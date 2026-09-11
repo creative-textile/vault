@@ -1,0 +1,158 @@
+import { useEffect, useState, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import WebApp from '@twa-dev/sdk';
+import { AuthContext, User } from './stores/auth';
+import { authApi, profileApi } from './api/client';
+import { getSocket, disconnectSocket } from './api/socket';
+
+import Onboarding from './components/onboarding/Onboarding';
+import Home from './components/layout/Home';
+import Deposit from './components/wallet/Deposit';
+import Withdraw from './components/wallet/Withdraw';
+import Rocket from './components/rocket/Rocket';
+import Duel from './components/duel/Duel';
+import DuelGame from './components/duel/DuelGame';
+import Safe from './components/safe/Safe';
+import SafeCrack from './components/safe/SafeCrack';
+import VaultDeposit from './components/vault-deposit/VaultDeposit';
+import Referral from './components/profile/Referral';
+import Profile from './components/profile/Profile';
+import AdminPanel from './components/profile/AdminPanel';
+import SetPin from './components/wallet/SetPin';
+import PendingDuelModal from './components/common/PendingDuelModal';
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(localStorage.getItem('vault_token'));
+  const [loading, setLoading] = useState(true);
+  const [onboardingDone, setOnboardingDoneState] = useState(
+    localStorage.getItem('onboarding_done') === '1'
+  );
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const p = await profileApi.get();
+      setUser(p);
+    } catch {
+      setUser(null);
+      setToken(null);
+      localStorage.removeItem('vault_token');
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      if (token) {
+        await refreshUser();
+        // Init socket
+        const sock = getSocket(token);
+        sock.on('notification', (data: any) => {
+          showToast(data.message);
+          refreshUser();
+        });
+      }
+      setLoading(false);
+    })();
+    return () => { disconnectSocket(); };
+  }, [token, refreshUser, showToast]);
+
+  useEffect(() => {
+    // Telegram WebApp init
+    try {
+      WebApp.ready();
+      WebApp.expand();
+      WebApp.setHeaderColor('#0a0a1a');
+      WebApp.setBackgroundColor('#0a0a1a');
+    } catch {}
+  }, []);
+
+  // Авто-вход по Telegram initData или демо
+  useEffect(() => {
+    if (token || loading) return;
+    (async () => {
+      try {
+        const tg = (window as any).Telegram?.WebApp;
+        const initData = tg?.initData;
+        const urlParams = new URLSearchParams(window.location.search);
+        const ref = urlParams.get('ref') || undefined;
+
+        let res;
+        if (initData && initData.length > 0) {
+          res = await authApi.telegram(initData, ref);
+        } else {
+          // Демо-логин для браузера
+          const demoId = parseInt(localStorage.getItem('demo_id') || String(Math.floor(Math.random() * 100000) + 1));
+          localStorage.setItem('demo_id', String(demoId));
+          res = await authApi.demoLogin(demoId, 'demo' + demoId, ref);
+        }
+        localStorage.setItem('vault_token', res.token);
+        setToken(res.token);
+        setUser(res.user);
+        if (res.isNew) {
+          localStorage.removeItem('onboarding_done');
+          setOnboardingDoneState(false);
+        }
+      } catch (e: any) {
+        showToast('Ошибка входа: ' + e.message);
+      }
+    })();
+  }, [token, loading, showToast]);
+
+  const logout = () => {
+    localStorage.removeItem('vault_token');
+    setToken(null);
+    setUser(null);
+    disconnectSocket();
+  };
+
+  const setOnboardingDone = () => {
+    localStorage.setItem('onboarding_done', '1');
+    setOnboardingDoneState(true);
+  };
+
+  if (loading) {
+    return <div className="app"><div className="container text-center" style={{paddingTop: '50vh'}}>Загрузка VAULT...</div></div>;
+  }
+
+  return (
+    <AuthContext.Provider value={{
+      user, token, loading, onboardingDone,
+      login: async () => {},
+      demoLogin: async () => {},
+      logout, refreshUser, setOnboardingDone,
+      showToast, toast
+    }}>
+      <BrowserRouter>
+        <div className="app">
+          {toast && <div className="toast">{toast}</div>}
+          {onboardingDone && <PendingDuelModal />}
+          <div className="container">
+            <Routes>
+              {!onboardingDone && <Route path="*" element={<Onboarding />} />}
+              <Route path="/" element={<Home />} />
+              <Route path="/deposit" element={<Deposit />} />
+              <Route path="/withdraw" element={<Withdraw />} />
+              <Route path="/rocket" element={<Rocket />} />
+              <Route path="/duel" element={<Duel />} />
+              <Route path="/duel/:id" element={<DuelGame />} />
+              <Route path="/safe" element={<Safe />} />
+              <Route path="/safe/crack" element={<SafeCrack />} />
+              <Route path="/vault" element={<VaultDeposit />} />
+              <Route path="/referral" element={<Referral />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/admin" element={<AdminPanel />} />
+              <Route path="/set-pin" element={<SetPin />} />
+              <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+          </div>
+        </div>
+      </BrowserRouter>
+    </AuthContext.Provider>
+  );
+}

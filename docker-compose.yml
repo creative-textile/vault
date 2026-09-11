@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  db:
+    build: ./db
+    environment:
+      POSTGRES_USER: vault
+      POSTGRES_PASSWORD: vault_pass
+      POSTGRES_DB: vault
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vault"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    expose:
+      - "8000"
+    environment:
+      TZ: Europe/Moscow
+      DATABASE_URL: postgresql://vault:vault_pass@db:5432/vault
+      REDIS_URL: redis://redis:6379
+      BOT_TOKEN: ${BOT_TOKEN:-demo_token}
+      WEBAPP_URL: ${WEBAPP_URL:-http://localhost:3000}
+      TON_API_KEY: ${TON_API_KEY:-demo}
+      TON_WALLET_MNEMONIC: ""
+      USDT_JETTON_ADDRESS: "0:0000000000000000000000000000000000000000000000000000000000000000"
+      ADMIN_TELEGRAM_IDS: ${ADMIN_TELEGRAM_IDS:-0}
+      DEMO_MODE: "true"
+      PORT: 8000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  bot:
+    build: ./bot
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:-demo_token}
+      WEBAPP_URL: ${WEBAPP_URL:-http://localhost:3000}
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
