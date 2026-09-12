@@ -157,7 +157,7 @@ export default function Home() {
               ✅ СЕЙФ #{safe.id} ВЗЛОМАН
             </div>
             <div className="text-dim text-center" style={{fontSize:13}}>
-              Банк: ${fmt(safe.bank)} · Победителей: {safe.winners_count}
+              Банк: ${fmt(safe.bank)} · С призом: {safe.winners_count}
             </div>
           </>
         )}

@@ -19,6 +19,28 @@ function timeToStr(ms: number) {
 
 const CHIPS_DEFAULTS = [10, 50, 100, 250, 500, 1000];
 
+/**
+ * Исход розыгрыша для одного вклада.
+ * Важно: приз — это выплата, а не заработок. Игрок, вложивший $50 и получивший
+ * $39 из остатка пула, в минусе на $11, и называть это «победой» нельзя.
+ * Поэтому сравниваем приз с вкладом и показываем результат «чистыми».
+ */
+function outcomeOf(amount: number, prize: number, crackTimeMs: number | null | undefined) {
+  const net = Math.round(((Number(prize) || 0) - (Number(amount) || 0)) * 100) / 100;
+  if (!(prize > 0)) {
+    return crackTimeMs == null
+      ? { key: 'late', icon: '⏱', title: 'НЕ УСПЕЛИ', color: '#ef4444', net }
+      : { key: 'lose', icon: '❌', title: 'ПОРАЖЕНИЕ', color: '#ef4444', net };
+  }
+  if (net > 0) return { key: 'win', icon: '🏆', title: 'ПОБЕДА', color: '#22c55e', net };
+  if (net === 0) return { key: 'even', icon: '⚖️', title: 'В НОЛЬ', color: '#38bdf8', net };
+  return { key: 'partial', icon: '⚠️', title: 'ЧАСТИЧНЫЙ ПРИЗ', color: '#f59e0b', net };
+}
+
+/** «+$12.50» / «−$11.00» / «±$0.00» — прибыль или убыток относительно вклада. */
+const fmtNet = (net: number) =>
+  net > 0 ? `+$${fmt(net)}` : net < 0 ? `−$${fmt(-net)}` : '±$0.00';
+
 export default function Safe() {
   const { user, refreshUser, showToast } = useAuth();
   const nav = useNavigate();
@@ -139,8 +161,11 @@ export default function Safe() {
 
   // Итог игрока в разыгранном сейфе: приз берём с сервера, а не считаем «×1.5»
   const prize = Number(myDeposit?.prize || 0);
+  const myAmount = Number(myDeposit?.amount || 0);
   const myTime = myDeposit?.crack_time_ms ?? null;
   const myPlace = results.length && user ? results.findIndex(r => r.user_id === user.id) + 1 : 0;
+  const place = myPlace > 0 ? `место ${myPlace} из ${results.length}` : '';
+  const out = outcomeOf(myAmount, prize, myTime);
 
   const depositForm = (
     <>
@@ -186,8 +211,9 @@ export default function Safe() {
             <div className="text-dim" style={{fontSize:11}}>мин 2 чел.</div>
           </div>
           <div className="text-center">
-            <div className="text-dim" style={{fontSize:12}}>Победителей</div>
+            <div className="text-dim" style={{fontSize:12}}>С призом</div>
             <div className="text-green" style={{fontWeight:900}}>{safe.winners_count}</div>
+            <div className="text-dim" style={{fontSize:11}}>получили выплату</div>
           </div>
         </div>
 
@@ -246,46 +272,54 @@ export default function Safe() {
           </div>
         )}
 
-        {/* Итог для игрока в разыгранном сейфе — победа / поражение выглядят по-разному */}
+        {/* Итог для игрока в разыгранном сейфе: победа / частичный приз / поражение / не успел */}
         {myDeposit && safe.status === 'finished' && (
           <div className="card" style={{
             margin:'12px 0',
-            background: prize > 0 ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.10)',
-            border: `1px solid ${prize > 0 ? '#22c55e' : '#ef4444'}`
+            background: `${out.color}1f`,
+            border: `1px solid ${out.color}`
           }}>
-            <div className="card-title" style={{margin:0}}>Ваш вклад: ${fmt(myDeposit.amount)}</div>
-            {prize > 0 ? (
-              <>
-                <div className="text-green" style={{fontWeight:900, fontSize:26, margin:'6px 0'}}>
-                  🏆 ПОБЕДА: +${fmt(prize)}
-                </div>
-                <div className="text-dim" style={{fontSize:13}}>
-                  Время {(myTime! / 1000).toFixed(2)} с
-                  {myPlace > 0 ? ` · место ${myPlace} из ${results.length}` : ''}
-                  {' '}· призовые зачислены на баланс
-                </div>
-              </>
-            ) : myTime != null ? (
-              <>
-                <div className="text-red" style={{fontWeight:900, fontSize:22, margin:'6px 0'}}>
-                  ❌ ПОРАЖЕНИЕ: приз $0.00
-                </div>
-                <div className="text-dim" style={{fontSize:13}}>
-                  Код собран за {(myTime / 1000).toFixed(2)} с
-                  {myPlace > 0 ? ` (место ${myPlace} из ${results.length})` : ''}, но призовой пул
-                  ${fmt(safe.prize_pool)} разобрали игроки, сдавшие результат раньше.
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-red" style={{fontWeight:900, fontSize:22, margin:'6px 0'}}>
-                  ⏱ НЕ УСПЕЛИ: приз $0.00
-                </div>
-                <div className="text-dim" style={{fontSize:13}}>
-                  Результат не был сдан до закрытия окна взлома — техническое поражение.
-                  Вклад ${fmt(myDeposit.amount)} остался в банке сейфа.
-                </div>
-              </>
+            <div className="card-title" style={{margin:0}}>Ваш вклад: ${fmt(myAmount)}</div>
+            <div style={{fontWeight:900, fontSize: out.key === 'win' ? 26 : 22, margin:'6px 0', color: out.color}}>
+              {out.icon} {out.title}
+            </div>
+            <div style={{fontSize:17, fontWeight:700, color: out.color}}>
+              Приз: ${fmt(prize)} <span className="text-dim" style={{fontSize:14, fontWeight:400}}>· чистыми {fmtNet(out.net)}</span>
+            </div>
+
+            {out.key === 'win' && (
+              <div className="text-dim" style={{fontSize:13, marginTop:6}}>
+                Код собран за {(myTime! / 1000).toFixed(2)} с{place ? ` · ${place}` : ''} · полный приз ×1.5
+                зачислен на баланс.
+              </div>
+            )}
+            {out.key === 'even' && (
+              <div className="text-dim" style={{fontSize:13, marginTop:6}}>
+                Код собран за {(myTime! / 1000).toFixed(2)} с{place ? ` · ${place}` : ''} · из остатка пула
+                вернулся ровно ваш вклад: ни прибыли, ни потерь.
+              </div>
+            )}
+            {out.key === 'partial' && (
+              <div className="text-dim" style={{fontSize:13, marginTop:6}}>
+                Код собран за {(myTime! / 1000).toFixed(2)} с{place ? ` · ${place}` : ''}. Полный приз ×1.5
+                составил бы ${fmt(myAmount * 1.5)}, но из призового пула ${fmt(safe.prize_pool)} к вашему ходу
+                осталось только ${fmt(prize)} — выплачен этот остаток. Итог в минусе
+                на {fmtNet(out.net).replace('−','')}, поэтому это не победа: игроки, сдавшие код раньше,
+                разобрали пул до вас.
+              </div>
+            )}
+            {out.key === 'lose' && (
+              <div className="text-dim" style={{fontSize:13, marginTop:6}}>
+                Код собран за {(myTime! / 1000).toFixed(2)} с{place ? ` · ${place}` : ''}, но призовой пул
+                ${fmt(safe.prize_pool)} уже был распределён между игроками, сдавшими результат раньше.
+                Потеряно {fmtNet(out.net).replace('−','')}.
+              </div>
+            )}
+            {out.key === 'late' && (
+              <div className="text-dim" style={{fontSize:13, marginTop:6}}>
+                Результат не был сдан до закрытия окна взлома — техническое поражение, приз $0.00.
+                Вклад ${fmt(myAmount)} ушёл в призовой пул и достался более быстрым игрокам.
+              </div>
             )}
           </div>
         )}
@@ -332,18 +366,30 @@ export default function Safe() {
       {safe.status === 'finished' && results.length > 0 && (
         <div className="card">
           <div className="card-title">🏆 Результаты</div>
-          <div className="scroll-list" style={{maxHeight:280, overflowY:'auto'}}>
+          <div className="text-dim" style={{fontSize:12, marginBottom:8}}>
+            Призовой пул ${fmt(safe.prize_pool)} раздаётся по порядку сдачи кода: сначала полный приз ×1.5,
+            затем остаток пула, дальше — $0.
+          </div>
+          <div className="scroll-list" style={{maxHeight:300, overflowY:'auto'}}>
             {results.slice(0, 20).map((r, i) => {
+              const o = outcomeOf(r.amount, r.prize, r.crack_time_ms);
               const participated = r.crack_time_ms != null && r.crack_time_ms > 0;
               const timeStr = participated ? `${(r.crack_time_ms/1000).toFixed(2)}с` : 'не успел';
               const isMe = r.user_id === user?.id;
-              const prizeStr = r.prize > 0
-                ? `$${fmt(r.prize)} ✅`
-                : participated ? '$0 · пул разобран' : '$0 ❌';
               return (
-                <div key={i} className="history-item" style={{fontSize:13, color: isMe ? '#ffd700' : r.prize > 0 ? '#22c55e' : '#8888aa'}}>
-                  <span>{i+1}. {r.username} ({timeStr}){isMe ? ' · вы' : ''}</span>
-                  <span>${fmt(r.amount)} → {prizeStr}</span>
+                <div key={i} className="history-item" style={{
+                  fontSize:13,
+                  color: isMe ? '#ffd700' : o.color,
+                  background: isMe ? 'rgba(255,215,0,0.08)' : undefined,
+                  borderRadius: 6,
+                  padding: '6px 4px'
+                }}>
+                  <span>
+                    {i+1}. {r.username}{isMe ? ' (вы)' : ''} · {timeStr}
+                  </span>
+                  <span style={{textAlign:'right'}}>
+                    ${fmt(r.amount)} → ${fmt(r.prize)} <b>({fmtNet(o.net)})</b> {o.icon}
+                  </span>
                 </div>
               );
             })}
