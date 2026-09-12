@@ -119,12 +119,12 @@ router.post('/cancel', auth, async (req, res) => {
 router.post('/crack', auth, async (req, res) => {
   try {
     const user = (req as any).user;
-    const { time_ms, taps, misses } = req.body;
+    const { time_ms, taps } = req.body;
     const t = Number(time_ms);
     if (!Number.isFinite(t) || t < 0) throw new Error('Некорректное время взлома');
     // taps — моменты тапов по барабанам (мс от старта вращения): по ним сервер
     // сам проверяет, что игрок остановил барабаны на цифрах кода
-    res.json(await submitCrackTime(user.id, t, taps, misses));
+    res.json(await submitCrackTime(user.id, t, taps));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

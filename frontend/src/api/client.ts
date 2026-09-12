@@ -38,6 +38,11 @@ export const authApi = {
     api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData: `demo:${telegramId}:${username || 'user' + telegramId}`, refCode }) })
 };
 
+// Публичная статистика проекта (главный экран): участники, дни, пополнения, выплаты
+export const statsApi = {
+  summary: () => api('/api/stats/summary')
+};
+
 export const profileApi = {
   get: () => api('/api/profile'),
   update: (data: any) => api('/api/profile', { method: 'PATCH', body: JSON.stringify(data) }),
@@ -85,8 +90,9 @@ export const safeApi = {
    * вращения) и число промахов: сервер сам сверяет цифры с кодом сейфа и
    * пересчитывает время — подставить произвольные числа не получится.
    */
-  crack: (time_ms: number, taps?: number[], misses?: number) =>
-    api('/api/safe/crack', { method: 'POST', body: JSON.stringify({ time_ms, taps, misses }) }),
+  // taps — моменты остановки барабанов: по ним сервер сверяет цифры с кодом сейфа
+  crack: (time_ms: number, taps?: number[]) =>
+    api('/api/safe/crack', { method: 'POST', body: JSON.stringify({ time_ms, taps }) }),
   results: (id: number) => api(`/api/safe/results/${id}`),
   get: (id: number) => api(`/api/safe/${id}`)
 };

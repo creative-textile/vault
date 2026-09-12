@@ -81,6 +81,18 @@ export default function App() {
           });
           sock.on('safe_cancelled', (data: any) => emitSafeEvent('safe_cancelled', data));
           sock.on('safe_created', (data: any) => emitSafeEvent('safe_created', data));
+          // Новый баланс приходит сразу после любой операции с деньгами —
+          // цифра на экране перестаёт «отставать» от сервера
+          sock.on('balance_updated', (data: any) => {
+            if (data?.balance == null) return;
+            setUser(u => u ? {
+              ...u,
+              balance: Number(data.balance),
+              frozen_balance: data.frozen_balance != null ? Number(data.frozen_balance) : u.frozen_balance,
+              available: Number(data.balance) - (data.frozen_balance != null ? Number(data.frozen_balance) : u.frozen_balance)
+            } : u);
+          });
+
           // Вклад/возврат вклада: банк в карточках обновляется у всех сразу,
           // без перезагрузки страницы (тост не показываем — был бы спам)
           sock.on('safe_deposit', (data: any) => emitSafeEvent('safe_deposit', data));

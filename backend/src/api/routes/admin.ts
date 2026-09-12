@@ -407,14 +407,16 @@ router.get('/settings', async (_req, res) => {
     'min_bet', 'rocket_max_bet_percent', 'vault_pool_percent',
     'safe_min_bank', 'safe_min_participants', 'beautiful_flight_chance',
     'vault_min_deposit', 'vault_max_deposit',
-    'safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes'
+    'safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes',
+    'project_start_date'
   ];
   const defaults: Record<string, string> = {
     commission_percent: '10', withdraw_commission: '1', referral_percent: '3',
     min_bet: '1', rocket_max_bet_percent: '50', vault_pool_percent: '15',
     safe_min_bank: '25', safe_min_participants: '2', beautiful_flight_chance: '3',
     vault_min_deposit: '10', vault_max_deposit: '100',
-    safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '1'
+    safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '1',
+    project_start_date: '2026-01-01'
   };
   const out: Record<string, string> = {};
   const labels: Record<string, string> = {
@@ -431,10 +433,19 @@ router.get('/settings', async (_req, res) => {
     vault_max_deposit: 'Начальный макс. вклад ВАУЛЬТ ($)',
     safe_crack_hour: 'Час взлома сейфа МСК (0-23)',
     safe_crack_minute: 'Минута взлома сейфа (0-59)',
-    safe_crack_timeout_minutes: 'Дедлайн взлома сейфа (минуты)'
+    safe_crack_timeout_minutes: 'Нужно взломать сейф за (минуты)',
+    project_start_date: 'Дата старта проекта (ГГГГ-ММ-ДД)'
   };
+  // Группы — чтобы настройки в админке не шли сплошным списком
+  const groups = [
+    { title: '🔒 Сейф', keys: ['safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes', 'safe_min_bank', 'safe_min_participants'] },
+    { title: '🚀 Ракета', keys: ['rocket_max_bet_percent', 'beautiful_flight_chance', 'min_bet'] },
+    { title: '💎 Вклад (VAULT)', keys: ['vault_pool_percent', 'vault_min_deposit', 'vault_max_deposit'] },
+    { title: '💰 Комиссии и рефералы', keys: ['commission_percent', 'withdraw_commission', 'referral_percent'] },
+    { title: '📊 Проект', keys: ['project_start_date'] }
+  ];
   for (const k of keys) out[k] = (await getSetting(k)) || defaults[k] || '';
-  res.json({ values: out, labels });
+  res.json({ values: out, labels, groups });
 });
 
 // POST /api/admin/settings

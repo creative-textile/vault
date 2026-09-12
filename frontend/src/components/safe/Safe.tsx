@@ -254,7 +254,7 @@ export default function Safe() {
             <span className="pill pill-active">взлом</span>
           </div>
           <div className="timer" style={{ color: crackTime < 15000 ? '#ef4444' : undefined }}>
-            {crackTime > 0 ? `⏱ До конца окна: ${timeToStr(crackTime)}` : '⏳ Окно закрыто — подводим итоги...'}
+            {crackTime > 0 ? `⏱ Нужно взломать сейф за: ${timeToStr(crackTime)}` : '⏳ Время вышло — подводим итоги...'}
           </div>
           <div className="text-dim" style={{ fontSize: 13, marginTop: 6 }}>
             Не сдали результат: {safe.pending_cracks ?? 0} из {safe.participants_count}.
@@ -438,11 +438,6 @@ export default function Safe() {
                 </div>
               )}
 
-              <div className="text-center" style={{ marginTop: 10 }}>
-                <button className="btn btn-small btn-secondary" onClick={markSeen}>
-                  ✓ Я ПОСМОТРЕЛ — БОЛЬШЕ НЕ ПОКАЗЫВАТЬ
-                </button>
-              </div>
             </>
           )}
         </div>

@@ -167,5 +167,6 @@ INSERT INTO settings (key, value) VALUES
     ('vault_pool_percent', '15'),
     ('vault_min_deposit', '10'),
     ('vault_max_deposit', '100'),
+    ('project_start_date', '2026-01-01'),
     ('manual_pool_addition', '0')
 ON CONFLICT (key) DO NOTHING;

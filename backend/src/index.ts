@@ -117,7 +117,8 @@ server.listen(config.port, async () => {
       safe_min_bank:'25', safe_min_participants:'2', beautiful_flight_chance:'3',
       vault_min_deposit:'10', vault_max_deposit:'100',
       safe_crack_hour:'21', safe_crack_minute:'0',
-      safe_crack_timeout_minutes: '1'
+      safe_crack_timeout_minutes: '1',
+      project_start_date: '2026-01-01'
     };
     // Принудительно обновим min_bank/safe_min_bank на корректные (на случай если в БД остались старые значения $2/$5)
     await query(`UPDATE settings SET value='25' WHERE key='safe_min_bank'`);

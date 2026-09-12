@@ -1,4 +1,5 @@
 import { query } from '../db/pool';
+import { emitToUser } from './notifications';
 
 const TX_TYPE_LABELS: Record<string, string> = {
   bet: 'Ставка',
@@ -37,6 +38,14 @@ export async function modifyBalance(
       [userId, type, amount, newBalance, opts.gameType || null, opts.gameId || null, label]
     );
     await client.query('COMMIT');
+    // Баланс на экране должен меняться сразу, а не по следующему опросу /api/profile
+    try {
+      const frozen = await query('SELECT frozen_balance FROM users WHERE id = $1', [userId]);
+      emitToUser(userId, 'balance_updated', {
+        balance: newBalance,
+        frozen_balance: parseFloat(frozen.rows[0]?.frozen_balance || '0')
+      });
+    } catch { /* уведомление не должно ломать операцию с балансом */ }
     return newBalance;
   } catch (e) {
     await client.query('ROLLBACK');

@@ -68,6 +68,11 @@ export async function notifyDuelResult(
   );
 }
 
+/** Отправить событие только в комнату конкретного пользователя. */
+export function emitToUser(userId: number, event: string, data: any) {
+  if (io) io.to(`user:${userId}`).emit(event, data);
+}
+
 export function broadcast(event: string, data: any) {
   if (io) io.emit(event, data);
 }

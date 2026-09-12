@@ -19,6 +19,8 @@ export default function AdminPanel() {
   const [stats, setStats] = useState<any>(null);
   const [settings, setSettings] = useState<any>({});
   const [settingsLabels, setSettingsLabels] = useState<Record<string,string>>({});
+  // Группы настроек приходят с сервера — в админке поля разложены по разделам
+  const [settingsGroups, setSettingsGroups] = useState<{title:string, keys:string[]}[]>([]);
   const [rangeFrom, setRangeFrom] = useState(todayISO(-6));
   const [rangeTo, setRangeTo] = useState(todayISO(0));
   const [bankrollAmt, setBankrollAmt] = useState('');
@@ -48,6 +50,7 @@ export default function AdminPanel() {
       const s = await adminApi.getSettings();
       setSettings(s.values);
       setSettingsLabels(s.labels);
+      setSettingsGroups(Array.isArray(s.groups) ? s.groups : []);
     } catch (e: any) {
       showToast('Нет доступа: ' + e.message);
     }
@@ -258,23 +261,57 @@ export default function AdminPanel() {
       )}
 
       {tab === 'settings' && (
-        <div className="card">
-          <div className="card-title">⚙️ НАСТРОЙКИ</div>
-          {Object.entries(settings).map(([k, v]) => (
-            <div key={k} className="history-item">
-              <label style={{fontSize:13, flex:1}}>{settingsLabels[k] || k}</label>
-              <input
-                style={{
-                  width: 120, background: '#1a1a3a', border: '1px solid #333',
-                  borderRadius: 6, padding: '8px 10px', color: '#fff', textAlign: 'right', fontWeight:700
-                }}
-                value={v as string}
-                onChange={e => setSettings({...settings, [k]: e.target.value})}
-              />
-            </div>
-          ))}
-          <button className="btn mt" onClick={async () => { await adminApi.setSettings(settings); showToast('Сохранено'); }}>💾 СОХРАНИТЬ</button>
-        </div>
+        <>
+          {(settingsGroups.length ? settingsGroups : [{ title: '⚙️ НАСТРОЙКИ', keys: Object.keys(settings) }]).map((g, gi) => {
+            const keys = g.keys.filter(k => k in settings);
+            if (!keys.length) return null;
+            return (
+              <div className="card" key={gi}>
+                <div className="card-title">{g.title}</div>
+                {keys.map(k => (
+                  <div key={k} className="history-item">
+                    <label style={{fontSize:13, flex:1}}>{settingsLabels[k] || k}</label>
+                    <input
+                      style={{
+                        width: 130, background: '#1a1a3a', border: '1px solid #333',
+                        borderRadius: 6, padding: '8px 10px', color: '#fff', textAlign: 'right', fontWeight:700
+                      }}
+                      value={settings[k] as string}
+                      onChange={e => setSettings({...settings, [k]: e.target.value})}
+                    />
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+
+          {/* Настройки, не попавшие ни в одну группу */}
+          {(() => {
+            const grouped = new Set(settingsGroups.flatMap(g => g.keys));
+            const rest = Object.keys(settings).filter(k => !grouped.has(k));
+            if (!rest.length) return null;
+            return (
+              <div className="card">
+                <div className="card-title">🧩 Прочее</div>
+                {rest.map(k => (
+                  <div key={k} className="history-item">
+                    <label style={{fontSize:13, flex:1}}>{settingsLabels[k] || k}</label>
+                    <input
+                      style={{
+                        width: 130, background: '#1a1a3a', border: '1px solid #333',
+                        borderRadius: 6, padding: '8px 10px', color: '#fff', textAlign: 'right', fontWeight:700
+                      }}
+                      value={settings[k] as string}
+                      onChange={e => setSettings({...settings, [k]: e.target.value})}
+                    />
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          <button className="btn mt" onClick={async () => { await adminApi.setSettings(settings); showToast('Сохранено'); }}>💾 СОХРАНИТЬ ВСЕ НАСТРОЙКИ</button>
+        </>
       )}
 
       {tab === 'users' && (

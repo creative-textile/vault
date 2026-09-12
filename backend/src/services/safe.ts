@@ -3,7 +3,7 @@ import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { broadcast } from './notifications';
 import { payReferral } from './referral';
-import { todayMSK, tomorrowMSK } from '../utils/time';
+import { todayMSK } from '../utils/time';
 
 /**
  * Технологический допуск ПОСЛЕ окна взлома: результат, отправленный игроком до
@@ -47,9 +47,6 @@ export function clampDrumSpeeds(speeds: any): number[] {
   }
   return nums;
 }
-
-/** Штраф за промах по барабану (мс) — одинаков на клиенте и на сервере. */
-export const MISS_PENALTY_MS = 500;
 
 /**
  * Цифра, которую видно на барабане в момент ms от старта вращения.
@@ -195,6 +192,10 @@ export async function createDailySafe() {
   const today = todayMSK();
   const exists = await query('SELECT id FROM safes WHERE date = $1', [today]);
   if (exists.rows.length) return;
+  // Сбор уже идёт в сейфе другой даты (такое бывает при переносе времени взлома
+  // в админке) — второй параллельный сейф не создаём
+  const collecting = await query(`SELECT id FROM safes WHERE status = 'collecting' LIMIT 1`);
+  if (collecting.rows.length) return;
 
   // Получаем одинаковые цифры для всех игроков в этот день
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
@@ -335,12 +336,13 @@ export async function cancelSafeDeposit(userId: number) {
 /**
  * Принять результат взлома.
  * Клиент присылает не только время, но и моменты тапов по барабанам (мс от
- * старта вращения) и число промахов. Сервер сам считает, какие цифры были
- * видны в эти моменты, и сверяет их с кодом сейфа: подставить произвольные
- * числа больше не выйдет — несовпавшие цифры дают штраф, а засчитанное время
- * никогда не может оказаться лучше честно пересчитанного.
+ * старта вращения). Сервер сам считает, какие цифры были видны в эти моменты,
+ * и сверяет их с кодом сейфа: подставить произвольные числа не выйдет —
+ * несовпавшие цифры означают отклонённый результат (игрок пробует снова),
+ * а засчитанное время никогда не может оказаться лучше честно пересчитанного.
+ * Штрафного времени за промах нет: промах и так стоит повторного тапа.
  */
-export async function submitCrackTime(userId: number, timeMs: number, taps?: any, misses?: any) {
+export async function submitCrackTime(userId: number, timeMs: number, taps?: any) {
   const clientMs = Math.round(Number(timeMs));
   if (!Number.isFinite(clientMs)) throw new Error('Некорректное время');
 
@@ -375,28 +377,29 @@ export async function submitCrackTime(userId: number, timeMs: number, taps?: any
 
   const timeoutMinutes = Math.round((await getCrackTimeoutMs()) / 60000);
 
-  // ── Пересчёт времени по тапам (проверка кода на сервере) ────────────────
+  // ── Проверка кода по тапам (сервер не верит заявленному времени на слово) ──
   const speeds = Array.isArray(safe.drum_speeds) && safe.drum_speeds.length === 3 ? safe.drum_speeds : null;
   const code = Array.isArray(safe.code) ? safe.code.map((c: any) => Number(c)) : null;
   const tapList = Array.isArray(taps) ? taps.map((x: any) => Math.round(Number(x))) : null;
   let verifiedMs = 0;
-  let serverMisses = 0;
   const tapsOk = !!speeds && !!code && code.length === 3 && !!tapList && tapList.length === 3
     && tapList.every((t: number) => Number.isFinite(t) && t >= 0 && t <= 24 * 3600 * 1000);
   if (tapsOk) {
-    serverMisses = tapList!.filter((t: number, i: number) => digitAt(speeds![i], t) !== code![i]).length;
-    verifiedMs = Math.max(...tapList!) + serverMisses * MISS_PENALTY_MS;
-    if (serverMisses > 0) {
-      console.log(`[SAFE] user ${userId}: тапы не совпали с кодом (${serverMisses}/3) — штраф ${serverMisses * MISS_PENALTY_MS} мс`);
+    const mismatched = tapList!.filter((t: number, i: number) => digitAt(speeds![i], t) !== code![i]);
+    if (mismatched.length) {
+      // Клиент остановил барабаны не на цифрах кода — такой результат не принимается.
+      // Штрафа нет: промах и так стоит игроку времени (барабан крутится дальше).
+      console.log(`[SAFE] user ${userId}: тапы не совпали с кодом (${mismatched.length}/3) — результат отклонён`);
+      throw new Error('Цифры не совпадают с кодом сейфа');
     }
+    verifiedMs = Math.max(...tapList!);
   } else if (Array.isArray(taps)) {
     console.log(`[SAFE] user ${userId}: прислан некорректный список тапов — считаем только время клиента`);
   }
-  const reportedMisses = Number.isFinite(Number(misses))
-    ? Math.max(0, Math.min(50, Math.round(Number(misses))))
-    : 0;
-  // Заявленное клиентом время не может быть лучше пересчитанного сервером
-  const honestMs = Math.max(clientMs, verifiedMs, reportedMisses * MISS_PENALTY_MS);
+  // Заявленное клиентом время не может быть лучше пересчитанного сервером.
+  // Штрафы за промахи не начисляются: промахнувшемуся игроку приходится тапать
+  // снова, и он теряет время сам.
+  const honestMs = Math.max(clientMs, verifiedMs);
 
   // Клиент считает время от старта барабанов, сервер — от старта фазы взлома,
   // поэтому берём большее из двух значений (честный порядок "кто раньше").
@@ -547,22 +550,41 @@ export async function getUserSafeDeposit(safeId: number, userId: number) {
   return { ...d, amount: parseFloat(d.amount), prize: parseFloat(d.prize) };
 }
 
-/** Гарантировать, что сейф следующего дня существует (чтобы депозиты не терялись). */
+/**
+ * Создать сейф, который будет собирать вклады следующим.
+ *
+ * Сейфы идут бесконечной чередой: как только текущий ушёл во взлом или
+ * отменён, должен появиться новый собирающий. Дату берём как «максимальная
+ * дата в таблице + 1 день» (date UNIQUE), потому что за день может быть
+ * разыграно несколько раундов — например, если админ переносил время взлома:
+ * сейф #2 при этом уже имеет дату завтрашнего дня, и «завтра» было бы занято.
+ */
 export async function ensureNextDaySafe(): Promise<void> {
-  const tomorrow = tomorrowMSK();
-  const nextSafeExists = await query('SELECT id FROM safes WHERE date = $1', [tomorrow]);
-  if (nextSafeExists.rows.length) return;
+  const collecting = await query(`SELECT id FROM safes WHERE status = 'collecting' LIMIT 1`);
+  if (collecting.rows.length) return; // сбор уже идёт — второй сейф не нужен
+
+  const maxRes = await query(`SELECT MAX(date) AS max_date FROM safes`);
+  const raw = maxRes.rows[0]?.max_date;
+  const today = todayMSK();
+  const base = raw ? new Date(raw) : new Date(`${today}T00:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + 1);
+  // Если сервер долго не работал, «максимум + 1» может оказаться в прошлом —
+  // такой сейф никто бы не увидел (клиент берёт date >= сегодня)
+  const nextDate = base.toISOString().slice(0, 10) > today ? base.toISOString().slice(0, 10) : today;
 
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
   const drumSpeeds = generateDrumSpeeds();
 
-  await query(
+  // DO NOTHING — два параллельных вклада не должны создавать два сейфа
+  const ins = await query(
     `INSERT INTO safes (date, status, bonus, code, drum_speeds, collect_started_at)
-     VALUES ($1, 'collecting', false, $2, $3, NOW())`,
-    [tomorrow, code, drumSpeeds]
+     VALUES ($1, 'collecting', false, $2, $3, NOW())
+     ON CONFLICT (date) DO NOTHING`,
+    [nextDate, code, drumSpeeds]
   );
-  console.log(`[SAFE] Создан сейф на ${tomorrow} (сбор следующего дня)`);
-  broadcast('safe_created', { date: tomorrow });
+  if (ins.rowCount === 0) return;
+  console.log(`[SAFE] Создан сейф на ${nextDate} (сбор следующего раунда)`);
+  broadcast('safe_created', { date: nextDate });
 }
 
 /** Поставить таймер финализации взлома (снимает предыдущий, если был). */
@@ -675,9 +697,6 @@ export async function startCracking() {
     return { cancelled: true, started: false };
   }
 
-  // Перед началом взлома создаём сейф на следующий день, чтобы депозиты не терялись
-  await ensureNextDaySafe();
-
   const windowMs = await getCrackWindowMs();
   const deadlineMs = await getCrackDeadlineMs();
   const upd = await query(
@@ -687,6 +706,10 @@ export async function startCracking() {
     [safe.id]
   );
   if (!upd.rows.length) return { cancelled: false, started: false };
+
+  // Следующий сейф создаём ПОСЛЕ перевода текущего во взлом: сбор не должен
+  // прерываться ни на минуту (иначе ensureNextDaySafe увидел бы «сбор идёт»)
+  await ensureNextDaySafe();
 
   // Итоги подводим по окончании окна взлома, а не сразу: у игроков должно быть
   // время пройти мини-игру и отправить результат.

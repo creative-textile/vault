@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
-import { vaultApi, safeApi } from '../../api/client';
+import { vaultApi, safeApi, statsApi } from '../../api/client';
 
 function fmt(n: number) {
   return n.toFixed(2);
@@ -24,6 +24,8 @@ export default function Home() {
   const [safe, setSafe] = useState<any>(null);
   // Сейф, который принимает вклады (во время взлома и после розыгрыша — следующий)
   const [collect, setCollect] = useState<any>(null);
+  // Витрина проекта: участники / дни работы / пополнено / выплачено
+  const [stats, setStats] = useState<any>(null);
   const [timeToCrack, setTimeToCrack] = useState(0);
   const [collectTimeToCrack, setCollectTimeToCrack] = useState(0);
   // Дедлайны в ref, тикаем локально — без запросов к серверу каждую секунду
@@ -58,6 +60,10 @@ export default function Home() {
   useEffect(() => {
     vaultApi.status().then(setVaultStatus).catch(() => {});
     loadSafe();
+    const loadStats = () => statsApi.summary().then(setStats).catch(() => {});
+    loadStats();
+    // Цифры проекта меняются медленно — обновляем раз в минуту
+    const statsPoll = setInterval(loadStats, 60000);
     // Карточка сейфа обновляется по socket-событиям: старт взлома, итоги, отмена
     const off = onSafeEvent(loadSafe);
     const iv = setInterval(() => {
@@ -68,7 +74,7 @@ export default function Home() {
     // Страховка на случай потерянного socket: банк не должен «застывать»
     const poll = setInterval(loadSafe, 20000);
     const refresh = setInterval(refreshUser, 5000);
-    return () => { off(); clearInterval(iv); clearInterval(poll); clearInterval(refresh); };
+    return () => { off(); clearInterval(iv); clearInterval(poll); clearInterval(refresh); clearInterval(statsPoll); };
   }, [refreshUser, loadSafe]);
 
   if (!user) return null;
@@ -183,6 +189,29 @@ export default function Home() {
             ? (safe?.status === 'cracking' ? `💰 ВНЕСТИ В СЕЙФ #${collect.id}` : '💰 ВНЕСТИ')
             : '🔥 УЧАСТВОВАТЬ'}
         </button>
+      </div>
+
+      {/* Проект в цифрах */}
+      <div className="card" style={{padding:'12px 14px'}}>
+        <div className="card-title" style={{fontSize:13, marginBottom:10}}>📊 ПРОЕКТ В ЦИФРАХ</div>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 8px'}}>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>УЧАСТНИКОВ</div>
+            <div style={{fontWeight:900, fontSize:19}}>{stats ? stats.users_count : '…'}</div>
+          </div>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ДНЕЙ РАБОТАЕМ</div>
+            <div style={{fontWeight:900, fontSize:19}}>{stats ? stats.days_working : '…'}</div>
+          </div>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ПОПОЛНЕНО ВСЕГО</div>
+            <div style={{fontWeight:900, fontSize:19, color:'#22c55e'}}>${stats ? fmt(stats.total_deposited) : '…'}</div>
+          </div>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ВЫПЛАЧЕНО ВСЕГО</div>
+            <div style={{fontWeight:900, fontSize:19, color:'#ffd700'}}>${stats ? fmt(stats.total_withdrawn) : '…'}</div>
+          </div>
+        </div>
       </div>
 
       {/* Нижнее меню */}

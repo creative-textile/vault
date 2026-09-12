@@ -13,8 +13,6 @@ import { onSafeEvent } from '../../utils/socketEvents';
  * остаётся в десятках миллисекунд. Запасные значения — те же, что генерирует сервер.
  */
 const DEFAULT_SPEEDS = [1.55, 1.72, 1.9];
-/** Штраф за промах (мс) — тот же, что на сервере. */
-const MISS_PENALTY_MS = 500;
 /** Цифра барабана i в момент, когда с начала вращения прошло ms миллисекунд. */
 const digitAt = (speeds: number[], i: number, ms: number) =>
   Math.floor((ms * (speeds[i] ?? DEFAULT_SPEEDS[i]) * 0.0013) % 10);
@@ -36,9 +34,9 @@ export default function SafeCrack() {
   const [countdown, setCountdown] = useState(3);
   const [codeRevealed, setCodeRevealed] = useState(false);
   // taps[i] — момент остановки барабана (мс от старта вращения); барабан
-  // останавливается ТОЛЬКО на правильной цифре, поэтому промахи считаем отдельно
+  // останавливается ТОЛЬКО на правильной цифре, а промах просто подсвечивается
+  // красным: штрафного времени нет, игрок теряет ровно то, что потратил на повтор
   const [taps, setTaps] = useState<(number | undefined)[]>([]);
-  const [misses, setMisses] = useState(0);
   const [flash, setFlash] = useState<{ i: number; digit: number } | null>(null);
   const [spinElapsed, setSpinElapsed] = useState(0);
   const [windowLeft, setWindowLeft] = useState<number | null>(null);
@@ -56,7 +54,6 @@ export default function SafeCrack() {
   const hasDepositRef = useRef(false);
   const windowDeadlineRef = useRef<number | null>(null);
   const spinRef = useRef<number | null>(null);
-  const missesRef = useRef(0);
   const tapsRef = useRef<(number | undefined)[]>([]);
   const flashTimerRef = useRef<number | null>(null);
 
@@ -157,9 +154,10 @@ export default function SafeCrack() {
     return () => clearTimeout(t);
   }, [finished, phase, nav]);
 
-  const submit = (finalTaps: number[], finalMisses: number) => {
-    const maxTap = Math.max(...finalTaps);
-    const totalTime = maxTap + finalMisses * MISS_PENALTY_MS;
+  const submit = (finalTaps: number[]) => {
+    // Время взлома = момент остановки последнего барабана. Штрафов за промахи
+    // нет: промахнувшийся игрок тапает снова и теряет время сам.
+    const totalTime = Math.max(...finalTaps);
 
     submittedRef.current = true;
     setPhase('done');
@@ -172,23 +170,38 @@ export default function SafeCrack() {
     submittedNowRef.current = true;
     // Сервер получает моменты тапов и сам сверяет цифры с кодом сейфа:
     // засчитанное время не может быть лучше честно пересчитанного
-    safeApi.crack(totalTime, finalTaps, finalMisses)
+    safeApi.crack(totalTime, finalTaps)
       .then((r: any) => {
         const shown = Number.isFinite(r?.crack_time_ms) ? r.crack_time_ms : totalTime;
         setMyTime(shown);
-        showToast(`✅ Код собран за ${(shown / 1000).toFixed(2)} с (промахов: ${finalMisses})`);
+        showToast(`✅ Код собран за ${(shown / 1000).toFixed(2)} с`);
         refreshUser();
         // Все участники сдали результат — сервер подвёл итоги досрочно
         if (r?.finished) setFinished(true);
         else load();
       })
-      .catch((e: any) => showToast(e.message));
+      .catch((e: any) => {
+        // Сервер отклонил результат (цифры не совпали с кодом, окно закрылось) —
+        // если время ещё есть, барабаны раскручиваются снова, игрок пробует ещё раз
+        showToast(e.message);
+        submittedRef.current = false;
+        submittedNowRef.current = false;
+        if (windowDeadlineRef.current != null && Date.now() >= windowDeadlineRef.current) {
+          setFinished(true);
+          return;
+        }
+        setMyTime(null);
+        setPhase('spinning');
+        startedAtRef.current = Date.now();
+        tapsRef.current = [];
+        setTaps([]);
+      });
   };
 
   /**
    * Тап по барабану. Останавливает его только попадание в нужную цифру:
-   * промах НЕ фиксирует барабан, а добавляет +0.5 с штрафа — сейф нельзя
-   * открыть произвольными числами.
+   * промах НЕ фиксирует барабан и не штрафует временем — он просто продолжает
+   * крутиться, и игрок теряет ровно столько, сколько потратил на повторный тап.
    */
   const tapDrum = (i: number) => {
     if (phase !== 'spinning' || tapsRef.current[i] !== undefined || submittedRef.current) return;
@@ -199,8 +212,6 @@ export default function SafeCrack() {
     const shown = digitAt(speeds, i, tapTime);
 
     if (shown !== code[i]) {
-      missesRef.current += 1;
-      setMisses(missesRef.current);
       setFlash({ i, digit: shown });
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
       flashTimerRef.current = window.setTimeout(() => setFlash(null), 400);
@@ -213,7 +224,7 @@ export default function SafeCrack() {
     setTaps(newTaps);
 
     const done = newTaps.filter(t => t !== undefined) as number[];
-    if (done.length === 3) submit(newTaps as number[], missesRef.current);
+    if (done.length === 3) submit(done);
   };
 
   if (!safe) return <><Header title="🔒 ВЗЛОМ СЕЙФА" /><div className="text-center mt">Загрузка...</div></>;
@@ -235,12 +246,12 @@ export default function SafeCrack() {
 
       {showWindow && phase !== 'done' && (
         <div className="timer" style={{ color: (windowLeft as number) < 15000 ? '#ef4444' : undefined }}>
-          ⏱ Окно взлома: {fmtWindow(windowLeft as number)}
+          ⏱ Нужно взломать сейф за: {fmtWindow(windowLeft as number)}
         </div>
       )}
       {windowClosed && phase !== 'done' && (
         <div className="timer" style={{ color: '#ef4444' }}>
-          ⏱ Окно взлома закрыто — результат не будет засчитан
+          ⏱ Время вышло — результат не будет засчитан
         </div>
       )}
 
@@ -265,15 +276,14 @@ export default function SafeCrack() {
             <span>{code[1]}</span>
             <span>{code[2]}</span>
           </div>
-          <div className="text-dim">Барабан остановится только на своей цифре. Промах — +0.5 с.</div>
+          <div className="text-dim">Запомните код — он показывается один раз. Барабан остановится только на своей цифре.</div>
         </div>
       )}
 
       {phase === 'spinning' && (
         <>
           <div className="text-center mt" style={{ fontSize: 18 }}>
-            Остановите барабаны на цифрах кода
-            <span style={{ color: '#ffd700', fontWeight: 900 }}> {code[0]} · {code[1]} · {code[2]}</span>
+            Остановите барабаны на цифрах кода — <span className="text-dim">код был показан перед стартом</span>
           </div>
           <div className="drums">
             {[0, 1, 2].map(i => {
@@ -287,7 +297,7 @@ export default function SafeCrack() {
               return (
                 <div key={i} style={{ textAlign: 'center' }}>
                   <div className="text-dim" style={{ fontSize: 13, marginBottom: 4 }}>
-                    цель: <b style={{ color: '#ffd700', fontSize: 16 }}>{code[i]}</b>
+                    барабан {i + 1}
                   </div>
                   <div
                     className="drum"
@@ -305,19 +315,19 @@ export default function SafeCrack() {
                     {shownDigit}
                   </div>
                   <div style={{ fontSize: 12, marginTop: 4, color: isStopped ? '#22c55e' : '#8888aa' }}>
-                    {isStopped ? `✓ ${(taps[i]! / 1000).toFixed(2)} с` : isFlash ? 'промах +0.5 с' : 'крутится'}
+                    {isStopped ? `✓ ${(taps[i]! / 1000).toFixed(2)} с` : isFlash ? 'промах — крутится дальше' : 'крутится'}
                   </div>
                 </div>
               );
             })}
           </div>
           <div className="text-dim text-center" style={{ fontSize: 14 }}>
-            Собрано {stoppedCount} из 3 · Промахов: {misses}
-            {misses > 0 ? ` (+${((misses * MISS_PENALTY_MS) / 1000).toFixed(1)} с к времени)` : ''}
+            Собрано {stoppedCount} из 3
           </div>
           <div className="text-dim text-center" style={{ fontSize: 13, marginTop: 6 }}>
             Барабан останавливается только на нужной цифре — сервер проверяет каждый тап.
-            Тап мимо добавляет +0.5 с. Побеждает тот, кто собрал код раньше остальных.
+            Промах временем не штрафуется, но барабан крутится дальше.
+            Побеждает тот, кто собрал код раньше остальных.
           </div>
         </>
       )}
@@ -329,11 +339,6 @@ export default function SafeCrack() {
             {myTime != null && (
               <div className="text-accent" style={{ fontWeight: 900, fontSize: 20 }}>
                 Ваше время: {(myTime / 1000).toFixed(2)} с
-              </div>
-            )}
-            {misses > 0 && (
-              <div className="text-dim" style={{ fontSize: 13 }}>
-                Включая штраф за промахи: {misses} × 0.5 с = +{(misses * MISS_PENALTY_MS / 1000).toFixed(1)} с
               </div>
             )}
             <div className="text-dim">
