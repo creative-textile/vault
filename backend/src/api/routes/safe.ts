@@ -3,7 +3,8 @@ import { auth } from '../middleware/auth';
 import {
   getActiveSafe, getCollectingSafe, getLastFinishedSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
   getSafeResults, getUserSafeDeposit, getSafeById,
-  getCrackWindowMs, getCrackRemainingMs, getPendingCracksCount
+  getCrackWindowMs, getCrackRemainingMs, getPendingCracksCount,
+  getSpinLeadMs, getSpinStartInMs, SPIN_CODE_LEAD_MS
 } from '../../services/safe';
 import { nextMSK, fmtMSK } from '../../utils/time';
 
@@ -37,6 +38,14 @@ router.get('/current', auth, async (req, res) => {
     const crackWindowMs = isCracking ? await getCrackWindowMs() : null;
     const crackRemainingMs = isCracking ? await getCrackRemainingMs(safe!.id, crackWindowMs ?? undefined) : null;
     const pendingCracks = isCracking ? await getPendingCracksCount(safe!.id) : null;
+
+    // ОБЩИЙ старт мини-игры: все игроки начинают вращение в один момент по
+    // серверным часам, независимо от того, когда их выдернуло на экран взлома.
+    // Отдаём остаток в миллисекундах (а не абсолютную метку), чтобы клиентские
+    // часы не влияли на результат; server_now нужен клиенту для диагностики
+    // расхождения часов и для поправки на время доставки ответа.
+    const spinLeadMs = isCracking ? await getSpinLeadMs(crackWindowMs ?? undefined) : null;
+    const spinInMs = isCracking ? await getSpinStartInMs(safe!.id, crackWindowMs ?? undefined) : null;
 
     const collectingIsOther = !!collecting && collecting?.id !== safe?.id;
     const myCollectingDeposit = collectingIsOther
@@ -92,9 +101,13 @@ router.get('/current', auth, async (req, res) => {
         time_to_crack_ms: isCracking ? (crackRemainingMs ?? 0) : timeToCrack,
         crack_window_ms: crackWindowMs,
         crack_remaining_ms: crackRemainingMs,
+        crack_spin_in_ms: spinInMs,
+        crack_spin_lead_ms: spinLeadMs,
+        crack_code_lead_ms: isCracking ? SPIN_CODE_LEAD_MS : null,
         pending_cracks: pendingCracks
       } : null,
-      my_deposit: myDeposit
+      my_deposit: myDeposit,
+      server_now: Date.now()
     });
   } catch (e: any) {
     res.status(400).json({ error: e.message });

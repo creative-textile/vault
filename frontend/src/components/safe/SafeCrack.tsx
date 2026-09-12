@@ -45,12 +45,21 @@ export default function SafeCrack() {
   const [flash, setFlash] = useState<{ i: number; digit: number } | null>(null);
   const [spinElapsed, setSpinElapsed] = useState(0);
   const [windowLeft, setWindowLeft] = useState<number | null>(null);
-  // Остаток окна на момент ПЕРВОГО ответа сервера. Игрока теперь выдёргивает в
-  // мини-игру с любого экрана (SafeCrackRedirector), поэтому он может прийти в
-  // последние секунды окна — тогда обычная церемония «3-2-1 → код 3 с» съела бы
-  // всё время до старта вращения. -1 значит «данных нет, играем по обычной схеме».
-  const [firstRemaining, setFirstRemaining] = useState<number | null>(null);
-  const firstRemainingRef = useRef<number | null>(null);
+  // ── ОБЩИЙ старт вращения (один на всех игроков) ─────────────────────────
+  // Момент, когда барабаны начинают крутиться, задаёт СЕРВЕР: crack_spin_in_ms —
+  // остаток в миллисекундах от серверных часов до общего старта. Клиент переводит
+  // его в свои часы один раз (с поправкой на время доставки ответа) и дальше
+  // живёт от этого якоря. Поэтому:
+  //   - отсчёт 3-2-1 у всех игроков заканчивается в один и тот же момент,
+  //     независимо от того, кого выдернуло сразу, а кого — на секунду позже;
+  //   - startedAtRef — абсолютный якорь, значит цифры барабанов у всех игроков
+  //     в один момент времени одинаковые (никто не получает «удобную» позицию);
+  //   - опоздавший (полёт ракеты, фоновая вкладка) не видит фейковый отсчёт, а
+  //     сразу попадает на вращение с правильными цифрами.
+  const [spinAnchor, setSpinAnchor] = useState<number | null>(null);
+  const spinAnchorRef = useRef<number | null>(null);
+  /** Метка общего старта по серверным часам (текст одинаков во всех окнах). */
+  const [spinAtLabel, setSpinAtLabel] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
   // Уже засчитанное время (пришли на экран после сдачи результата) — мини-игру не перезапускаем
   const [myTime, setMyTime] = useState<number | null>(null);
@@ -70,8 +79,11 @@ export default function SafeCrack() {
 
   // ── Данные сейфа: опрос + мгновенная реакция на socket-событие ──────────
   const load = useCallback(async () => {
+    const sentAt = Date.now();
     try {
       const r = await safeApi.current();
+      const arrivedAt = Date.now();
+      const rtt = arrivedAt - sentAt;
       setSafe(r.safe);
       setMyDeposit(r.my_deposit);
       hasDepositRef.current = !!r.my_deposit;
@@ -91,11 +103,25 @@ export default function SafeCrack() {
         setPhase('done');
       }
       if (r.safe?.crack_remaining_ms != null) {
-        windowDeadlineRef.current = Date.now() + r.safe.crack_remaining_ms;
-        if (firstRemainingRef.current == null) {
-          firstRemainingRef.current = r.safe.crack_remaining_ms;
-          setFirstRemaining(r.safe.crack_remaining_ms);
-        }
+        // Ответ доехал за rtt, значит на момент получения осталось на rtt/2 меньше
+        windowDeadlineRef.current = arrivedAt + r.safe.crack_remaining_ms - rtt / 2;
+      }
+      // Якорь общего старта назначается ОДИН раз и больше не пересчитывается:
+      // последующие опросы не должны сдвигать старт ни на миллисекунду.
+      if (spinAnchorRef.current == null && typeof r.safe?.crack_spin_in_ms === 'number') {
+        const anchor = arrivedAt + r.safe.crack_spin_in_ms - rtt / 2;
+        spinAnchorRef.current = anchor;
+        setSpinAnchor(anchor);
+        // Расхождение клиентских и серверных часов — только для подписи на экране
+        const skew = typeof r.server_now === 'number' ? Math.round(r.server_now + rtt / 2 - arrivedAt) : 0;
+        const serverStart = new Date(anchor + skew);
+        setSpinAtLabel(serverStart.toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow' }));
+        startedAtRef.current = anchor;
+        console.info(
+          `[safe-crack] общий старт вращения через ${Math.round(anchor - arrivedAt)} мс ` +
+          `(${serverStart.toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК), ` +
+          `rtt ${rtt} мс, часы ${skew >= 0 ? '+' : ''}${skew} мс к серверу`
+        );
       }
       if (r.safe && r.safe.status !== 'cracking') setFinished(true);
     } catch {}
@@ -109,43 +135,51 @@ export default function SafeCrack() {
         setFinished(true);
         load();
       }
+      // Взлом начался, а экран был открыт заранее — забираем общий старт сразу,
+      // не дожидаясь следующего опроса (он раз в 5 с)
+      if (d.type === 'safe_crack_started') load();
     });
     return () => { clearInterval(iv); off(); };
   }, [load]);
 
   useEffect(() => () => { if (flashTimerRef.current) clearTimeout(flashTimerRef.current); }, []);
 
-  // Страховка: если сервер молчит 1.5 с, не держим игрока на цифре «3»
-  useEffect(() => {
-    if (firstRemaining != null) return;
-    const t = window.setTimeout(() => setFirstRemaining(-1), 1500);
-    return () => window.clearTimeout(t);
-  }, [firstRemaining]);
+  // Взлом реально идёт — только тогда имеет смысл назначать общий старт
+  const cracking = safe?.status === 'cracking';
 
-  // ── Предстартовая последовательность: 3-2-1 → код (3 с) → вращение ─────
-  // В последние 12 с окна церемония короткая (код сразу и на 1.4 с): выдернутый
-  // с другого экрана игрок успевает начать вращение, а не досмотреть отсчёт.
-  //
-  // Фаза считается от ОДНОГО момента старта по настенным часам, а не цепочкой
-  // setTimeout: фоновую вкладку Chrome троттлит (таймеры раз в секунду, а через
-  // пять минут в фоне — раз в минуту), и цепочка растянулась бы на минуты.
-  // Теперь пересчёт идёт каждые 100 мс и мгновенно при возврате во вкладку, а
-  // startedAtRef — момент старта вращения по часам: от него считаются и цифры
-  // барабанов, и время тапов, поэтому «спящая» вкладка игру не ломает.
+  // Страховка: сервер не прислал crack_spin_in_ms (например, бэкенд не пересобран).
+  // Ждём 1.5 с и стартуем сами — иначе игрок зависнет на отсчёте навсегда.
   useEffect(() => {
-    if (myTime != null) return; // результат уже засчитан — отсчёт не запускаем
-    if (firstRemaining == null) return; // ждём остаток окна (или страховочные 1.5 с)
-    const urgent = firstRemaining >= 0 && firstRemaining < 12000;
-    const codeAt = urgent ? 100 : 3000;   // когда показать код
-    const spinAt = urgent ? 1500 : 6000;  // когда начать вращение
-    const t0 = Date.now();
-    startedAtRef.current = t0 + spinAt;
+    if (spinAnchor != null || !cracking) return;
+    const t = window.setTimeout(() => {
+      if (spinAnchorRef.current != null) return;
+      spinAnchorRef.current = Date.now() + 1200;
+      startedAtRef.current = spinAnchorRef.current;
+      setSpinAnchor(spinAnchorRef.current);
+      console.warn('[safe-crack] сервер не прислал crack_spin_in_ms — старт назначен локально, синхронизации между игроками нет. Пересоберите бэкенд.');
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [spinAnchor, cracking]);
+
+  // ── Предстартовая последовательность: отсчёт → код → вращение ───────────
+  // Все фазы привязаны к АБСОЛЮТНОМУ моменту общего старта (spinAnchor), а не к
+  // времени монтирования экрана, поэтому у каждого игрока «1» сменяется
+  // вращением в один и тот же миг. Пересчёт каждые 100 мс + мгновенно при
+  // возврате во вкладку: фоновую вкладку Chrome троттлит (таймеры раз в секунду,
+  // через пять минут в фоне — раз в минуту), а настенные часы не обманешь.
+  // Код показывается за crack_code_lead_ms до старта (по умолчанию 3 с).
+  useEffect(() => {
+    if (myTime != null) return;        // результат уже засчитан — отсчёт не запускаем
+    if (spinAnchor == null) return;    // ждём якорь от сервера (или страховочные 1.5 с)
+    if (!cracking) return;
+    const codeLead = Number(safe?.crack_code_lead_ms) > 0 ? Number(safe.crack_code_lead_ms) : 3000;
+    startedAtRef.current = spinAnchor; // ОДИН якорь на всех: цифры барабанов совпадают
     let done = false;
 
     const apply = () => {
       if (done) return;
-      const e = Date.now() - t0;
-      if (e >= spinAt) {
+      const toSpin = spinAnchor - Date.now();
+      if (toSpin <= 0) {
         done = true;
         setCountdown(0);
         setCodeRevealed(true);
@@ -154,12 +188,8 @@ export default function SafeCrack() {
         document.removeEventListener('visibilitychange', onVis);
         return;
       }
-      if (e >= codeAt) {
-        setCountdown(0);
-        setCodeRevealed(true);
-        return;
-      }
-      setCountdown(Math.max(1, 3 - Math.floor(e / 1000)));
+      setCountdown(Math.ceil(toSpin / 1000));
+      setCodeRevealed(toSpin <= codeLead);
     };
 
     const iv = window.setInterval(apply, 100);
@@ -172,7 +202,7 @@ export default function SafeCrack() {
       window.clearInterval(iv);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [myTime, firstRemaining]);
+  }, [myTime, spinAnchor, cracking, safe?.crack_code_lead_ms]);
 
   // ── Обратный отсчёт окна взлома (серверное время, тикает локально) ─────
   useEffect(() => {
@@ -247,7 +277,8 @@ export default function SafeCrack() {
         }
         setMyTime(null);
         setPhase('spinning');
-        startedAtRef.current = Date.now();
+        // startedAtRef НЕ сбрасываем: барабаны продолжают крутиться от общего
+        // якоря, иначе повторная попытка рассинхронизировала бы игрока с остальными
         tapsRef.current = [];
         setTaps([]);
       });
@@ -324,14 +355,25 @@ export default function SafeCrack() {
         </div>
       )}
 
-      {phase === 'countdown' && countdown > 0 && (
+      {/* ОБЩИЙ старт: отсчёт заканчивается у всех игроков в один и тот же миг,
+          поэтому никто не начинает вводить шифр раньше остальных */}
+      {phase === 'countdown' && spinAnchor == null && (
+        <div className="text-center mt text-dim">Синхронизируем общий старт...</div>
+      )}
+
+      {phase === 'countdown' && spinAnchor != null && !codeRevealed && (
         <div className="text-center mt">
           <div style={{ fontSize: 96, fontWeight: 900, color: '#ff4444' }}>{countdown}</div>
-          <div className="text-dim">Приготовьтесь...</div>
+          <div className="text-dim">
+            Общий старт для всех игроков{spinAtLabel ? ` — ${spinAtLabel} МСК` : ''}
+          </div>
+          <div className="text-dim" style={{ fontSize: 12, marginTop: 4 }}>
+            Барабаны начнут вращаться одновременно у всех участников, код появится за 3 с до старта
+          </div>
         </div>
       )}
 
-      {codeRevealed && phase === 'countdown' && countdown === 0 && (
+      {phase === 'countdown' && spinAnchor != null && codeRevealed && (
         <div className="card card-hl text-center mt">
           <div className="card-title" style={{ fontSize: 24 }}>КОД:</div>
           <div style={{ display: 'flex', gap: 24, justifyContent: 'center', fontSize: 56, fontWeight: 900, color: '#ffd700', margin: '16px 0' }}>
@@ -339,7 +381,11 @@ export default function SafeCrack() {
             <span>{code[1]}</span>
             <span>{code[2]}</span>
           </div>
+          <div style={{ fontSize: 30, fontWeight: 900, color: '#ff4444' }}>СТАРТ ЧЕРЕЗ {countdown}</div>
           <div className="text-dim">Запомните код — он показывается один раз. Барабан остановится только на своей цифре.</div>
+          <div className="text-dim" style={{ fontSize: 12, marginTop: 4 }}>
+            Старт у всех игроков одновременно{spinAtLabel ? ` — ${spinAtLabel} МСК` : ''}
+          </div>
         </div>
       )}
 

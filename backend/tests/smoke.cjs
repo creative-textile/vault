@@ -251,6 +251,48 @@ const finish = () => {
     const safe = await safeSvc.getSafeById(collecting.id);
     check('взлом стартовал', safe.status === 'cracking', safe.status);
 
+    // ── ОБЩИЙ старт вращения: один абсолютный момент на всех игроков ──────
+    // Раньше каждый клиент запускал отсчёт 3-2-1 от момента собственного
+    // монтирования экрана, и один игрок уже вводил шифр, пока другой досматривал
+    // «3…2…1». Теперь момент старта считает сервер от crack_started_at.
+    const spinLead = await safeSvc.getSpinLeadMs();
+    check('разгон до общего старта: 6 с при окне 2 минуты', spinLead === 6000, spinLead);
+    check('разгон не съедает окно (меньше 20% и не больше 6 с)',
+      spinLead <= 6000 && spinLead <= Math.round(120000 * 0.2), spinLead);
+
+    const startedRow = (await query(`SELECT crack_started_at FROM safes WHERE id = $1`, [collecting.id])).rows[0];
+    const startedMs = new Date(startedRow.crack_started_at).getTime();
+    const spinIn = await safeSvc.getSpinStartInMs(collecting.id);
+    const anchor = Date.now() + spinIn;
+    check('общий старт = crack_started_at + разгон (по серверным часам)',
+      Math.abs(anchor - (startedMs + spinLead)) <= 50,
+      { delta: anchor - (startedMs + spinLead), spinIn });
+    const remain = await safeSvc.getCrackRemainingMs(collecting.id);
+    check('общий старт раньше конца окна', spinIn > 0 && spinIn < remain, { spinIn, remain });
+
+    const spinIn2 = await safeSvc.getSpinStartInMs(collecting.id);
+    check('остаток до общего старта убывает (а не назначается заново)',
+      spinIn2 < spinIn && spinIn - spinIn2 < 500, { spinIn, spinIn2 });
+
+    // Короткое окно: разгон урезается, чтобы церемония не съела всё время
+    check('для окна 7.5 с разгон урезается до 1.5 с', (await safeSvc.getSpinLeadMs(7500)) === 1500,
+      await safeSvc.getSpinLeadMs(7500));
+
+    // Опоздавший игрок (полёт ракеты, фоновая вкладка): общий старт уже прошёл —
+    // остаток отрицательный, клиент не рисует фейковый отсчёт, а сразу крутит барабаны
+    await query(`UPDATE safes SET crack_started_at = $1 WHERE id = $2`,
+      [new Date(Date.now() - 9000).toISOString(), collecting.id]);
+    const spinLate = await safeSvc.getSpinStartInMs(collecting.id);
+    check('опоздавший игрок: остаток до общего старта отрицательный',
+      spinLate < 0 && spinLate > -9000, spinLate);
+    await query(`UPDATE safes SET crack_started_at = $1 WHERE id = $2`,
+      [typeof startedRow.crack_started_at === 'string'
+        ? startedRow.crack_started_at
+        : new Date(startedRow.crack_started_at).toISOString(), collecting.id]);
+    check('после восстановления отметки общий старт снова в будущем',
+      (await safeSvc.getSpinStartInMs(collecting.id)) > 0,
+      await safeSvc.getSpinStartInMs(collecting.id));
+
     // 1) Посторонний (без вклада) результат сдать не может
     await query(`INSERT INTO users (telegram_id, username, balance) VALUES (1004,'dave',0)`);
     let err = null;
@@ -355,6 +397,25 @@ const finish = () => {
     check('во время взлома сбор следующего сейфа виден',
       r.json?.collecting_safe && r.json.collecting_safe.id !== collecting.id, r.json?.collecting_safe?.id);
     check('сколько участников ещё не сдали', r.json?.safe?.pending_cracks === 2, r.json?.safe?.pending_cracks);
+
+    // Общий старт мини-игры: клиент получает остаток в мс от серверных часов
+    check('во время взлома: остаток до общего старта в ответе',
+      typeof r.json?.safe?.crack_spin_in_ms === 'number'
+        && r.json.safe.crack_spin_in_ms <= Number(r.json.safe.crack_remaining_ms),
+      { spin: r.json?.safe?.crack_spin_in_ms, left: r.json?.safe?.crack_remaining_ms });
+    check('разгон и момент показа кода отданы клиенту',
+      Number(r.json?.safe?.crack_spin_lead_ms) > 0 && Number(r.json?.safe?.crack_code_lead_ms) > 0,
+      { lead: r.json?.safe?.crack_spin_lead_ms, code: r.json?.safe?.crack_code_lead_ms });
+    check('server_now в ответе — клиент правит расхождение своих часов',
+      Math.abs(Number(r.json?.server_now) - Date.now()) < 5000, r.json?.server_now);
+
+    // Два «игрока» опрашивают сервер в разные моменты — абсолютный старт один и тот же
+    const rA = await call('GET', '/api/safe/current'); const tA = Date.now();
+    const rB = await call('GET', '/api/safe/current'); const tB = Date.now();
+    const anchorA = tA + Number(rA.json?.safe?.crack_spin_in_ms);
+    const anchorB = tB + Number(rB.json?.safe?.crack_spin_in_ms);
+    check('оба игрока выводят один момент общего старта (±100 мс)',
+      Math.abs(anchorA - anchorB) <= 100, { delta: anchorA - anchorB });
 
     const safeNow = await safeSvc.getSafeById(collecting.id);
     const good = tapsFor(safeNow);

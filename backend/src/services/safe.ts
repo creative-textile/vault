@@ -13,6 +13,21 @@ import { todayMSK } from '../utils/time';
 const CRACK_GRACE_MS = 5_000;
 
 /**
+ * ОБЩИЙ старт вращения барабанов: через сколько миллисекунд после начала окна
+ * взлома мини-игра стартует ОДНОВРЕМЕННО у всех игроков.
+ *
+ * Без этого каждый клиент запускал отсчёт 3-2-1 от момента собственного
+ * монтирования экрана (а монтируется он в разное время: кого-то выдернуло сразу
+ * по socket-событию, кого-то — на секунду позже из полёта ракеты), и один игрок
+ * уже вводил шифр, пока другой досматривал «3…2…1». Теперь момент старта —
+ * абсолютная величина от серверных часов, клиент её только пересчитывает в свои.
+ */
+const SPIN_LEAD_MS = 6_000;
+
+/** За сколько мс до общего старта показываем код (крупный отсчёт 3-2-1). */
+export const SPIN_CODE_LEAD_MS = 3_000;
+
+/**
  * Скорость барабана определяет, сколько миллисекунд видна каждая цифра:
  *     время цифры = 1000 / (speed × 1.3) мс
  * Диапазон 1.45–2.00 → 385–530 мс на цифру. Это калибровано под живого
@@ -484,6 +499,28 @@ export async function getCrackRemainingMs(safeId: number, windowMs?: number): Pr
   if (!started) return null;
   const win = windowMs ?? (await getCrackWindowMs());
   return Math.max(0, Math.round(win - (Date.now() - started.getTime())));
+}
+
+/**
+ * Длина «разгона» до общего старта: не больше SPIN_LEAD_MS и не больше 20% окна,
+ * чтобы короткое окно взлома не съедалось церемонией.
+ */
+export async function getSpinLeadMs(windowMs?: number): Promise<number> {
+  const win = windowMs ?? (await getCrackWindowMs());
+  return Math.min(SPIN_LEAD_MS, Math.max(1_500, Math.round(win * 0.2)));
+}
+
+/**
+ * Сколько миллисекунд осталось до ОБЩЕГО старта вращения. Значение считается от
+ * серверных часов и потому одинаково для всех игроков в один и тот же момент;
+ * отрицательное — общий старт уже прошёл (опоздавший игрок сразу попадает
+ * на вращающиеся барабаны, а не на фейковый отсчёт).
+ */
+export async function getSpinStartInMs(safeId: number, windowMs?: number): Promise<number | null> {
+  const started = await getCrackStartedAt(safeId);
+  if (!started) return null;
+  const lead = await getSpinLeadMs(windowMs);
+  return Math.round(started.getTime() + lead - Date.now());
 }
 
 export async function calculateSafeWinners(safeId: number) {
