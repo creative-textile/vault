@@ -206,8 +206,11 @@ export default function NotificationsModal() {
                                   {notification.message}
                                 </div>
                                 {notification.data?.prize && (
-                                  <div style={{ color: '#22c55e', fontSize: 12, marginTop: 4 }}>
-                                    Приз: ${notification.data.prize.toFixed(2)}
+                                  // Нейтрально и без цвета победы: это банк за
+                                  // вычетом комиссии, а не выигрыш игрока —
+                                  // исход он узнаёт на экране дуэли
+                                  <div style={{ color: '#8888aa', fontSize: 12, marginTop: 4 }}>
+                                    Приз победителю: ${notification.data.prize.toFixed(2)}
                                   </div>
                                 )}
                               </div>

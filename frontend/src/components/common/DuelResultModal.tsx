@@ -4,7 +4,7 @@ import { useNotifications } from '../../stores/notifications';
 import { useAuth } from '../../stores/auth';
 import { useHasRocketFlight } from '../../utils/rocketFlight';
 import { onNotificationEvent } from '../../utils/socketEvents';
-import { releaseBalance } from '../../utils/balanceHold';
+import { holdBalance, releaseBalance } from '../../utils/balanceHold';
 
 /**
  * Очередь результатов дуэлей — модальное окно.
@@ -22,12 +22,18 @@ import { releaseBalance } from '../../utils/balanceHold';
  *  - дуэлей может быть несколько (максимум 3 открытых вызова), поэтому окно
  *    показывает очередь по одной: закрыл или посмотрел одну — всплывает
  *    следующая, со счётчиком «2 из 3»;
- *  - две кнопки: «смотреть реплей» ведёт на /duel/:id, «закрыть» гасит
+ *  - две кнопки: «▶ УЗНАТЬ РЕЗУЛЬТАТ» ведёт на /duel/:id, «✖ ЗАКРЫТЬ» гасит
  *    уведомление в БД, и оно больше не появляется ни на этом устройстве,
  *    ни на любом другом.
  *
+ * **Исход окно не раскрывает**: ни словом («победа/поражение»), ни суммой, ни
+ * цветом рамки, ни тем, что выпало. Иначе бросок монеты смотреть незачем —
+ * игрок узнаёт всё на экране дуэли. Здесь только факт: ставка, соперник, время.
+ * Фон полностью непрозрачный, чтобы не просвечивал экран с балансом (цифра до
+ * броска тоже выдаёт исход), а сам баланс держится старым (см. balanceHold).
+ *
  * Окно не показывается там, где оно отнимет у игрока деньги или время:
- * в мини-игре взлома сейфа (тикает окно, оверлей = потерянный вклад), на
+ * на /safe (вклады, история раунда) и /safe/crack (тикает окно взлома), на
  * экране ракеты и во время летящей ракеты (нужен доступ к кнопке «ЗАБРАТЬ»),
  * а также на самом реплее — следующая дуэль всплывёт после возврата.
  */
@@ -96,25 +102,35 @@ export default function DuelResultModal() {
   const current = queue[0];
 
   const onReplay = /^\/duel\/\d+$/.test(loc.pathname);
+  // Экраны, где окно показывать нельзя: сейф (сбор вкладов и мини-игра взлома —
+  // там тикает окно и оверлей стоит игроку вклада), ракета (нужна кнопка
+  // «ЗАБРАТЬ») и сам экран дуэли (следующая всплывёт после возврата).
   const blocked = rocketFlying
-    || loc.pathname.startsWith('/safe/crack')
+    || loc.pathname.startsWith('/safe')
     || loc.pathname.startsWith('/rocket')
     || onReplay;
+
+  // Пока окно заблокировано, игрок не может ни посмотреть результат, ни закрыть
+  // уведомление — продлеваем удержание баланса, иначе страховка по времени
+  // вернула бы на экран свежие цифры посреди игры, а они исход и выдают.
+  useEffect(() => {
+    if (!queue.length || !blocked) return;
+    holdBalance();
+    const iv = setInterval(holdBalance, 30_000);
+    return () => clearInterval(iv);
+  }, [queue.length, blocked]);
 
   if (!current || blocked) return null;
 
   const duelId = Number(current.data.duel_id);
   const amount = Number(current.data.amount) || 0;
-  const prize = Number(current.data.prize) || Math.round(amount * 2 * 0.9 * 100) / 100;
-  const won = !!current.data.i_won;
-  const coin = current.data.result === 'heads' ? 'ОРЁЛ' : current.data.result === 'tails' ? 'РЕШКА' : null;
   const opponent = current.data.opponent_name || null;
   const finishedAt = current.data.finished_at
     ? new Date(current.data.finished_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })
     : null;
   const rest = queue.length - 1;
 
-  /** «Смотреть реплей»: гасим уведомление и ведём на страницу дуэли. */
+  /** «Узнать результат»: гасим уведомление и ведём на страницу дуэли. */
   const watch = () => {
     dismissed.current.add(duelId);
     markDuelAsRead(duelId);
@@ -133,13 +149,15 @@ export default function DuelResultModal() {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)',
+      // Фон глухой, без полупрозрачности: под окном может быть главная с
+      // крупным балансом, а цифра до броска монеты выдаёт исход
+      position: 'fixed', inset: 0, background: '#05050c',
       zIndex: 2500, display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20
     }}>
       <div style={{
         background: '#12122a', borderRadius: 16, padding: 24, maxWidth: 380, width: '100%',
-        border: `2px solid ${won ? '#ffd700' : '#8888aa'}`, textAlign: 'center'
+        border: '2px solid #ffd700', textAlign: 'center'
       }}>
         <div style={{ fontSize: 44, marginBottom: 4 }}>⚔️</div>
 
@@ -154,19 +172,13 @@ export default function DuelResultModal() {
         </div>
 
         <div className="text-dim" style={{ fontSize: 14, marginBottom: 12 }}>
-          {current.message || (opponent ? `Соперник: ${opponent}` : 'Результат уже известен')}
+          {current.message || (opponent ? `Соперник: ${opponent}` : 'Монета брошена')}
         </div>
 
-        <div style={{
-          fontSize: 22, fontWeight: 900, marginBottom: 6,
-          color: won ? '#22c55e' : '#ef4444'
-        }}>
-          {won ? `🏆 ПОБЕДА  +$${(prize - amount).toFixed(2)}` : `❌ ПОРАЖЕНИЕ  −$${amount.toFixed(2)}`}
-        </div>
-
+        {/* Исход не показываем: ни словом, ни суммой, ни цветом — только факт
+            броска и его время. Всё остальное игрок увидит на экране дуэли. */}
         <div className="text-dim" style={{ fontSize: 12, marginBottom: 16 }}>
-          {coin ? `🪙 выпал${coin === 'РЕШКА' ? 'а' : ''} ${coin.toLowerCase()}` : '🪙 монета брошена'}
-          {finishedAt ? ` · ${finishedAt} МСК` : ''}
+          🪙 монета брошена{finishedAt ? ` · ${finishedAt} МСК` : ''}
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
@@ -174,12 +186,12 @@ export default function DuelResultModal() {
             ✖ ЗАКРЫТЬ
           </button>
           <button className="btn" onClick={watch} style={{ flex: 2 }}>
-            ▶ СМОТРЕТЬ РЕПЛЕЙ
+            ▶ УЗНАТЬ РЕЗУЛЬТАТ
           </button>
         </div>
 
         <div className="text-dim" style={{ fontSize: 11, marginTop: 10 }}>
-          «Закрыть» — уведомление больше не появится.
+          «Закрыть» — не смотреть бросок, уведомление больше не появится.
           {rest > 0 ? ` Ждут просмотра: ещё ${rest}.` : ''}
         </div>
       </div>
