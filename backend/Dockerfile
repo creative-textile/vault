@@ -5,8 +5,11 @@ ENV TZ=Europe/Moscow
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# package-lock.json закоммичен: npm ci ставит ровно зафиксированные версии.
+# С npm install каждая сборка могла pull'ить свежие минорные версии — отсюда
+# разные хэши бандла на разных машинах и невозможность сверить деплой.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 RUN npm run build
