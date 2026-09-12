@@ -123,41 +123,55 @@ export default function SafeCrack() {
   }, [firstRemaining]);
 
   // ── Предстартовая последовательность: 3-2-1 → код (3 с) → вращение ─────
-  // В последние 12 с окна церемония короткая: код сразу и на 1.2 с. Пришедший
+  // В последние 12 с окна церемония короткая (код сразу и на 1.4 с): выдернутый
   // с другого экрана игрок успевает начать вращение, а не досмотреть отсчёт.
+  //
+  // Фаза считается от ОДНОГО момента старта по настенным часам, а не цепочкой
+  // setTimeout: фоновую вкладку Chrome троттлит (таймеры раз в секунду, а через
+  // пять минут в фоне — раз в минуту), и цепочка растянулась бы на минуты.
+  // Теперь пересчёт идёт каждые 100 мс и мгновенно при возврате во вкладку, а
+  // startedAtRef — момент старта вращения по часам: от него считаются и цифры
+  // барабанов, и время тапов, поэтому «спящая» вкладка игру не ломает.
   useEffect(() => {
     if (myTime != null) return; // результат уже засчитан — отсчёт не запускаем
     if (firstRemaining == null) return; // ждём остаток окна (или страховочные 1.5 с)
     const urgent = firstRemaining >= 0 && firstRemaining < 12000;
-    let cancelled = false;
-    const timers = urgent
-      ? [
-          window.setTimeout(() => {
-            if (cancelled) return;
-            setCountdown(0);
-            setCodeRevealed(true);
-          }, 100),
-          window.setTimeout(() => {
-            if (cancelled) return;
-            startedAtRef.current = Date.now();
-            setPhase('spinning');
-          }, 1500)
-        ]
-      : [
-          window.setTimeout(() => !cancelled && setCountdown(2), 1000),
-          window.setTimeout(() => !cancelled && setCountdown(1), 2000),
-          window.setTimeout(() => {
-            if (cancelled) return;
-            setCountdown(0);
-            setCodeRevealed(true);
-          }, 3000),
-          window.setTimeout(() => {
-            if (cancelled) return;
-            startedAtRef.current = Date.now();
-            setPhase('spinning');
-          }, 6000)
-        ];
-    return () => { cancelled = true; timers.forEach(clearTimeout); };
+    const codeAt = urgent ? 100 : 3000;   // когда показать код
+    const spinAt = urgent ? 1500 : 6000;  // когда начать вращение
+    const t0 = Date.now();
+    startedAtRef.current = t0 + spinAt;
+    let done = false;
+
+    const apply = () => {
+      if (done) return;
+      const e = Date.now() - t0;
+      if (e >= spinAt) {
+        done = true;
+        setCountdown(0);
+        setCodeRevealed(true);
+        setPhase('spinning');
+        window.clearInterval(iv);
+        document.removeEventListener('visibilitychange', onVis);
+        return;
+      }
+      if (e >= codeAt) {
+        setCountdown(0);
+        setCodeRevealed(true);
+        return;
+      }
+      setCountdown(Math.max(1, 3 - Math.floor(e / 1000)));
+    };
+
+    const iv = window.setInterval(apply, 100);
+    const onVis = () => { if (document.visibilityState === 'visible') apply(); };
+    document.addEventListener('visibilitychange', onVis);
+    apply();
+
+    return () => {
+      done = true;
+      window.clearInterval(iv);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [myTime, firstRemaining]);
 
   // ── Обратный отсчёт окна взлома (серверное время, тикает локально) ─────

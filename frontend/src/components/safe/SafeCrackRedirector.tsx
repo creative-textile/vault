@@ -44,15 +44,18 @@ import { getFlight } from '../../utils/rocketFlight';
  *    экрана, нет.
  *
  * Переход делается `push`, поэтому «назад» возвращает игрока туда, откуда его
- * забрали. В фоновой вкладке не переходим: там `requestAnimationFrame`
- * остановлен, а серверные секунды идут — игрок потерял бы вклад, не увидев игру.
+ * забрали. Фоновая вкладка — не исключение: игрока уводит и там, иначе окно
+ * взлома проходит, пока он смотрит в соседнюю вкладку, и вклад сгорает. Мини-игра
+ * к этому готова: предстартовая последовательность и цифры барабанов считаются
+ * по настенным часам, а не по кадрам анимации, поэтому «спящая» вкладка ничего
+ * не рассинхронизирует (см. SafeCrack).
  *
  * Каждая ветка решения пишется в консоль (`[safe-crack]`): если перехода нет,
  * по F12 сразу видно почему.
  */
 
-/** Меньше трёх секунд до конца окна — открывать мини-игру уже бессмысленно. */
-const MIN_REMAINING_MS = 3000;
+/** Практический порог: меньше секунды — окно уже фактически закрыто. */
+const MIN_REMAINING_MS = 800;
 /** Интервал опроса в спокойное время и за две минуты до взлома / во время него. */
 const POLL_IDLE_MS = 10000;
 const POLL_HOT_MS = 1500;
@@ -96,11 +99,12 @@ export default function SafeCrackRedirector() {
   const consider = useCallback(async (reason: string) => {
     if (!userId) return;
     if (pathRef.current.startsWith('/safe/crack')) return; // уже в мини-игре
-    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-      console.info('[safe-crack] не переходим: вкладка в фоне');
-      return;
-    }
     if (inFlightRef.current) return; // предыдущий запрос ещё не вернулся
+    // ВАЖНО: фоновую вкладку НЕ пропускаем. Игрока должно выдёргивать отовсюду,
+    // и «он не смотрел в эту вкладку» — не причина терять вклад: socket-событие
+    // в фоне приходит (таймеры Chrome троттлит, сетевые колбэки — нет), а
+    // мини-игра считается по настенным часам, поэтому после возврата вкладки
+    // цифры барабанов и время тапов остаются правильными.
 
     inFlightRef.current = true;
     // Если запрос завис, флаг не должен блокировать переход до конца сессии
@@ -133,7 +137,8 @@ export default function SafeCrackRedirector() {
         console.info(`[safe-crack] ${reason}: окно закрывается (${left} мс) — открывать мини-игру поздно`);
         return;
       }
-      console.info(`[safe-crack] ${reason}: уводим игрока в мини-игру сейфа #${safe.id}, окно ${Math.round(left / 1000)} с`);
+      const hidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
+      console.info(`[safe-crack] ${reason}: уводим игрока в мини-игру сейфа #${safe.id}, окно ${Math.round(left / 1000)} с${hidden ? ' (вкладка в фоне — переходим всё равно)' : ''}`);
       go(safe.id);
     } catch (e: any) {
       console.warn('[safe-crack] не смогли проверить состояние сейфа:', e?.message || e);
@@ -148,7 +153,9 @@ export default function SafeCrackRedirector() {
     if (type === 'safe_crack_started') consider('socket safe_crack_started');
   }), [consider]);
 
-  // 2. Опрос + возврат во вкладку. Страховка на случай потерянного события
+  // 2. Опрос. Страховка на случай потерянного socket-события. В фоновой вкладке
+  // Chrome режет интервалы до раза в минуту, поэтому основной триггер там —
+  // именно событие сокета, а опрос догоняет при возврате во вкладку.
   useEffect(() => {
     if (!userId) return;
     consider('вход в приложение');
