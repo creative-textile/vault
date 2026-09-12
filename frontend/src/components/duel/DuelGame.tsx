@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { releaseBalance } from '../../utils/balanceHold';
+import { hasFreshDuelResults } from '../../stores/notifications';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
@@ -17,6 +18,11 @@ export default function DuelGame() {
   const nav = useNavigate();
   const { user, refreshUser, showToast } = useAuth();
   const { markDuelAsRead } = useNotifications();
+  // Остались ли непросмотренные свежие результаты других дуэлей. Баланс —
+  // цифра суммарная: показав её сейчас, выдали бы исход тех дуэлей, которые
+  // ещё ждут своей очереди в модальном окне. Подписка на стор уведомлений
+  // выше даёт пересчёт при каждом изменении списка.
+  const otherPending = hasFreshDuelResults(Number(id));
 
   const [phase, setPhase] = useState<DuelPhase>('flipping');
   const [result, setResult] = useState<'heads' | 'tails' | null>(null);
@@ -115,9 +121,10 @@ export default function DuelGame() {
           setTimeout(async () => {
             if (!mounted) return;
             setPhase('result');
-            // Исход показан — баланс можно обновить (до этого момента цифры
-            // держались старыми, чтобы не выдать результат до броска монеты)
-            releaseBalance();
+            // Исход этой дуэли показан — баланс можно обновить, но только если
+            // непросмотренных свежих результатов больше нет: цифра суммарная, и
+            // по ней игрок понял бы исход остальных дуэлей из списка
+            if (!hasFreshDuelResults(Number(seenId))) releaseBalance();
             await refreshUser().catch(() => {});
             if (iWon && prz - amt >= 1) {
               const autoPct = userRef.current?.auto_safe_percent || 0;
@@ -138,13 +145,15 @@ export default function DuelGame() {
             }
           }, 2800);
         } else {
-          // Если уже просмотрено, просто обновляем баланс
-          releaseBalance();
+          // Если уже просмотрено, просто обновляем баланс (опять же — только
+          // когда других непросмотренных результатов не осталось)
+          if (!hasFreshDuelResults(Number(seenId))) releaseBalance();
           await refreshUser().catch(() => {});
         }
       } catch (e: any) {
-        // Анимации не будет — цифры не держим
-        releaseBalance();
+        // Анимации не будет — цифры не держим (кроме случая, когда в списке
+        // остались другие непросмотренные результаты)
+        if (!hasFreshDuelResults(Number(id))) releaseBalance();
         if (!mounted) return;
         setLoadErr(e?.message || 'Ошибка загрузки дуэли');
         setTimeout(() => nav('/duel', { replace: true }), 1500);
@@ -152,8 +161,9 @@ export default function DuelGame() {
     })();
     return () => {
       mounted = false;
-      // Ушли с экрана, не досмотрев: баланс не должен остаться замороженным
-      releaseBalance();
+      // Ушли с экрана: баланс не должен остаться замороженным навсегда, но и
+      // выдавать исход других непросмотренных дуэлей он не обязан
+      if (!hasFreshDuelResults(Number(id))) releaseBalance();
     };
   }, [id, loc.state, nav, refreshUser, markDuelAsRead]);
 
@@ -219,7 +229,13 @@ export default function DuelGame() {
               она появлялась раньше надписи «ВЫ ПОБЕДИЛИ» и путала игрока. */}
           <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
             <span className="text-dim">Баланс:</span>
-            <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+            {otherPending ? (
+              <span className="text-dim" style={{fontSize:12, textAlign:'right', maxWidth:'62%'}}>
+                обновится после остальных дуэлей
+              </span>
+            ) : (
+              <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+            )}
           </div>
 
           <div className="btn-row">

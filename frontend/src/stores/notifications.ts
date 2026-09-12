@@ -28,6 +28,35 @@ interface NotificationsState {
   clear: () => void;
 }
 
+/**
+ * Сколько времени результат дуэли считается «свежим».
+ *
+ * Баланс на экране — цифра суммарная: по ней видно исход даже той дуэли,
+ * которую игрок ещё не смотрел. Поэтому, пока висит непросмотренный СВЕЖИЙ
+ * результат, баланс держится прежним (см. `utils/balanceHold.ts`). Результат,
+ * которому больше пяти минут, уже учтён в балансе, который игрок видел до
+ * этого, — прятать цифры из-за него незачем (иначе у вернувшегося через три
+ * дня игрока баланс завис бы до просмотра старых дуэлей).
+ */
+export const FRESH_DUEL_RESULT_MS = 5 * 60_000;
+
+function isFreshDuelResult(n: Notification): boolean {
+  const t = new Date(n.data?.finished_at || n.created_at).getTime();
+  return Number.isFinite(t) ? Date.now() - t < FRESH_DUEL_RESULT_MS : true;
+}
+
+/**
+ * Есть ли в сторе непросмотренные свежие результаты дуэлей.
+ *
+ * @param exceptDuelId дуэль, которую не считать (игрок её только что
+ *   посмотрел или закрыл, но стор ещё не перечитан)
+ */
+export function hasFreshDuelResults(exceptDuelId?: number): boolean {
+  return useNotifications.getState().notifications.some(n =>
+    n.type === 'duel_result' && !n.is_read && isFreshDuelResult(n)
+    && (exceptDuelId == null || Number(n.data?.duel_id) !== Number(exceptDuelId)));
+}
+
 const withUnreadCount = (notifications: Notification[]) => ({
   notifications,
   unreadCount: notifications.filter(n => !n.is_read).length
