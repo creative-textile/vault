@@ -23,6 +23,10 @@ export async function initNotificationsTable() {
         related_entity_id INTEGER
       )
     `);
+    await query(`
+      CREATE INDEX IF NOT EXISTS idx_user_notifications_user_unread
+        ON user_notifications(user_id, is_read)
+    `);
     console.log('[DB] user_notifications table ready');
   } catch (e: any) {
     console.error('[DB] Error creating user_notifications table:', e.message);
@@ -122,6 +126,22 @@ export async function markAllNotificationsAsRead(userId: number) {
     `UPDATE user_notifications SET is_read = TRUE WHERE user_id = $1`,
     [userId]
   );
+}
+
+/**
+ * Отметить как прочитанные все уведомления по конкретной дуэли.
+ * Используется, когда игрок просмотрел результат дуэли: бейдж должен гаснуть,
+ * даже если список уведомлений на клиенте устарел.
+ */
+export async function markDuelNotificationsAsRead(duelId: number, userId: number) {
+  const res = await query(
+    `UPDATE user_notifications SET is_read = TRUE
+      WHERE user_id = $1 AND is_read = FALSE AND type = 'duel_result'
+        AND (data->>'duel_id') = $2::text
+      RETURNING id`,
+    [userId, String(duelId)]
+  );
+  return res.rows.length;
 }
 
 /**

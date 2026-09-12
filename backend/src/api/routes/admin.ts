@@ -4,7 +4,7 @@ import { query } from '../../db/pool';
 import { getSetting, setSetting } from '../../services/revenue';
 import { getRocketBankroll, updateRocketBankroll } from '../../services/rocket';
 import { addManualPool, getVaultPool } from '../../services/vault-deposit';
-import { startCracking, getTodaySafe } from '../../services/safe';
+import { startCracking, finalizeCracking, getTodaySafe } from '../../services/safe';
 import { broadcast } from '../../services/notifications';
 
 const router = Router();
@@ -414,7 +414,7 @@ router.get('/settings', async (_req, res) => {
   const defaults: Record<string, string> = {
     commission_percent: '10', withdraw_commission: '1', referral_percent: '3',
     min_bet: '1', rocket_max_bet_percent: '50', vault_pool_percent: '15',
-    safe_min_bank: '5', safe_min_participants: '2', beautiful_flight_chance: '3',
+    safe_min_bank: '25', safe_min_participants: '2', beautiful_flight_chance: '3',
     vault_min_deposit: '10', vault_max_deposit: '100',
     safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '2'
   };
@@ -433,7 +433,7 @@ router.get('/settings', async (_req, res) => {
     vault_max_deposit: 'Начальный макс. вклад ВАУЛЬТ ($)',
     safe_crack_hour: 'Час взлома сейфа МСК (0-23)',
     safe_crack_minute: 'Минута взлома сейфа (0-59)',
-    safe_crack_timeout_minutes: 'Время "не успел" (минуты)'
+    safe_crack_timeout_minutes: 'Окно взлома сейфа (минуты)'
   };
   for (const k of keys) out[k] = (await getSetting(k)) || defaults[k] || '';
   res.json({ values: out, labels });
@@ -463,20 +463,26 @@ router.post('/start-cracking', async (req, res) => {
       broadcast('safe_cancelled', {});
       return res.json({ ok: false, message: 'Сейф отменён (не набрал минимум)' });
     }
-    
-    broadcast('safe_crack_started', { safe: resCrack.safe });
-    
-    // Финализация через 1 секунду
-    setTimeout(async () => {
-      const safeAfter = await getTodaySafe();
-      if (safeAfter) {
-        const { calculateSafeWinners } = await import('../../services/safe');
-        await calculateSafeWinners(safeAfter.id);
-        broadcast('safe_finished', { safe_id: safeAfter.id });
-      }
-    }, 1000);
-    
-    res.json({ ok: true, message: 'Взлом запущен' });
+    if (!resCrack.started) {
+      return res.json({ ok: false, message: 'Взлом уже идёт или сейф разыгран' });
+    }
+
+    broadcast('safe_crack_started', { safe: resCrack.safe, window_ms: resCrack.window_ms });
+
+    // Итоги подводит сам сервис по истечении окна взлома
+    // (safe_crack_timeout_minutes + запас) — игрокам нужно время на мини-игру.
+    res.json({ ok: true, message: 'Взлом запущен', window_ms: resCrack.window_ms });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/finalize-cracking - досрочно закрыть окно взлома и подвести итоги
+router.post('/finalize-cracking', async (_req, res) => {
+  try {
+    const safeId = await finalizeCracking();
+    if (!safeId) return res.status(400).json({ error: 'Взлом сейчас не идёт' });
+    res.json({ ok: true, safe_id: safeId });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

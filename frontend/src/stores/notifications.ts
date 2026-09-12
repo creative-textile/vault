@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { duelApi } from '../api/client';
 
-interface Notification {
+export interface Notification {
   id: number;
   user_id: number;
   type: string;
@@ -18,69 +18,74 @@ interface NotificationsState {
   notifications: Notification[];
   unreadCount: number;
   isLoading: boolean;
+  /** Загрузить непрочитанные уведомления с сервера (единственный источник правды). */
   fetchNotifications: () => Promise<void>;
   markAsRead: (id: number) => Promise<void>;
+  /** Отметить всё прочитанным одним запросом. */
   markAllAsRead: () => Promise<void>;
-  addNotification: (notification: Notification) => void;
+  /** Погасить уведомления по конкретной дуэли (когда игрок увидел результат). */
+  markDuelAsRead: (duelId: number) => Promise<void>;
+  clear: () => void;
 }
 
-export const useNotifications = create<NotificationsState>((set: any, get: any) => {
-  return {
-    notifications: [],
-    unreadCount: 0,
-    isLoading: false,
-    
-    fetchNotifications: async () => {
-      set({ isLoading: true });
-      try {
-        const response = await duelApi.notifications();
-        const notifications: Notification[] = response.notifications || [];
-        const unreadCount = notifications.filter((n: Notification) => !n.is_read).length;
-        set({ notifications, unreadCount, isLoading: false });
-      } catch (error) {
-        set({ isLoading: false });
-      }
-    },
-    
-    markAsRead: async (id: number) => {
-      try {
-        await duelApi.markNotificationAsRead(id);
-        const state = get();
-        const notifications: Notification[] = state.notifications;
-        const updated = notifications.map((n: Notification) => 
-          n.id === id ? { ...n, is_read: true } : n
-        );
-        const unreadCount = updated.filter((n: Notification) => !n.is_read).length;
-        set({ notifications: updated, unreadCount });
-      } catch (error) {
-        console.error('Error marking notification as read:', error);
-      }
-    },
-    
-    markAllAsRead: async () => {
-      const state = get();
-      const notifications: Notification[] = state.notifications;
-      const unreadIds = notifications.filter((n: Notification) => !n.is_read).map((n: Notification) => n.id);
-      
-      try {
-        await Promise.all(unreadIds.map((id: number) => duelApi.markNotificationAsRead(id)));
-        const updated = notifications.map((n: Notification) => ({ ...n, is_read: true }));
-        set({ notifications: updated, unreadCount: 0 });
-      } catch (error) {
-        console.error('Error marking all notifications as read:', error);
-      }
-    },
-    
-    addNotification: (notification: Notification) => {
-      const state = get();
-      const notifications: Notification[] = state.notifications;
-      const exists = notifications.some((n: Notification) => n.id === notification.id);
-      if (!exists) {
-        const updated = [notification, ...notifications];
-        const currentUnread: number = state.unreadCount;
-        const unreadCount = notification.is_read ? currentUnread : currentUnread + 1;
-        set({ notifications: updated, unreadCount });
-      }
-    }
-  };
+const withUnreadCount = (notifications: Notification[]) => ({
+  notifications,
+  unreadCount: notifications.filter(n => !n.is_read).length
 });
+
+export const useNotifications = create<NotificationsState>((set, get) => ({
+  notifications: [],
+  unreadCount: 0,
+  isLoading: false,
+
+  fetchNotifications: async () => {
+    if (get().isLoading) return;
+    set({ isLoading: true });
+    try {
+      const response = await duelApi.notifications();
+      const notifications: Notification[] = response.notifications || [];
+      set({ ...withUnreadCount(notifications), isLoading: false });
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      set({ isLoading: false });
+    }
+  },
+
+  markAsRead: async (id: number) => {
+    try {
+      await duelApi.markNotificationAsRead(id);
+      const updated = get().notifications.map(n => (n.id === id ? { ...n, is_read: true } : n));
+      set(withUnreadCount(updated));
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  },
+
+  markAllAsRead: async () => {
+    try {
+      await duelApi.markAllNotificationsAsRead();
+      set(withUnreadCount(get().notifications.map(n => ({ ...n, is_read: true }))));
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    }
+  },
+
+  markDuelAsRead: async (duelId: number) => {
+    if (!Number.isFinite(duelId)) return;
+    const matches = (n: Notification) => Number(n.data?.duel_id) === Number(duelId);
+    // Сразу гасим локально, чтобы бейдж не мигал, и параллельно — на сервере:
+    // там помечаются и те уведомления, которых ещё нет в локальном списке.
+    const local = get().notifications.filter(n => !n.is_read && matches(n));
+    if (local.length) {
+      set(withUnreadCount(get().notifications.map(n => (matches(n) ? { ...n, is_read: true } : n))));
+    }
+    try {
+      await duelApi.markDuelNotificationsAsRead(duelId);
+      await get().fetchNotifications();
+    } catch (error) {
+      console.error('Error marking duel notifications as read:', error);
+    }
+  },
+
+  clear: () => set({ notifications: [], unreadCount: 0 })
+}));

@@ -89,6 +89,12 @@ server.listen(config.port, async () => {
   try {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`);
+    // Отметка старта фазы взлома сейфа (нужна существующим БД: окно взлома считается от неё)
+    try {
+      await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS crack_started_at TIMESTAMPTZ`);
+    } catch (e: any) {
+      console.error('[DB] Migration safes.crack_started_at:', e.message);
+    }
     await query(`CREATE TABLE IF NOT EXISTS platform_cashbox (
         id SERIAL PRIMARY KEY, amount DECIMAL(14,2) DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW()
     )`);

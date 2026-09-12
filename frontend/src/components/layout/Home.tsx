@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../stores/auth';
+import { onSafeEvent } from '../../utils/socketEvents';
 import { vaultApi, safeApi } from '../../api/client';
 
 function fmt(n: number) {
@@ -23,8 +24,7 @@ export default function Home() {
   const [safe, setSafe] = useState<any>(null);
   const [timeToCrack, setTimeToCrack] = useState(0);
 
-  useEffect(() => {
-    vaultApi.status().then(setVaultStatus).catch(() => {});
+  const loadSafe = useCallback(() => {
     safeApi.current().then(s => {
       setSafe(s.safe);
       if (s.safe?.crack_at) {
@@ -34,12 +34,19 @@ export default function Home() {
         setTimeToCrack(s.safe?.time_to_crack_ms || 0);
       }
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    vaultApi.status().then(setVaultStatus).catch(() => {});
+    loadSafe();
+    // Карточка сейфа обновляется по socket-событиям: старт взлома, итоги, отмена
+    const off = onSafeEvent(loadSafe);
     const iv = setInterval(() => {
       setTimeToCrack(t => Math.max(0, t - 1000));
     }, 1000);
     const refresh = setInterval(refreshUser, 5000);
-    return () => { clearInterval(iv); clearInterval(refresh); };
-  }, [refreshUser]);
+    return () => { off(); clearInterval(iv); clearInterval(refresh); };
+  }, [refreshUser, loadSafe]);
 
   if (!user) return null;
 

@@ -5,6 +5,7 @@ import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
+import { useNotifications } from '../../stores/notifications';
 
 type DuelPhase = 'flipping' | 'result';
 
@@ -13,6 +14,7 @@ export default function DuelGame() {
   const loc = useLocation();
   const nav = useNavigate();
   const { user, refreshUser, showToast } = useAuth();
+  const { markDuelAsRead } = useNotifications();
 
   const [phase, setPhase] = useState<DuelPhase>('flipping');
   const [result, setResult] = useState<'heads' | 'tails' | null>(null);
@@ -79,6 +81,10 @@ export default function DuelGame() {
         localStorage.removeItem(`duel_dismissed_${seenId}`);
         sessionStorage.removeItem(`duel_pending_${seenId}`);
 
+        // Результат просмотрен — гасим уведомления по этой дуэли,
+        // иначе бейдж непрочитанных висит, даже когда игрок всё увидел
+        markDuelAsRead(Number(seenId));
+
         // Если анимация не была просмотрена, запускаем её
         if (!alreadySeen) {
           setTimeout(async () => {
@@ -110,7 +116,7 @@ export default function DuelGame() {
       }
     })();
     return () => { mounted = false; };
-  }, [id, loc.state, nav, refreshUser]);
+  }, [id, loc.state, nav, refreshUser, markDuelAsRead]);
 
   const rematch = async (mult = 1) => {
     if (!id) return;

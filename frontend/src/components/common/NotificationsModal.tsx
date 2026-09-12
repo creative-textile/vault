@@ -1,20 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useNotifications } from '../../stores/notifications';
+import { useNotifications, Notification } from '../../stores/notifications';
 import { useAuth } from '../../stores/auth';
-
-interface Notification {
-  id: number;
-  user_id: number;
-  type: string;
-  title: string;
-  message: string;
-  data?: any;
-  is_read: boolean;
-  created_at: string;
-  related_entity_type?: string;
-  related_entity_id?: number;
-}
 
 export default function NotificationsModal() {
   const { notifications, unreadCount, fetchNotifications, markAsRead, markAllAsRead } = useNotifications();
@@ -24,12 +11,11 @@ export default function NotificationsModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Проверяем, находимся ли мы на страницах, где не нужно показывать уведомления
-  const isExcludedRoute = () => {
-    const path = location.pathname;
-    // Исключаем только /rocket и /safe/crack, но не /duel
-    return path.startsWith('/rocket') || path.startsWith('/safe/crack');
-  };
+  // На этих экранах бейдж не показываем: /rocket (игра) и /safe/crack (мини-игра взлома)
+  const isExcludedRoute = useMemo(
+    () => location.pathname.startsWith('/rocket') || location.pathname.startsWith('/safe/crack'),
+    [location.pathname]
+  );
 
   // Загружаем уведомления при монтировании
   useEffect(() => {
@@ -43,15 +29,6 @@ export default function NotificationsModal() {
     }, 10000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
-
-  // Автоматически открываем модальное окно, если есть непрочитанные уведомления
-  // и пользователь не на исключённых страницах
-  useEffect(() => {
-    if (unreadCount > 0 && !isExcludedRoute() && !isOpen) {
-      // Не открываем автоматически, чтобы не мешать пользователю
-      // Вместо этого покажем индикатор
-    }
-  }, [unreadCount, isExcludedRoute, isOpen]);
 
   const handleOpen = async () => {
     setIsOpen(true);
@@ -99,7 +76,7 @@ export default function NotificationsModal() {
 
   if (!isOpen) {
     // Показываем индикатор непрочитанных уведомлений
-    if (unreadCount > 0 && !isExcludedRoute()) {
+    if (unreadCount > 0 && !isExcludedRoute) {
       return (
         <div 
           style={{
@@ -147,36 +124,6 @@ export default function NotificationsModal() {
 
   return (
     <>
-      {/* Индикатор в правом нижнем углу */}
-      {!isOpen && unreadCount > 0 && !isExcludedRoute() && (
-        <div 
-          style={{
-            position: 'fixed',
-            bottom: 20,
-            right: 20,
-            zIndex: 1000,
-            cursor: 'pointer'
-          }}
-          onClick={handleOpen}
-        >
-          <div style={{
-            background: '#ffd700',
-            color: '#000',
-            borderRadius: '50%',
-            width: 50,
-            height: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 'bold',
-            fontSize: 18,
-            boxShadow: '0 4px 12px rgba(255, 215, 0, 0.4)'
-          }}>
-            {unreadCount}
-          </div>
-        </div>
-      )}
-
       {/* Модальное окно */}
       {isOpen && (
         <div style={{

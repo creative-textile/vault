@@ -21,6 +21,13 @@ export function todayMSK(): string {
   return nowMSK().toISOString().slice(0, 10);
 }
 
+/** Дата следующего дня в МСК (YYYY-MM-DD). */
+export function tomorrowMSK(): string {
+  const n = nowMSK();
+  n.setDate(n.getDate() + 1);
+  return n.toISOString().slice(0, 10);
+}
+
 /** Возвращает настоящий Date для заданных часов/минут в MSK на сегодня (или завтра, если уже прошло). */
 export function nextMSK(hour: number, minute: number): Date {
   const n = nowMSK();

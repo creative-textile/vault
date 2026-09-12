@@ -70,6 +70,9 @@ export const duelApi = {
   pending: () => api('/api/duel/pending'),
   notifications: () => api('/api/duel/notifications'),
   markNotificationAsRead: (id: number) => api(`/api/duel/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsAsRead: () => api('/api/duel/notifications/read-all', { method: 'POST' }),
+  markDuelNotificationsAsRead: (duelId: number) =>
+    api(`/api/duel/notifications/read-duel/${duelId}`, { method: 'POST' }),
   getUnreadCount: () => api('/api/duel/notifications/count')
 };
 
@@ -106,6 +109,8 @@ export const adminApi = {
   withdrawPlatform: (amount: number, note?: string) =>
     api('/api/admin/withdraw-platform', { method: 'POST', body: JSON.stringify({ amount, note }) }),
   seedPlatform: (amount: number) => api('/api/admin/seed-platform', { method: 'POST', body: JSON.stringify({ amount }) }),
+  startCracking: () => api('/api/admin/start-cracking', { method: 'POST' }),
+  finalizeCracking: () => api('/api/admin/finalize-cracking', { method: 'POST' }),
   getSettings: () => api('/api/admin/settings'),
   setSettings: (s: any) => api('/api/admin/settings', { method: 'POST', body: JSON.stringify(s) }),
   users: (search?: string, limit = 50) => {

@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import {
-  getTodaySafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
-  getSafeResults, getUserSafeDeposit, getSafeById
+  getActiveSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
+  getSafeResults, getUserSafeDeposit, getSafeById,
+  getCrackWindowMs, getCrackRemainingMs
 } from '../../services/safe';
 import { nextMSK } from '../../utils/time';
 
@@ -12,7 +13,7 @@ const router = Router();
 router.get('/current', auth, async (req, res) => {
   try {
     const user = (req as any).user;
-    const safe = await getTodaySafe();
+    const safe = await getActiveSafe();
     if (!safe) return res.json({ safe: null, my_deposit: null });
     const myDeposit = await getUserSafeDeposit(safe.id, user.id);
     // Время до взлома — читается из настроек (час/минута в МСК)
@@ -22,6 +23,13 @@ router.get('/current', auth, async (req, res) => {
     const crackAt = nextMSK(hour, minute);
     const now = new Date();
     const timeToCrack = Math.max(0, crackAt.getTime() - now.getTime());
+
+    // Во время взлома клиенту нужно знать длину окна и остаток (считается на
+    // сервере от crack_started_at — клиентские часы могут врать)
+    const isCracking = safe.status === 'cracking';
+    const crackWindowMs = isCracking ? await getCrackWindowMs() : null;
+    const crackRemainingMs = isCracking ? await getCrackRemainingMs(safe.id, crackWindowMs ?? undefined) : null;
+
     res.json({
       safe: {
         id: safe.id,
@@ -34,7 +42,9 @@ router.get('/current', auth, async (req, res) => {
         drum_speeds: safe.drum_speeds,
         date: safe.date,
         crack_at: crackAt.toISOString(),
-        time_to_crack_ms: timeToCrack
+        time_to_crack_ms: isCracking ? (crackRemainingMs ?? 0) : timeToCrack,
+        crack_window_ms: crackWindowMs,
+        crack_remaining_ms: crackRemainingMs
       },
       my_deposit: myDeposit
     });
@@ -69,7 +79,9 @@ router.post('/crack', auth, async (req, res) => {
   try {
     const user = (req as any).user;
     const { time_ms } = req.body;
-    res.json(await submitCrackTime(user.id, parseInt(time_ms)));
+    const t = Number(time_ms);
+    if (!Number.isFinite(t) || t < 0) throw new Error('Некорректное время взлома');
+    res.json(await submitCrackTime(user.id, t));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

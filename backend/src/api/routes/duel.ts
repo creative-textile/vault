@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import { createDuel, getLobby, acceptDuel, cancelDuel, getDuelHistory, getDuel } from '../../services/duel';
-import { notify, notifyDuelResult, getUnreadUserNotifications } from '../../services/notifications';
-import { markNotificationAsRead, getUnreadCount } from '../../services/user-notifications';
+import { notifyDuelResult, getUnreadUserNotifications } from '../../services/notifications';
+import {
+  markNotificationAsRead, markAllNotificationsAsRead,
+  markDuelNotificationsAsRead, getUnreadCount
+} from '../../services/user-notifications';
 
 const router = Router();
 
@@ -138,6 +141,75 @@ router.get('/history', async (_req, res) => {
   }
 });
 
+// ============================================================
+// Уведомления о дуэлях.
+// ВАЖНО: эти маршруты обязаны быть зарегистрированы ДО '/:id',
+// иначе Express сопоставит '/notifications' с '/:id' и вернёт 400.
+// ============================================================
+
+// GET /api/duel/notifications — непрочитанные уведомления пользователя
+router.get('/notifications', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !user.id) {
+      return res.json({ notifications: [] });
+    }
+    const notifications = await getUnreadUserNotifications(user.id);
+    res.json({ notifications });
+  } catch (e: any) {
+    console.error('[NOTIFICATIONS ERROR]', e.message, e.stack);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// GET /api/duel/notifications/count — количество непрочитанных уведомлений
+router.get('/notifications/count', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const count = await getUnreadCount(user.id);
+    res.json({ count });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/duel/notifications/read-all — отметить всё прочитанным (один запрос)
+router.post('/notifications/read-all', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    await markAllNotificationsAsRead(user.id);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/duel/notifications/read-duel/:duelId — пометить уведомления по дуэли
+router.post('/notifications/read-duel/:duelId', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const duelId = parseInt(req.params.duelId);
+    if (isNaN(duelId)) throw new Error('Некорректный ID дуэли');
+    const marked = await markDuelNotificationsAsRead(duelId, user.id);
+    res.json({ success: true, marked });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/duel/notifications/:id/read — отметить уведомление прочитанным
+router.post('/notifications/:id/read', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const notificationId = parseInt(req.params.id);
+    if (isNaN(notificationId)) throw new Error('Некорректный ID уведомления');
+    const success = await markNotificationAsRead(notificationId, user.id);
+    res.json({ success });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // GET /api/duel/:id (replay)
 router.get('/:id', auth, async (req, res) => {
   try {
@@ -163,45 +235,6 @@ router.get('/:id', auth, async (req, res) => {
       finished_at: d.finished_at,
       status: d.status
     });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-// GET /api/duel/notifications - получить непрочитанные уведомления о дуэлях
-router.get('/notifications', auth, async (req, res) => {
-  try {
-    const user = (req as any).user;
-    if (!user || !user.id) {
-      return res.json({ notifications: [] });
-    }
-    const notifications = await getUnreadUserNotifications(user.id);
-    res.json({ notifications });
-  } catch (e: any) {
-    console.error('[NOTIFICATIONS ERROR]', e.message, e.stack);
-    res.status(400).json({ error: e.message });
-  }
-});
-
-// POST /api/duel/notifications/:id/read - отметить уведомление как прочитанное
-router.post('/notifications/:id/read', auth, async (req, res) => {
-  try {
-    const user = (req as any).user;
-    const notificationId = parseInt(req.params.id);
-    if (isNaN(notificationId)) throw new Error('Некорректный ID уведомления');
-    const success = await markNotificationAsRead(notificationId, user.id);
-    res.json({ success });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-// GET /api/duel/notifications/count - получить количество непрочитанных уведомлений
-router.get('/notifications/count', auth, async (req, res) => {
-  try {
-    const user = (req as any).user;
-    const count = await getUnreadCount(user.id);
-    res.json({ count });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

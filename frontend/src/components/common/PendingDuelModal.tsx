@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { duelApi } from '../../api/client';
+import { useNotifications } from '../../stores/notifications';
+import { onNotificationEvent } from '../../utils/socketEvents';
 
 export default function PendingDuelModal() {
   const [pending, setPending] = useState<any>(null);
   const nav = useNavigate();
+  const { markDuelAsRead } = useNotifications();
 
   useEffect(() => {
     let active = true;
@@ -22,10 +25,16 @@ export default function PendingDuelModal() {
       } catch {}
     };
     check();
-    const iv = setInterval(check, 3000);
+    // Основной триггер — socket-уведомление о результате дуэли (модалка появится сразу),
+    // опрос оставлен как страховка на случай разорванного соединения.
+    const iv = setInterval(check, 15000);
+    const off = onNotificationEvent(d => {
+      if (d?.type === 'duel_result') check();
+    });
     return () => {
       active = false;
       clearInterval(iv);
+      off();
     };
   }, []);
 
@@ -41,6 +50,8 @@ export default function PendingDuelModal() {
     if (!pending || isNaN(pending.id)) return;
     localStorage.setItem(`duel_seen_${pending.id}`, '1');
     setPending(null);
+    // Игрок пошёл смотреть результат — уведомления по этой дуэли больше не нужны
+    markDuelAsRead(Number(pending.id));
     nav(`/duel/${pending.id}`, { state: { result: pending } });
   };
 

@@ -17,7 +17,7 @@ router.get('/config', async (_req, res) => {
   ]);
   res.json({
     min_bet: parseFloat(minBet || '1'),
-    safe_min_bank: parseFloat(safeMinBank || '5'),
+    safe_min_bank: parseFloat(safeMinBank || '25'),
     safe_min_participants: parseInt(safeMinPart || '2'),
     rocket_max_bet_percent: parseInt(rocketMaxPct || '50'),
     vault_min_deposit_base: parseFloat(vaultMin || '10'),

@@ -5,6 +5,7 @@ import { AuthContext, User } from './stores/auth';
 import { authApi, profileApi } from './api/client';
 import { getSocket, disconnectSocket } from './api/socket';
 import { useNotifications } from './stores/notifications';
+import { emitSafeEvent, emitNotificationEvent } from './utils/socketEvents';
 
 import Onboarding from './components/onboarding/Onboarding';
 import Home from './components/layout/Home';
@@ -31,7 +32,7 @@ export default function App() {
     localStorage.getItem('onboarding_done') === '1'
   );
   const [toast, setToast] = useState<string | null>(null);
-  const { addNotification, fetchNotifications } = useNotifications();
+  const { fetchNotifications, clear: clearNotifications } = useNotifications();
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -51,60 +52,46 @@ export default function App() {
 
   useEffect(() => {
     let sock: any = null;
-    let intervalId: number | null = null;
-    
+
     (async () => {
       try {
         if (token) {
           await refreshUser();
-          // Init socket
           sock = getSocket(token);
+
+          // Уведомление из сокета — тост + перечитывание списка с сервера.
+          // Подделывать уведомление на клиенте (id: Date.now()) нельзя: такой id
+          // не существует в БД, и «отметить прочитанным» по нему не сработает.
           sock.on('notification', (data: any) => {
             showToast(data.message);
             refreshUser();
-            if (data.type === 'duel_result') {
-              addNotification({
-                id: Date.now(),
-                user_id: user?.id || 0,
-                type: data.type,
-                title: data.title || 'Результат дуэли',
-                message: data.message,
-                data: data.data,
-                is_read: false,
-                created_at: new Date().toISOString()
-              });
-            }
+            fetchNotifications();
+            emitNotificationEvent(data || {});
           });
-          
+
+          // События сейфа пересылаем подписчикам (Safe/SafeCrack) без перезагрузки
+          // страницы: reload обрывал мини-игру взлома и ронял socket-соединение.
           sock.on('safe_crack_started', (data: any) => {
-            console.log('[SOCKET] Safe crack started:', data);
-            if (window.location.pathname === '/safe') {
-              window.location.reload();
-            }
+            showToast('🔓 Начался взлом сейфа!');
+            emitSafeEvent('safe_crack_started', data);
           });
           sock.on('safe_finished', (data: any) => {
-            console.log('[SOCKET] Safe finished:', data);
-            if (window.location.pathname === '/safe') {
-              window.location.reload();
-            }
+            showToast('🏆 Сейф разыгран — итоги готовы');
+            emitSafeEvent('safe_finished', data);
           });
-          
-          intervalId = window.setInterval(() => {
-            if (token) {
-              fetchNotifications();
-            }
-          }, 15000);
+          sock.on('safe_cancelled', (data: any) => emitSafeEvent('safe_cancelled', data));
+          sock.on('safe_created', (data: any) => emitSafeEvent('safe_created', data));
         }
       } finally {
         setLoading(false);
       }
     })();
-    
+
+    // Опрос уведомлений здесь не нужен: NotificationsModal обновляет список сам.
     return () => {
-      if (intervalId) clearInterval(intervalId);
       disconnectSocket();
     };
-  }, [token, refreshUser, showToast, addNotification, fetchNotifications, user?.id]);
+  }, [token, refreshUser, showToast, fetchNotifications]);
 
   useEffect(() => {
     // Telegram WebApp init
@@ -152,6 +139,7 @@ export default function App() {
     localStorage.removeItem('vault_token');
     setToken(null);
     setUser(null);
+    clearNotifications();
     disconnectSocket();
   };
 

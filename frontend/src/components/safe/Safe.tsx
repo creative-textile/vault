@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import { onSafeEvent } from '../../utils/socketEvents';
 
 function fmt(n: number) { return n.toFixed(2); }
 
@@ -28,7 +29,9 @@ export default function Safe() {
   const [timeToCrack, setTimeToCrack] = useState(0);
   const [safeMinBank, setSafeMinBank] = useState(25);
   const [minBet, setMinBet] = useState(1);
-  const [crackAt, setCrackAt] = useState<Date | null>(null);
+  // Дедлайн взлома держим в ref: объект Date в зависимостях эффекта пересоздавался
+  // на каждом опросе и запускал эффект заново — отсюда бесконечные запросы /api/safe/current
+  const crackAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     publicConfig().then(c => {
@@ -43,31 +46,32 @@ export default function Safe() {
       setSafe(r.safe);
       setMyDeposit(r.my_deposit);
       setTimeToCrack(r.safe?.time_to_crack_ms || 0);
-      if (r.safe?.status === 'finished' || r.safe?.status === 'cracking') {
+      if (r.safe?.crack_at) {
+        crackAtRef.current = new Date(r.safe.crack_at).getTime();
+      }
+      // Результаты имеют смысл только после розыгрыша (во время взлома призов ещё нет)
+      if (r.safe?.status === 'finished') {
         const res = await safeApi.results(r.safe.id);
         setResults(res.results);
-      }
-      // Обновляем время взлома из настроек
-      if (r.safe?.crack_at) {
-        setCrackAt(new Date(r.safe.crack_at));
       }
     } catch {}
   }, []);
 
   useEffect(() => {
     load();
+    // Локальный тикер обратного отсчёта (без запросов к серверу)
     const iv = setInterval(() => {
-      if (crackAt) {
-        const now = new Date();
-        const newTimeToCrack = Math.max(0, crackAt.getTime() - now.getTime());
-        setTimeToCrack(newTimeToCrack);
+      if (crackAtRef.current) {
+        setTimeToCrack(Math.max(0, crackAtRef.current - Date.now()));
       } else {
         setTimeToCrack(t => Math.max(0, t - 1000));
       }
     }, 1000);
+    // Контрольный опрос + мгновенная реакция на socket-события сейфа
     const iv2 = setInterval(load, 5000);
-    return () => { clearInterval(iv); clearInterval(iv2); };
-  }, [load, crackAt]);
+    const off = onSafeEvent(() => load());
+    return () => { clearInterval(iv); clearInterval(iv2); off(); };
+  }, [load]);
 
   useEffect(() => {
     if (safe?.status === 'cracking') {

@@ -1,14 +1,37 @@
 import { query } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
+import { broadcast } from './notifications';
 import { payReferral } from './referral';
-import { todayMSK } from '../utils/time';
+import { todayMSK, tomorrowMSK } from '../utils/time';
 
-export async function getTodaySafe() {
-  const today = todayMSK();
-  const res = await query('SELECT * FROM safes WHERE date = $1', [today]);
-  if (res.rows.length === 0) return null;
-  const s = res.rows[0];
+/**
+ * Запас времени после окончания окна взлома: даёт игрокам дослать результат
+ * (сеть/лаг) и гарантирует, что финализация по расписанию не отрежет валидные
+ * вводы. Входит в длину окна взлома, которое видит клиент.
+ */
+const CRACK_GRACE_MS = 10_000;
+
+/** Таймеры финализации взлома по сейфам (пересоздаются после рестарта). */
+const finalizeTimers = new Map<number, NodeJS.Timeout>();
+
+/** Сколько минут длится фаза взлома (настройка safe_crack_timeout_minutes). */
+async function getCrackTimeoutMs(): Promise<number> {
+  const raw = parseInt(await getSetting('safe_crack_timeout_minutes') || '2');
+  const minutes = Number.isFinite(raw) && raw > 0 ? raw : 2;
+  return minutes * 60 * 1000;
+}
+
+/**
+ * Полная длина окна взлома в мс (таймаут + запас). Именно столько длится
+ * статус 'cracking' — по истечении окно закрывается и подводятся итоги.
+ */
+export async function getCrackWindowMs(): Promise<number> {
+  return (await getCrackTimeoutMs()) + CRACK_GRACE_MS;
+}
+
+/** Привести строки из БД к числам (DECIMAL приходит строкой). */
+function normalizeSafe(s: any) {
   s.bank = parseFloat(s.bank);
   s.prize_pool = parseFloat(s.prize_pool);
   s.commission_amount = parseFloat(s.commission_amount);
@@ -16,15 +39,31 @@ export async function getTodaySafe() {
   return s;
 }
 
+export async function getTodaySafe() {
+  const today = todayMSK();
+  const res = await query('SELECT * FROM safes WHERE date = $1', [today]);
+  if (res.rows.length === 0) return null;
+  return normalizeSafe(res.rows[0]);
+}
+
 export async function getSafeById(id: number) {
   const res = await query('SELECT * FROM safes WHERE id = $1', [id]);
   if (res.rows.length === 0) return null;
-  const s = res.rows[0];
-  s.bank = parseFloat(s.bank);
-  s.prize_pool = parseFloat(s.prize_pool);
-  s.commission_amount = parseFloat(s.commission_amount);
-  s.drum_speeds = s.drum_speeds ? s.drum_speeds.map((x: string) => parseFloat(x)) : [];
-  return s;
+  return normalizeSafe(res.rows[0]);
+}
+
+/**
+ * Сейф, который сейчас показывает экран «Сейф»/«Взлом».
+ * Во время взлома возвращаем именно взламываемый сейф: окно взлома может
+ * переходить полночь МСК, и тогда «сегодняшний» сейф — уже следующий,
+ * а игроки всё ещё доигрывают вчерашний.
+ */
+export async function getActiveSafe() {
+  const res = await query(
+    `SELECT * FROM safes WHERE status = 'cracking' ORDER BY id DESC LIMIT 1`
+  );
+  if (res.rows.length) return normalizeSafe(res.rows[0]);
+  return getTodaySafe();
 }
 
 export async function createDailySafe() {
@@ -144,14 +183,27 @@ export async function cancelSafeDeposit(userId: number) {
 }
 
 export async function submitCrackTime(userId: number, timeMs: number) {
-  const timeoutMinutes = parseInt(await getSetting('safe_crack_timeout_minutes') || '2');
-  const maxTimeMs = timeoutMinutes * 60 * 1000; // Преобразуем минуты в миллисекунды
-  
-  if (timeMs < 500) throw new Error('Слишком быстро');
-  if (timeMs > maxTimeMs) throw new Error(`Таймаут: ${timeoutMinutes} мин`);
-  const safe = await getTodaySafe();
+  const clientMs = Math.round(Number(timeMs));
+  if (!Number.isFinite(clientMs)) throw new Error('Некорректное время');
+
+  const safe = await getActiveSafe();
   if (!safe) throw new Error('Сейф не найден');
   if (safe.status !== 'cracking') throw new Error('Не фаза взлома');
+
+  const windowMs = await getCrackWindowMs();
+
+  // Сколько времени реально прошло с начала взлома (по серверным часам).
+  // Защита от подкрутки клиентского времени и от ввода после закрытия окна.
+  const startedAt = await getCrackStartedAt(safe.id);
+  const elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt.getTime()) : 0;
+  if (elapsedMs > windowMs) throw new Error('Окно взлома закрыто');
+
+  const timeoutMinutes = Math.round((await getCrackTimeoutMs()) / 60000);
+  // Клиент считает время от старта барабанов, сервер — от старта фазы взлома,
+  // поэтому берём большее из двух значений (честный порядок "кто раньше").
+  const recordedMs = Math.max(clientMs, elapsedMs);
+  if (recordedMs < 500) throw new Error('Слишком быстро');
+  if (recordedMs > windowMs) throw new Error(`Таймаут: ${timeoutMinutes} мин`);
 
   // Проверка: пользователь имеет вклад?
   const depRes = await query(
@@ -162,9 +214,25 @@ export async function submitCrackTime(userId: number, timeMs: number) {
 
   await query(
     'UPDATE safe_deposits SET crack_time_ms = $1 WHERE id = $2',
-    [Math.round(timeMs), depRes.rows[0].id]
+    [recordedMs, depRes.rows[0].id]
   );
-  return { recorded: true };
+  return { recorded: true, crack_time_ms: recordedMs };
+}
+
+/** Момент старта фазы взлома (TIMESTAMPTZ → Date) или null, если отметки нет. */
+async function getCrackStartedAt(safeId: number): Promise<Date | null> {
+  const res = await query(`SELECT crack_started_at FROM safes WHERE id = $1`, [safeId]);
+  if (!res.rows.length || !res.rows[0].crack_started_at) return null;
+  const d = new Date(res.rows[0].crack_started_at);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** Сколько миллисекунд осталось до закрытия окна взлома (null, если отметки старта нет). */
+export async function getCrackRemainingMs(safeId: number, windowMs?: number): Promise<number | null> {
+  const started = await getCrackStartedAt(safeId);
+  if (!started) return null;
+  const win = windowMs ?? (await getCrackWindowMs());
+  return Math.max(0, Math.round(win - (Date.now() - started.getTime())));
 }
 
 export async function calculateSafeWinners(safeId: number) {
@@ -250,38 +318,142 @@ export async function getUserSafeDeposit(safeId: number, userId: number) {
   return { ...d, amount: parseFloat(d.amount), prize: parseFloat(d.prize) };
 }
 
+/** Гарантировать, что сейф следующего дня существует (чтобы депозиты не терялись). */
+export async function ensureNextDaySafe(): Promise<void> {
+  const tomorrow = tomorrowMSK();
+  const nextSafeExists = await query('SELECT id FROM safes WHERE date = $1', [tomorrow]);
+  if (nextSafeExists.rows.length) return;
+
+  const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
+  const drumSpeeds = [0, 1, 2].map(() => +(1.5 + Math.random() * 2.5).toFixed(2));
+
+  await query(
+    `INSERT INTO safes (date, status, bonus, code, drum_speeds)
+     VALUES ($1, 'collecting', false, $2, $3)`,
+    [tomorrow, code, drumSpeeds]
+  );
+  console.log(`[SAFE] Создан сейф на ${tomorrow} (сбор следующего дня)`);
+  broadcast('safe_created', { date: tomorrow });
+}
+
+/** Поставить таймер финализации взлома (снимает предыдущий, если был). */
+function scheduleCrackFinalize(safeId: number, delayMs: number) {
+  const prev = finalizeTimers.get(safeId);
+  if (prev) clearTimeout(prev);
+  const timer = setTimeout(() => {
+    finalizeTimers.delete(safeId);
+    finalizeCracking(safeId).catch(e => console.error('[SAFE] Ошибка финализации взлома:', e.message));
+  }, Math.max(0, delayMs));
+  finalizeTimers.set(safeId, timer);
+}
+
+/**
+ * Закрыть окно взлома: подвести итоги и раздать призы.
+ * Идемпотентно — повторный вызов для уже разыгранного сейфа ничего не делает.
+ */
+export async function finalizeCracking(safeId?: number): Promise<number | null> {
+  const id = safeId ?? (await getActiveSafe())?.id;
+  if (!id) return null;
+  const safe = await getSafeById(id);
+  if (!safe || safe.status !== 'cracking') return null;
+
+  const timer = finalizeTimers.get(id);
+  if (timer) { clearTimeout(timer); finalizeTimers.delete(id); }
+
+  await calculateSafeWinners(id);
+  const finished = await getSafeById(id);
+  if (!finished || finished.status !== 'finished') return null;
+
+  broadcast('safe_finished', { safe_id: id });
+  await ensureNextDaySafe();
+  console.log(`[SAFE] Взлом сейфа #${id} завершён, победителей: ${finished.winners_count}`);
+  return id;
+}
+
+/**
+ * Страховка: завершить взлом, если окно истекло, а таймер был утерян
+ * (рестарт процесса, пропущенный тик cron). Вызывается cron каждую минуту.
+ */
+export async function finalizeCrackIfDue(): Promise<number | null> {
+  // У записей, созданных до появления crack_started_at, отметки нет — проставляем её,
+  // иначе такой взлом закрылся бы мгновенно.
+  await query(
+    `UPDATE safes SET crack_started_at = NOW() WHERE status = 'cracking' AND crack_started_at IS NULL`
+  );
+  const windowMs = await getCrackWindowMs();
+  const res = await query(
+    `SELECT id, crack_started_at FROM safes WHERE status = 'cracking' ORDER BY id ASC`
+  );
+  for (const row of res.rows) {
+    const started = row.crack_started_at ? new Date(row.crack_started_at) : null;
+    if (!started || Date.now() - started.getTime() < windowMs) continue;
+    const done = await finalizeCracking(row.id);
+    if (done) return done;
+  }
+  return null;
+}
+
+/**
+ * Восстановление после рестарта: у сейфов в статусе 'cracking' восстанавливаем
+ * отметку старта (если её нет) и заново ставим таймер финализации.
+ */
+export async function resumeCracking(): Promise<void> {
+  await query(
+    `UPDATE safes SET crack_started_at = NOW() WHERE status = 'cracking' AND crack_started_at IS NULL`
+  );
+  const windowMs = await getCrackWindowMs();
+  const res = await query(`SELECT id FROM safes WHERE status = 'cracking'`);
+  for (const row of res.rows) {
+    const remaining = await getCrackRemainingMs(row.id, windowMs);
+    if (remaining == null || remaining <= 0) {
+      await finalizeCracking(row.id);
+    } else {
+      scheduleCrackFinalize(row.id, remaining);
+      console.log(`[SAFE] Взлом сейфа #${row.id} продолжается, осталось ${Math.round(remaining / 1000)} с`);
+    }
+  }
+}
+
 export async function startCracking() {
   const safe = await getTodaySafe();
   if (!safe) return;
+
+  // Взлом уже идёт — не начинаем заново, только восстанавливаем таймер финализации
+  if (safe.status === 'cracking') {
+    const remaining = await getCrackRemainingMs(safe.id);
+    if (remaining != null && remaining > 0) scheduleCrackFinalize(safe.id, remaining);
+    return { cancelled: false, started: false, safe };
+  }
+  if (safe.status !== 'collecting') return { cancelled: false, started: false };
+
   const minBank = parseFloat(await getSetting('safe_min_bank') || '25');
   const minPart = parseInt(await getSetting('safe_min_participants') || '2');
 
   if (safe.bank < minBank || safe.participants_count < minPart) {
     // Вернуть депозиты
     await cancelSafeReturnDeposits(safe);
-    return { cancelled: true };
+    await ensureNextDaySafe();
+    return { cancelled: true, started: false };
   }
-  
+
   // Перед началом взлома создаём сейф на следующий день, чтобы депозиты не терялись
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-  
-  const nextSafeExists = await query('SELECT id FROM safes WHERE date = $1', [tomorrowStr]);
-  if (!nextSafeExists.rows.length) {
-    const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
-    const drumSpeeds = [0, 1, 2].map(() => +(1.5 + Math.random() * 2.5).toFixed(2));
-    
-    await query(
-      `INSERT INTO safes (date, status, bonus, code, drum_speeds)
-       VALUES ($1, 'collecting', false, $2, $3)`,
-      [tomorrowStr, code, drumSpeeds]
-    );
-    console.log(`[SAFE] Создан сейф на ${tomorrowStr} для предотвращения потери депозитов`);
-  }
-  
-  await query("UPDATE safes SET status = 'cracking' WHERE id = $1", [safe.id]);
-  return { cancelled: false, safe };
+  await ensureNextDaySafe();
+
+  const windowMs = await getCrackWindowMs();
+  const upd = await query(
+    `UPDATE safes SET status = 'cracking', crack_started_at = NOW()
+      WHERE id = $1 AND status = 'collecting'
+      RETURNING *`,
+    [safe.id]
+  );
+  if (!upd.rows.length) return { cancelled: false, started: false };
+
+  // Итоги подводим по окончании окна взлома, а не сразу: у игроков должно быть
+  // время пройти мини-игру и отправить результат.
+  scheduleCrackFinalize(safe.id, windowMs);
+  console.log(`[SAFE] Взлом сейфа #${safe.id} стартовал, окно ${Math.round(windowMs / 1000)} с`);
+
+  return { cancelled: false, started: true, safe: (await getSafeById(safe.id)), window_ms: windowMs };
 }
 
 async function cancelSafeReturnDeposits(safe: any) {
