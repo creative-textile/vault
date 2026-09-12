@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useNotifications } from '../../stores/notifications';
+import { useAuth } from '../../stores/auth';
 import { useHasRocketFlight } from '../../utils/rocketFlight';
 import { onNotificationEvent } from '../../utils/socketEvents';
+import { releaseBalance } from '../../utils/balanceHold';
 
 /**
  * Очередь результатов дуэлей — модальное окно.
@@ -31,6 +33,7 @@ import { onNotificationEvent } from '../../utils/socketEvents';
  */
 export default function DuelResultModal() {
   const { notifications, fetchNotifications, markDuelAsRead } = useNotifications();
+  const { refreshUser } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const rocketFlying = useHasRocketFlight();
@@ -122,6 +125,10 @@ export default function DuelResultModal() {
   const close = () => {
     dismissed.current.add(duelId);
     markDuelAsRead(duelId);
+    // Игрок отказался смотреть бросок — анимации не будет, значит баланс больше
+    // нечего прятать: отпускаем удержание и показываем настоящие цифры
+    releaseBalance();
+    refreshUser();
   };
 
   return (

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { releaseBalance } from '../../utils/balanceHold';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
@@ -114,6 +115,9 @@ export default function DuelGame() {
           setTimeout(async () => {
             if (!mounted) return;
             setPhase('result');
+            // Исход показан — баланс можно обновить (до этого момента цифры
+            // держались старыми, чтобы не выдать результат до броска монеты)
+            releaseBalance();
             await refreshUser().catch(() => {});
             if (iWon && prz - amt >= 1) {
               const autoPct = userRef.current?.auto_safe_percent || 0;
@@ -135,15 +139,22 @@ export default function DuelGame() {
           }, 2800);
         } else {
           // Если уже просмотрено, просто обновляем баланс
+          releaseBalance();
           await refreshUser().catch(() => {});
         }
       } catch (e: any) {
+        // Анимации не будет — цифры не держим
+        releaseBalance();
         if (!mounted) return;
         setLoadErr(e?.message || 'Ошибка загрузки дуэли');
         setTimeout(() => nav('/duel', { replace: true }), 1500);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+      // Ушли с экрана, не досмотрев: баланс не должен остаться замороженным
+      releaseBalance();
+    };
   }, [id, loc.state, nav, refreshUser, markDuelAsRead]);
 
   const rematch = async (mult = 1) => {

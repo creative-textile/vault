@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { holdBalance, releaseBalance } from '../../utils/balanceHold';
 import { useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
@@ -64,11 +65,17 @@ export default function Duel() {
   };
 
   const accept = async (id: number) => {
+    // Сервер списывает ставку и резервирует приз в момент принятия вызова —
+    // до броска монеты. Без удержания баланс в лобби и в шапке успевал
+    // измениться на глазах: цифра выдавала исход раньше анимации.
+    holdBalance();
     try {
       const result = await duelApi.accept(id);
       await refreshUser();
       nav(`/duel/${id}`, { state: { result: { ...result, id } }, replace: true });
     } catch (e: any) {
+      releaseBalance();
+      await refreshUser();
       showToast(e.message);
     }
   };
