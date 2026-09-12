@@ -37,7 +37,7 @@ export default function DuelGame() {
         if (!mounted) return () => {};
         if (!duelId) {
           setLoadErr('Дуэль не найдена');
-          setTimeout(() => nav('/duel'), 1500);
+          setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
         
@@ -53,7 +53,7 @@ export default function DuelGame() {
         if (!mounted) return;
         if (!res || !res.id) {
           setLoadErr('Дуэль не найдена');
-          setTimeout(() => nav('/duel'), 1500);
+          setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
         
@@ -112,7 +112,7 @@ export default function DuelGame() {
       } catch (e: any) {
         if (!mounted) return;
         setLoadErr(e?.message || 'Ошибка загрузки дуэли');
-        setTimeout(() => nav('/duel'), 1500);
+        setTimeout(() => nav('/duel', { replace: true }), 1500);
       }
     })();
     return () => { mounted = false; };

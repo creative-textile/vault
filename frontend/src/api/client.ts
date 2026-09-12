@@ -109,7 +109,6 @@ export const adminApi = {
   withdrawPlatform: (amount: number, note?: string) =>
     api('/api/admin/withdraw-platform', { method: 'POST', body: JSON.stringify({ amount, note }) }),
   seedPlatform: (amount: number) => api('/api/admin/seed-platform', { method: 'POST', body: JSON.stringify({ amount }) }),
-  startCracking: () => api('/api/admin/start-cracking', { method: 'POST' }),
   finalizeCracking: () => api('/api/admin/finalize-cracking', { method: 'POST' }),
   getSettings: () => api('/api/admin/settings'),
   setSettings: (s: any) => api('/api/admin/settings', { method: 'POST', body: JSON.stringify(s) }),

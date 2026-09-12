@@ -49,18 +49,27 @@ async function maybeStartCrack(lastCrackDate: string): Promise<string> {
   return lastCrackDate;
 }
 
+/** Запущенные задачи — нужны для корректного завершения процесса. */
+const tasks: cron.ScheduledTask[] = [];
+
+/** Остановить все планировщики (вызывается при SIGTERM/SIGINT). */
+export function stopCrons(): void {
+  for (const t of tasks) { try { t.stop(); } catch { /* уже остановлена */ } }
+  tasks.length = 0;
+}
+
 export function initCrons() {
   // 09:00 MSK — создать дневной Сейф
-  cron.schedule('0 6 * * *', async () => {
+  tasks.push(cron.schedule('0 6 * * *', async () => {
     // контейнер может быть в UTC (06:00 UTC = 09:00 MSK)
     console.log('[CRON] Создание дневного сейфа');
     await createDailySafe();
     broadcast('safe_created', {});
-  }, { timezone: 'UTC' });
+  }, { timezone: 'UTC' }));
 
   // Каждую минуту: страховка по завершению взлома + проверка времени старта (МСК)
   let lastCrackDate = '';
-  cron.schedule('* * * * *', async () => {
+  tasks.push(cron.schedule('* * * * *', async () => {
     try {
       const finalized = await finalizeCrackIfDue();
       if (finalized) console.log(`[CRON] Окно взлома сейфа #${finalized} истекло — итоги подведены`);
@@ -68,15 +77,15 @@ export function initCrons() {
     } catch (e: any) {
       console.error('[CRON safe] error:', e.message);
     }
-  });
+  }));
 
   // 21:00 UTC == 00:00 MSK — распределение Вклада
-  cron.schedule('0 21 * * *', async () => {
+  tasks.push(cron.schedule('0 21 * * *', async () => {
     console.log('[CRON] Дневное распределение Вклада (полночь МСК)');
     const res = await dailyVaultDistribution();
     broadcast('vault_distributed', res);
     await createDailySafe();
-  }, { timezone: 'UTC' });
+  }, { timezone: 'UTC' }));
 
   // Убедимся, что на сегодня есть сейф (для демо и первого запуска),
   // и восстановим таймеры взлома, потерянные при рестарте процесса

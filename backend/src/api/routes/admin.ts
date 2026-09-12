@@ -451,7 +451,9 @@ router.post('/settings', async (req, res) => {
   }
 });
 
-// POST /api/admin/start-cracking - ручной запуск взлома сейфа
+// POST /api/admin/start-cracking - ручной запуск взлома сейфа.
+// Из админ-панели кнопка убрана (взлом стартует по настроенному времени МСК),
+// эндпоинт оставлен для отладки/ops через curl и для смоук-тестов.
 router.post('/start-cracking', async (req, res) => {
   try {
     const safe = await getTodaySafe();

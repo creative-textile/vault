@@ -163,18 +163,12 @@ export default function AdminPanel() {
           <div className="card">
             <h3 style={{color:'#ffd700', margin:'0 0 8px'}}>🔒 УПРАВЛЕНИЕ ВЗЛОМОМ СЕЙФА</h3>
             <div className="text-dim" style={{fontSize:12, marginBottom:10}}>
-              Взлом стартует сам в настроенное время МСК (вкладка «Настройки») и длится
-              «Окно взлома сейфа (минуты)» + 10 секунд запаса. Итоги подводятся автоматически
-              по окончании окна. Кнопки ниже — для ручной проверки сценария.
+              Взлом стартует сам в настроенное время МСК (вкладка «Настройки» — «Час/Минута взлома сейфа»).
+              Окно длится ровно «Дедлайн взлома сейфа (минуты)». Итоги подводятся автоматически:
+              сразу, как только все участники сдали результат, иначе — по закрытию окна
+              (не сдавшим достаётся «не успел» и приз 0).
             </div>
             <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-              <button className="btn btn-small" onClick={async () => {
-                try {
-                  const r = await adminApi.startCracking();
-                  showToast(r.message || 'Взлом запущен');
-                  if (r.window_ms) showToast(`Окно взлома: ${Math.round(r.window_ms / 1000)} с`);
-                } catch (e: any) { showToast(e.message); }
-              }}>🔓 ЗАПУСТИТЬ ВЗЛОМ</button>
               <button className="btn btn-small btn-secondary" onClick={async () => {
                 try {
                   const r = await adminApi.finalizeCracking();
@@ -182,6 +176,9 @@ export default function AdminPanel() {
                   loadStats();
                 } catch (e: any) { showToast(e.message); }
               }}>🏁 ПОДВЕСТИ ИТОГИ</button>
+            </div>
+            <div className="text-dim" style={{fontSize:11, marginTop:8}}>
+              «Подвести итоги» — принудительно закрыть окно взлома (например, если кто-то из участников завис).
             </div>
           </div>
 

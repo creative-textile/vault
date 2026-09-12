@@ -82,7 +82,9 @@ export default function Safe() {
   const submittedMs = myDeposit?.crack_time_ms ?? null;
   useEffect(() => {
     if (safe?.status === 'cracking' && myDeposit && submittedMs == null) {
-      nav('/safe/crack');
+      // replace: редирект не должен добавлять запись в историю,
+      // иначе кнопка «назад» будет вечно ходить /safe ↔ /safe/crack
+      nav('/safe/crack', { replace: true });
     }
   }, [safe?.status, myDeposit, submittedMs, nav]);
 

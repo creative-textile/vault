@@ -127,7 +127,7 @@ export default function SafeCrack() {
     if (!finished) return;
     // Если игрок только что сдал результат — даём увидеть «ВЗЛОМ!», потом к итогам
     const delay = submittedNowRef.current ? 2200 : 0;
-    const t = setTimeout(() => nav('/safe'), delay);
+    const t = setTimeout(() => nav('/safe', { replace: true }), delay);
     return () => clearTimeout(t);
   }, [finished, phase, nav]);
 
@@ -267,7 +267,7 @@ export default function SafeCrack() {
             <div className="text-dim" style={{ fontSize: 12, marginTop: 6 }}>
               Итоги появятся сразу, как только все участники сдадут результат
             </div>
-            <button className="btn mt" onClick={() => nav('/safe')}>К РЕЗУЛЬТАТАМ</button>
+            <button className="btn mt" onClick={() => nav('/safe', { replace: true })}>К РЕЗУЛЬТАТАМ</button>
           </div>
           <button className="btn btn-secondary" onClick={() => nav('/')}>🏠 НА ГЛАВНУЮ</button>
         </>

@@ -3,7 +3,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import { config } from './config';
-import { initCrons } from './cron';
+import { initCrons, stopCrons } from './cron';
 import { initNotifications } from './services/notifications';
 import { initNotificationsTable } from './services/user-notifications';
 import { startDepositListener } from './services/ton';
@@ -141,4 +141,45 @@ server.listen(config.port, async () => {
 
   initCrons();
   await startDepositListener();
+});
+
+// ── Корректное завершение работы ──────────────────────────────────────────
+// docker stop / restart / down шлют SIGTERM. Раньше процесс в этот момент
+// падал с «terminating connection due to unexpected postmaster exit»:
+// Postgres закрывался первым, и необработанная ошибка соединения валила Node.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[VAULT] ${signal}: останавливаюсь...`);
+
+  // Жёсткий выход, если закрытие чего-то зависнет
+  const force = setTimeout(() => process.exit(1), 8000);
+  force.unref();
+
+  try { stopCrons(); } catch { /* планировщики уже остановлены */ }
+
+  await new Promise<void>(resolve => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; resolve(); } };
+    try { io.close(() => fin()); } catch { fin(); }
+    setTimeout(fin, 3000); // страховка, если колбэк не придёт
+  });
+
+  try {
+    const { pool } = await import('./db/pool');
+    await pool.end();
+  } catch (e: any) {
+    console.error('[DB] pool.end:', e.message);
+  }
+
+  console.log('[VAULT] Остановлен корректно');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+// Незакрытое обещание не должно ронять контейнер (например, ошибка сокета в игре)
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[VAULT] unhandledRejection:', reason?.message || reason);
 });
