@@ -31,9 +31,12 @@ export default function SafeCrack() {
   const [spinElapsed, setSpinElapsed] = useState(0);
   const [windowLeft, setWindowLeft] = useState<number | null>(null);
   const [finished, setFinished] = useState(false);
+  // Уже засчитанное время (пришли на экран после сдачи результата) — мини-игру не перезапускаем
+  const [myTime, setMyTime] = useState<number | null>(null);
 
   const startedAtRef = useRef(0);
   const submittedRef = useRef(false);
+  const submittedNowRef = useRef(false);
   const hasDepositRef = useRef(false);
   const windowDeadlineRef = useRef<number | null>(null);
   const spinRef = useRef<number | null>(null);
@@ -45,6 +48,14 @@ export default function SafeCrack() {
       setSafe(r.safe);
       setMyDeposit(r.my_deposit);
       hasDepositRef.current = !!r.my_deposit;
+      const recorded = r.my_deposit?.crack_time_ms;
+      if (recorded != null) {
+        // Игрок уже сдал результат (перезаход на экран, возврат с /safe) —
+        // показываем его время и ждём остальных, барабаны не запускаем.
+        submittedRef.current = true;
+        setMyTime(recorded);
+        setPhase('done');
+      }
       if (r.safe?.crack_remaining_ms != null) {
         windowDeadlineRef.current = Date.now() + r.safe.crack_remaining_ms;
       }
@@ -66,6 +77,7 @@ export default function SafeCrack() {
 
   // ── Предстартовая последовательность: 3-2-1 → код (3 с) → вращение ─────
   useEffect(() => {
+    if (myTime != null) return; // результат уже засчитан — отсчёт не запускаем
     let cancelled = false;
     const timers = [
       window.setTimeout(() => !cancelled && setCountdown(2), 1000),
@@ -82,7 +94,7 @@ export default function SafeCrack() {
       }, 6000)
     ];
     return () => { cancelled = true; timers.forEach(clearTimeout); };
-  }, []);
+  }, [myTime]);
 
   // ── Обратный отсчёт окна взлома (серверное время, тикает локально) ─────
   useEffect(() => {
@@ -113,8 +125,8 @@ export default function SafeCrack() {
   // ── Переход к результатам, когда окно взлома закрылось ─────────────────
   useEffect(() => {
     if (!finished) return;
-    // Если игрок уже сдал результат — даём увидеть «ВЗЛОМ!», потом к итогам
-    const delay = submittedRef.current || phase === 'done' ? 2200 : 0;
+    // Если игрок только что сдал результат — даём увидеть «ВЗЛОМ!», потом к итогам
+    const delay = submittedNowRef.current ? 2200 : 0;
     const t = setTimeout(() => nav('/safe'), delay);
     return () => clearTimeout(t);
   }, [finished, phase, nav]);
@@ -141,12 +153,17 @@ export default function SafeCrack() {
       return;
     }
 
+    submittedNowRef.current = true;
     safeApi.crack(totalTime)
       .then((r: any) => {
         // Сервер пишет max(время клиента, время от старта фазы взлома)
         const shown = Number.isFinite(r?.crack_time_ms) ? r.crack_time_ms : totalTime;
+        setMyTime(shown);
         showToast(`✅ Взлом за ${(shown / 1000).toFixed(2)}с (промахи: ${misses})`);
         refreshUser();
+        // Все участники сдали результат — сервер подвёл итоги досрочно
+        if (r?.finished) setFinished(true);
+        else load();
       })
       .catch((e: any) => showToast(e.message));
   };
@@ -178,7 +195,7 @@ export default function SafeCrack() {
         </div>
       )}
 
-      {countdown > 0 && (
+      {phase === 'countdown' && countdown > 0 && (
         <div className="text-center mt">
           <div style={{ fontSize: 96, fontWeight: 900, color: '#ff4444' }}>{countdown}</div>
           <div className="text-dim">Приготовьтесь...</div>
@@ -233,10 +250,22 @@ export default function SafeCrack() {
         <>
           <div className="card mt text-center">
             <div className="result-text win">✅ ВЗЛОМ!</div>
+            {myTime != null && (
+              <div className="text-accent" style={{ fontWeight: 900, fontSize: 20 }}>
+                Ваше время: {(myTime / 1000).toFixed(2)} с
+              </div>
+            )}
             <div className="text-dim">
-              {showWindow
-                ? `Ждём окончания окна взлома: ${fmtWindow(windowLeft as number)}`
-                : 'Подводим итоги...'}
+              {finished
+                ? 'Подводим итоги...'
+                : showWindow && (safe.pending_cracks ?? 0) > 0
+                  ? `Ждём остальных игроков (${safe.pending_cracks} из ${safe.participants_count}) — окно закроется через ${fmtWindow(windowLeft as number)}`
+                  : showWindow
+                    ? `Окно взлома закроется через ${fmtWindow(windowLeft as number)}`
+                    : 'Подводим итоги...'}
+            </div>
+            <div className="text-dim" style={{ fontSize: 12, marginTop: 6 }}>
+              Итоги появятся сразу, как только все участники сдадут результат
             </div>
             <button className="btn mt" onClick={() => nav('/safe')}>К РЕЗУЛЬТАТАМ</button>
           </div>

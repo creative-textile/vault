@@ -433,7 +433,7 @@ router.get('/settings', async (_req, res) => {
     vault_max_deposit: 'Начальный макс. вклад ВАУЛЬТ ($)',
     safe_crack_hour: 'Час взлома сейфа МСК (0-23)',
     safe_crack_minute: 'Минута взлома сейфа (0-59)',
-    safe_crack_timeout_minutes: 'Окно взлома сейфа (минуты)'
+    safe_crack_timeout_minutes: 'Дедлайн взлома сейфа (минуты)'
   };
   for (const k of keys) out[k] = (await getSetting(k)) || defaults[k] || '';
   res.json({ values: out, labels });
@@ -469,8 +469,8 @@ router.post('/start-cracking', async (req, res) => {
 
     broadcast('safe_crack_started', { safe: resCrack.safe, window_ms: resCrack.window_ms });
 
-    // Итоги подводит сам сервис по истечении окна взлома
-    // (safe_crack_timeout_minutes + запас) — игрокам нужно время на мини-игру.
+    // Итоги подводит сам сервис: досрочно — как только результат сдали все
+    // участники, иначе по истечении дедлайна safe_crack_timeout_minutes.
     res.json({ ok: true, message: 'Взлом запущен', window_ms: resCrack.window_ms });
   } catch (e: any) {
     res.status(400).json({ error: e.message });

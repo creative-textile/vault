@@ -6,14 +6,20 @@ import { payReferral } from './referral';
 import { todayMSK, tomorrowMSK } from '../utils/time';
 
 /**
- * Запас времени после окончания окна взлома: даёт игрокам дослать результат
- * (сеть/лаг) и гарантирует, что финализация по расписанию не отрежет валидные
- * вводы. Входит в длину окна взлома, которое видит клиент.
+ * Технологический допуск ПОСЛЕ окна взлома: результат, отправленный игроком до
+ * закрытия окна, но доехавший до сервера с задержкой, всё ещё засчитывается.
+ * На клиенте не показывается — игрок видит ровно safe_crack_timeout_minutes.
  */
-const CRACK_GRACE_MS = 10_000;
+const CRACK_GRACE_MS = 5_000;
 
 /** Таймеры финализации взлома по сейфам (пересоздаются после рестарта). */
 const finalizeTimers = new Map<number, NodeJS.Timeout>();
+
+/**
+ * Сейфы, итоги которых подводятся прямо сейчас. Защита от гонки: два игрока
+ * могут сдать результат практически одновременно и оба увидеть «все сдали».
+ */
+const finalizingSafes = new Set<number>();
 
 /** Сколько минут длится фаза взлома (настройка safe_crack_timeout_minutes). */
 async function getCrackTimeoutMs(): Promise<number> {
@@ -23,11 +29,16 @@ async function getCrackTimeoutMs(): Promise<number> {
 }
 
 /**
- * Полная длина окна взлома в мс (таймаут + запас). Именно столько длится
- * статус 'cracking' — по истечении окно закрывается и подводятся итоги.
+ * Длина окна взлома в мс — ровно safe_crack_timeout_minutes.
+ * Столько времени даётся всем игрокам и столько видит клиент на обратном отсчёте.
  */
 export async function getCrackWindowMs(): Promise<number> {
-  return (await getCrackTimeoutMs()) + CRACK_GRACE_MS;
+  return await getCrackTimeoutMs();
+}
+
+/** Когда окно реально закрывается (окно + допуск на доставку результата). */
+async function getCrackDeadlineMs(): Promise<number> {
+  return (await getCrackWindowMs()) + CRACK_GRACE_MS;
 }
 
 /** Привести строки из БД к числам (DECIMAL приходит строкой). */
@@ -190,21 +201,6 @@ export async function submitCrackTime(userId: number, timeMs: number) {
   if (!safe) throw new Error('Сейф не найден');
   if (safe.status !== 'cracking') throw new Error('Не фаза взлома');
 
-  const windowMs = await getCrackWindowMs();
-
-  // Сколько времени реально прошло с начала взлома (по серверным часам).
-  // Защита от подкрутки клиентского времени и от ввода после закрытия окна.
-  const startedAt = await getCrackStartedAt(safe.id);
-  const elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt.getTime()) : 0;
-  if (elapsedMs > windowMs) throw new Error('Окно взлома закрыто');
-
-  const timeoutMinutes = Math.round((await getCrackTimeoutMs()) / 60000);
-  // Клиент считает время от старта барабанов, сервер — от старта фазы взлома,
-  // поэтому берём большее из двух значений (честный порядок "кто раньше").
-  const recordedMs = Math.max(clientMs, elapsedMs);
-  if (recordedMs < 500) throw new Error('Слишком быстро');
-  if (recordedMs > windowMs) throw new Error(`Таймаут: ${timeoutMinutes} мин`);
-
   // Проверка: пользователь имеет вклад?
   const depRes = await query(
     'SELECT * FROM safe_deposits WHERE safe_id = $1 AND user_id = $2',
@@ -212,11 +208,55 @@ export async function submitCrackTime(userId: number, timeMs: number) {
   );
   if (!depRes.rows.length) throw new Error('Нет вклада');
 
+  // Результат уже засчитан — повторная отправка его не перезаписывает
+  // (иначе повторный заход на экран взлома ухудшил бы честное время).
+  if (depRes.rows[0].crack_time_ms != null) {
+    const recorded = depRes.rows[0].crack_time_ms;
+    return { recorded: true, already_recorded: true, crack_time_ms: recorded, finished: false };
+  }
+
+  const deadlineMs = await getCrackDeadlineMs();
+
+  // Сколько времени реально прошло с начала взлома (по серверным часам).
+  // Защита от подкрутки клиентского времени и от ввода после закрытия окна.
+  const startedAt = await getCrackStartedAt(safe.id);
+  const elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt.getTime()) : 0;
+  if (elapsedMs > deadlineMs) throw new Error('Окно взлома закрыто');
+
+  const timeoutMinutes = Math.round((await getCrackTimeoutMs()) / 60000);
+  // Клиент считает время от старта барабанов, сервер — от старта фазы взлома,
+  // поэтому берём большее из двух значений (честный порядок "кто раньше").
+  const recordedMs = Math.max(clientMs, elapsedMs);
+  if (recordedMs < 500) throw new Error('Слишком быстро');
+  if (recordedMs > deadlineMs) throw new Error(`Таймаут: ${timeoutMinutes} мин`);
+
   await query(
     'UPDATE safe_deposits SET crack_time_ms = $1 WHERE id = $2',
     [recordedMs, depRes.rows[0].id]
   );
-  return { recorded: true, crack_time_ms: recordedMs };
+
+  // Окно взлома — это крайний срок для тех, кто ушёл от компьютера.
+  // Как только ВСЕ участники сдали результат, подводим итоги сразу,
+  // не заставляя игроков ждать оставшиеся минуты.
+  const waiting = await getPendingCracksCount(safe.id);
+  const finished = waiting === 0 ? !!(await finalizeCracking(safe.id)) : false;
+  if (finished) console.log(`[SAFE] Все участники сдали результат — итоги подведены досрочно`);
+
+  return { recorded: true, crack_time_ms: recordedMs, waiting, finished };
+}
+
+/** Остаток до фактического закрытия окна (окно + допуск) — для таймеров финализации. */
+async function getDeadlineRemainingMs(safeId: number): Promise<number | null> {
+  return getCrackRemainingMs(safeId, await getCrackDeadlineMs());
+}
+
+/** Сколько участников взлома ещё не сдали результат (для «ждём остальных»). */
+export async function getPendingCracksCount(safeId: number): Promise<number> {
+  const res = await query(
+    `SELECT COUNT(*)::int AS n FROM safe_deposits WHERE safe_id = $1 AND crack_time_ms IS NULL`,
+    [safeId]
+  );
+  return res.rows.length ? res.rows[0].n : 0;
 }
 
 /** Момент старта фазы взлома (TIMESTAMPTZ → Date) или null, если отметки нет. */
@@ -227,7 +267,11 @@ async function getCrackStartedAt(safeId: number): Promise<Date | null> {
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** Сколько миллисекунд осталось до закрытия окна взлома (null, если отметки старта нет). */
+/**
+ * Сколько миллисекунд осталось до конца окна взлома (null, если отметки старта нет).
+ * Это значение уходит клиенту: оно равно ровно safe_crack_timeout_minutes в момент старта.
+ * Для таймеров финализации используйте getDeadlineRemainingMs() (окно + допуск).
+ */
 export async function getCrackRemainingMs(safeId: number, windowMs?: number): Promise<number | null> {
   const started = await getCrackStartedAt(safeId);
   if (!started) return null;
@@ -239,6 +283,17 @@ export async function calculateSafeWinners(safeId: number) {
   const safe = await getSafeById(safeId);
   if (!safe) return;
   if (safe.status !== 'cracking') return;
+
+  // Атомарно «застолбить» розыгрыш: cracked_at проставляется один раз,
+  // поэтому призыв из двух мест (таймер + досрочный по сдаче результата)
+  // не выплатит призы дважды.
+  const claim = await query(
+    `UPDATE safes SET cracked_at = NOW()
+      WHERE id = $1 AND status = 'cracking' AND cracked_at IS NULL
+      RETURNING id`,
+    [safeId]
+  );
+  if (!claim.rows.length) return;
 
   const depRes = await query(
     `SELECT d.*, u.username
@@ -283,7 +338,7 @@ export async function calculateSafeWinners(safeId: number) {
   }
 
   await query(
-    `UPDATE safes SET winners_count = $1, status = 'finished', cracked_at = NOW() WHERE id = $2`,
+    `UPDATE safes SET winners_count = $1, status = 'finished' WHERE id = $2`,
     [winners, safeId]
   );
 }
@@ -354,20 +409,28 @@ function scheduleCrackFinalize(safeId: number, delayMs: number) {
 export async function finalizeCracking(safeId?: number): Promise<number | null> {
   const id = safeId ?? (await getActiveSafe())?.id;
   if (!id) return null;
-  const safe = await getSafeById(id);
-  if (!safe || safe.status !== 'cracking') return null;
+  // Занимаем сейф синхронно (без await между проверкой и отметкой),
+  // иначе параллельный вызов успел бы пройти проверку тоже.
+  if (finalizingSafes.has(id)) return null;
+  finalizingSafes.add(id);
+  try {
+    const safe = await getSafeById(id);
+    if (!safe || safe.status !== 'cracking') return null;
 
-  const timer = finalizeTimers.get(id);
-  if (timer) { clearTimeout(timer); finalizeTimers.delete(id); }
+    const timer = finalizeTimers.get(id);
+    if (timer) { clearTimeout(timer); finalizeTimers.delete(id); }
 
-  await calculateSafeWinners(id);
-  const finished = await getSafeById(id);
-  if (!finished || finished.status !== 'finished') return null;
+    await calculateSafeWinners(id);
+    const finished = await getSafeById(id);
+    if (!finished || finished.status !== 'finished') return null;
 
-  broadcast('safe_finished', { safe_id: id });
-  await ensureNextDaySafe();
-  console.log(`[SAFE] Взлом сейфа #${id} завершён, победителей: ${finished.winners_count}`);
-  return id;
+    broadcast('safe_finished', { safe_id: id });
+    await ensureNextDaySafe();
+    console.log(`[SAFE] Взлом сейфа #${id} завершён, победителей: ${finished.winners_count}`);
+    return id;
+  } finally {
+    finalizingSafes.delete(id);
+  }
 }
 
 /**
@@ -380,13 +443,13 @@ export async function finalizeCrackIfDue(): Promise<number | null> {
   await query(
     `UPDATE safes SET crack_started_at = NOW() WHERE status = 'cracking' AND crack_started_at IS NULL`
   );
-  const windowMs = await getCrackWindowMs();
+  const deadlineMs = await getCrackDeadlineMs();
   const res = await query(
     `SELECT id, crack_started_at FROM safes WHERE status = 'cracking' ORDER BY id ASC`
   );
   for (const row of res.rows) {
     const started = row.crack_started_at ? new Date(row.crack_started_at) : null;
-    if (!started || Date.now() - started.getTime() < windowMs) continue;
+    if (!started || Date.now() - started.getTime() < deadlineMs) continue;
     const done = await finalizeCracking(row.id);
     if (done) return done;
   }
@@ -401,10 +464,9 @@ export async function resumeCracking(): Promise<void> {
   await query(
     `UPDATE safes SET crack_started_at = NOW() WHERE status = 'cracking' AND crack_started_at IS NULL`
   );
-  const windowMs = await getCrackWindowMs();
   const res = await query(`SELECT id FROM safes WHERE status = 'cracking'`);
   for (const row of res.rows) {
-    const remaining = await getCrackRemainingMs(row.id, windowMs);
+    const remaining = await getDeadlineRemainingMs(row.id);
     if (remaining == null || remaining <= 0) {
       await finalizeCracking(row.id);
     } else {
@@ -420,7 +482,7 @@ export async function startCracking() {
 
   // Взлом уже идёт — не начинаем заново, только восстанавливаем таймер финализации
   if (safe.status === 'cracking') {
-    const remaining = await getCrackRemainingMs(safe.id);
+    const remaining = await getDeadlineRemainingMs(safe.id);
     if (remaining != null && remaining > 0) scheduleCrackFinalize(safe.id, remaining);
     return { cancelled: false, started: false, safe };
   }
@@ -440,6 +502,7 @@ export async function startCracking() {
   await ensureNextDaySafe();
 
   const windowMs = await getCrackWindowMs();
+  const deadlineMs = await getCrackDeadlineMs();
   const upd = await query(
     `UPDATE safes SET status = 'cracking', crack_started_at = NOW()
       WHERE id = $1 AND status = 'collecting'
@@ -450,7 +513,7 @@ export async function startCracking() {
 
   // Итоги подводим по окончании окна взлома, а не сразу: у игроков должно быть
   // время пройти мини-игру и отправить результат.
-  scheduleCrackFinalize(safe.id, windowMs);
+  scheduleCrackFinalize(safe.id, deadlineMs);
   console.log(`[SAFE] Взлом сейфа #${safe.id} стартовал, окно ${Math.round(windowMs / 1000)} с`);
 
   return { cancelled: false, started: true, safe: (await getSafeById(safe.id)), window_ms: windowMs };

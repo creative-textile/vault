@@ -46,7 +46,10 @@ export default function Safe() {
       setSafe(r.safe);
       setMyDeposit(r.my_deposit);
       setTimeToCrack(r.safe?.time_to_crack_ms || 0);
-      if (r.safe?.crack_at) {
+      if (r.safe?.status === 'cracking' && r.safe?.crack_remaining_ms != null) {
+        // во время взлома таймер показывает остаток окна взлома
+        crackAtRef.current = Date.now() + r.safe.crack_remaining_ms;
+      } else if (r.safe?.crack_at) {
         crackAtRef.current = new Date(r.safe.crack_at).getTime();
       }
       // Результаты имеют смысл только после розыгрыша (во время взлома призов ещё нет)
@@ -73,11 +76,15 @@ export default function Safe() {
     return () => { clearInterval(iv); clearInterval(iv2); off(); };
   }, [load]);
 
+  // На мини-игру отправляем только участника, который ещё не сдал результат.
+  // Раньше уходили все и всегда: после «К результатам» страница взлома открывалась
+  // заново и перезапускала отсчёт — получался бесконечный взлом.
+  const submittedMs = myDeposit?.crack_time_ms ?? null;
   useEffect(() => {
-    if (safe?.status === 'cracking') {
+    if (safe?.status === 'cracking' && myDeposit && submittedMs == null) {
       nav('/safe/crack');
     }
-  }, [safe?.status, nav]);
+  }, [safe?.status, myDeposit, submittedMs, nav]);
 
   const deposit = async () => {
     const a = parseFloat(amount);
@@ -143,6 +150,39 @@ export default function Safe() {
             <div className="text-green" style={{fontWeight:900}}>{safe.winners_count}</div>
           </div>
         </div>
+
+        {safe.status === 'cracking' && (
+          <div className="card" style={{margin:'12px 0', background:'rgba(255,68,68,0.08)'}}>
+            {myDeposit?.crack_time_ms != null ? (
+              <>
+                <div className="text-green" style={{fontWeight:900, fontSize:16}}>
+                  ✅ Ваш результат засчитан: {(myDeposit.crack_time_ms / 1000).toFixed(2)} с
+                </div>
+                <div className="timer" style={{marginTop:8}}>
+                  {timeToCrack > 0 ? `⏱ Ждём остальных: ${timeToStr(timeToCrack)}` : '⏳ Окно взлома закрыто — подводим итоги...'}
+                </div>
+                <div className="text-dim" style={{fontSize:12, marginTop:6}}>
+                  Не сдали результат: {safe.pending_cracks ?? 0} из {safe.participants_count}.
+                  Итоги появятся сразу, как только все закончат, либо когда окно взлома закроется.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-red" style={{fontWeight:900, fontSize:16}}>🔥 ИДЁТ ВЗЛОМ</div>
+                <div className="timer" style={{marginTop:8}}>
+                  {timeToCrack > 0 ? `⏱ До конца окна: ${timeToStr(timeToCrack)}` : '⏳ Окно взлома закрыто — подводим итоги...'}
+                </div>
+                <div className="text-dim" style={{fontSize:12, marginTop:6}}>
+                  Не сдали результат: {safe.pending_cracks ?? 0} из {safe.participants_count}.
+                  Кто не успеет — «не успел», приз 0.
+                </div>
+                {!myDeposit && (
+                  <button className="btn btn-small mt" onClick={() => nav('/safe/crack')}>👀 СМОТРЕТЬ ВЗЛОМ</button>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {safe.status === 'collecting' && (
           <>

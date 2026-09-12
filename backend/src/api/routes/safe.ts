@@ -3,7 +3,7 @@ import { auth } from '../middleware/auth';
 import {
   getActiveSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
   getSafeResults, getUserSafeDeposit, getSafeById,
-  getCrackWindowMs, getCrackRemainingMs
+  getCrackWindowMs, getCrackRemainingMs, getPendingCracksCount
 } from '../../services/safe';
 import { nextMSK } from '../../utils/time';
 
@@ -29,6 +29,7 @@ router.get('/current', auth, async (req, res) => {
     const isCracking = safe.status === 'cracking';
     const crackWindowMs = isCracking ? await getCrackWindowMs() : null;
     const crackRemainingMs = isCracking ? await getCrackRemainingMs(safe.id, crackWindowMs ?? undefined) : null;
+    const pendingCracks = isCracking ? await getPendingCracksCount(safe.id) : null;
 
     res.json({
       safe: {
@@ -44,7 +45,8 @@ router.get('/current', auth, async (req, res) => {
         crack_at: crackAt.toISOString(),
         time_to_crack_ms: isCracking ? (crackRemainingMs ?? 0) : timeToCrack,
         crack_window_ms: crackWindowMs,
-        crack_remaining_ms: crackRemainingMs
+        crack_remaining_ms: crackRemainingMs,
+        pending_cracks: pendingCracks
       },
       my_deposit: myDeposit
     });
