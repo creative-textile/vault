@@ -4,8 +4,10 @@
 // и отправляет их на localhost:8000 (см. vite.config.ts).
 const API_URL = '';
 
+import { getStoredToken } from '../utils/tokenStorage';
+
 function getToken(): string | null {
-  return localStorage.getItem('vault_token');
+  return getStoredToken();
 }
 
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {

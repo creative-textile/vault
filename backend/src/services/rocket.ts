@@ -100,6 +100,20 @@ export async function processCashout(roundId: number, userId: number, elapsedSec
   const bet = parseFloat(round.bet);
   const grossWin = Math.round(bet * currentMult * 100) / 100;
 
+  // Атомарно занимаем раунд ДО выплаты. Проверка `round.cashout_at` отдельным
+  // SELECT оставляла гонку: два одновременных «ЗАБРАТЬ» (двойной клик, бейдж
+  // полёта и экран ракеты разом) проходили её оба и выплачивали выигрыш
+  // дважды — деньги брались из воздуха. Заодно отметка сразу защищает раунд от
+  // processCrash (`WHERE cashout_at IS NULL`), который иначе списал бы ставку
+  // параллельно с выплатой.
+  const claim = await query(
+    `UPDATE rocket_rounds SET cashout_at = $1
+      WHERE id = $2 AND user_id = $3 AND cashout_at IS NULL
+      RETURNING id`,
+    [currentMult, roundId, userId]
+  );
+  if (claim.rows.length === 0) throw new Error('Уже забрали');
+
   // Забрать из кассы
   await updateRocketBankroll(-grossWin);
   await modifyBalance(userId, grossWin, 'win', {

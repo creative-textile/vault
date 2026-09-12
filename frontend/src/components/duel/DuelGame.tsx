@@ -6,6 +6,7 @@ import { duelApi, safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
 import { useNotifications } from '../../stores/notifications';
+import { tabStore, duelSeenKey } from '../../utils/tabStore';
 
 type DuelPhase = 'flipping' | 'result';
 
@@ -46,8 +47,11 @@ export default function DuelGame() {
         // Флаг «анимацию уже смотрели» ставит ТОЛЬКО этот экран (ниже).
         // Вызывающая сторона его не проставляет: иначе повтор дуэли открывался
         // бы сразу на результате, без броска монеты, — а смысл реплея в броске.
-        const seenKey = `duel_seen_${duelId}`;
-        const alreadySeen = localStorage.getItem(seenKey) === '1';
+        // Флаг свой для вкладки (tabStore → sessionStorage). В localStorage его
+        // видел соседний аккаунт в другой вкладке того же браузера — и повтор
+        // дуэли открывался у него сразу на результате, без броска монеты.
+        const seenKey = duelSeenKey(duelId);
+        const alreadySeen = tabStore.get(seenKey) === '1';
         
         // ВСЕГДА подтягиваем актуальные данные дуэли с сервера, чтобы не было -$0.00
         try {
@@ -99,7 +103,7 @@ export default function DuelGame() {
         }
 
         const seenId = res.id || duelId;
-        localStorage.setItem(seenKey, '1');
+        tabStore.set(seenKey, '1');
 
         // Результат просмотрен — гасим уведомления по этой дуэли,
         // иначе бейдж непрочитанных висит, даже когда игрок всё увидел
@@ -154,11 +158,11 @@ export default function DuelGame() {
   };
 
   const goHome = () => {
-    if (id) localStorage.setItem(`duel_seen_${id}`, '1');
+    if (id) tabStore.set(duelSeenKey(id), '1');
     nav('/');
   };
   const goBack = () => {
-    if (id) localStorage.setItem(`duel_seen_${id}`, '1');
+    if (id) tabStore.set(duelSeenKey(id), '1');
     nav('/duel');
   };
 
@@ -179,11 +183,6 @@ export default function DuelGame() {
       <Header title="⚔️ Дуэль" />
       <DuelScene phase={phase as any} result={result} trajectory={traj} />
 
-      <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
-        <span className="text-dim">Баланс:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
-      </div>
-
       {phase === 'result' && (
         <>
           <div className={`result-text ${won ? 'win' : 'lose'}`}>
@@ -203,6 +202,14 @@ export default function DuelGame() {
               🔒 ${autoDeposited.toFixed(2)} автоматически переведено в Сейф
             </div>
           )}
+
+          {/* Баланс — только вместе с итогом. Деньги сервер двигает в момент
+              принятия вызова, поэтому во время броска монеты цифра уже новая:
+              она появлялась раньше надписи «ВЫ ПОБЕДИЛИ» и путала игрока. */}
+          <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
+            <span className="text-dim">Баланс:</span>
+            <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+          </div>
 
           <div className="btn-row">
             <button className="btn" onClick={() => rematch(1)}>⚔️ РЕВАНШ ${amount}</button>

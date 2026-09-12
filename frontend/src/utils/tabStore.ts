@@ -25,3 +25,6 @@ export const resultSeenKey = (safeId: number) => `vault:safe-result-seen:${safeI
 
 /** В этом раунде игрока уже открывали в мини-игре взлома. */
 export const crackVisitedKey = (safeId: number) => `vault:safe-crack-visited:${safeId}`;
+
+/** Анимацию броска монеты в этой дуэли уже смотрели (повтор открываем на результате). */
+export const duelSeenKey = (duelId: number | string) => `vault:duel-seen:${duelId}`;

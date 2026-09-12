@@ -10,6 +10,9 @@
  *   node tests/smoke.cjs chain     # цепочка сейфов не обрывается
  *   node tests/smoke.cjs crack     # приём результата взлома
  *   node tests/smoke.cjs http      # /api/safe/current, /api/stats/summary, настройки, токены
+ *   node tests/smoke.cjs duel      # деньги вызова, уведомления о результате, очередь реплеев
+ *   node tests/smoke.cjs vault     # вклад: списание без заморозки, возврат, выплата в срок
+ *   node tests/smoke.cjs money     # гонки денежных операций (ракета, сейф): двойная выплата/списание
  *
  * Особенности pg-mem, которые здесь учтены: DECIMAL без точности, DATE приходит
  * строкой (в живой БД — Date в локальной полночи, поэтому даты проверяем
@@ -22,7 +25,7 @@ const BACKEND = path.resolve(__dirname, '..');
 process.env.NODE_PATH = path.join(BACKEND, 'node_modules') + path.delimiter + (process.env.NODE_PATH || '');
 require('module').Module._initPaths();
 
-const MODES = ['dates', 'chain', 'crack', 'http', 'duel'];
+const MODES = ['dates', 'chain', 'crack', 'http', 'duel', 'vault', 'money'];
 const ARG = process.argv[2];
 
 // ── Режим «всё подряд»: каждый режим в отдельном процессе (своя БД) ───────
@@ -96,8 +99,16 @@ const DDL = [
      amount DECIMAL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), UNIQUE(date, source))`,
   `CREATE TABLE platform_cashbox (id SERIAL PRIMARY KEY, amount DECIMAL DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE vault_deposits (id SERIAL PRIMARY KEY, user_id INTEGER, amount DECIMAL NOT NULL, term_days INTEGER NOT NULL,
-     locked_at TIMESTAMP DEFAULT NOW(), status VARCHAR(16) DEFAULT 'active', multiplier DECIMAL DEFAULT 1)`,
-  `CREATE TABLE vault_pool_daily (id SERIAL PRIMARY KEY, date DATE UNIQUE, pool DECIMAL DEFAULT 0, base_rate DECIMAL DEFAULT 0)`,
+     multiplier DECIMAL NOT NULL, days_elapsed INTEGER DEFAULT 0, accumulated_profit DECIMAL DEFAULT 0,
+     status VARCHAR(16) DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW(), unlocked_at TIMESTAMP)`,
+  `CREATE TABLE vault_pool_daily (id SERIAL PRIMARY KEY, date DATE UNIQUE NOT NULL, platform_revenue DECIMAL DEFAULT 0,
+     auto_pool DECIMAL DEFAULT 0, manual_pool DECIMAL DEFAULT 0, total_pool DECIMAL DEFAULT 0,
+     total_locked DECIMAL DEFAULT 0, depositors_count INTEGER DEFAULT 0, base_rate DECIMAL DEFAULT 0,
+     max_deposit DECIMAL DEFAULT 100)`,
+  `CREATE TABLE rocket_rounds (id SERIAL PRIMARY KEY, user_id INTEGER, bet DECIMAL NOT NULL, crash_at DECIMAL NOT NULL,
+     cashout_at DECIMAL, profit DECIMAL DEFAULT 0, flight_curve DECIMAL DEFAULT 0.075,
+     was_beautiful BOOLEAN DEFAULT FALSE, started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
+  `CREATE TABLE rocket_bankroll (id SERIAL PRIMARY KEY, amount DECIMAL DEFAULT 1500, updated_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE duels (id SERIAL PRIMARY KEY, creator_id INTEGER, opponent_id INTEGER, amount DECIMAL,
      status VARCHAR(16) DEFAULT 'waiting', result VARCHAR(8), winner_id INTEGER, coin_trajectory JSONB,
      created_at TIMESTAMP DEFAULT NOW(), finished_at TIMESTAMP)`,
@@ -731,8 +742,190 @@ const finish = () => {
     check('заплатил ровно один претендент, второй деньги сохранил (1028 / 100)',
       (alicePaid && carolRace === 100) || (carolPaid && aliceRace === 1028), [aliceRace, carolRace]);
 
+    // ── Событие в сокет уходит ПОСЛЕ записи в БД ─────────────────────────
+    // Раньше notify() сначала слал socket-событие и только потом писал строку:
+    // клиент на событие перечитывал список, не находил уведомление, и
+    // досоздание плодило дубли (в логе — два [NOTIFY] на одну дуэль).
+    const notifMod = require(path.join(BACKEND, 'src/services/notifications.ts'));
+    const unMod = require(path.join(BACKEND, 'src/services/user-notifications.ts'));
+    const origCreate = unMod.createNotification;
+    const order = [];
+    unMod.createNotification = async (...a) => {
+      const r = await origCreate(...a);
+      order.push('db');
+      return r;
+    };
+    notifMod.initNotifications({ to: () => ({ emit: () => order.push('socket') }) });
+    await duelSvc.notifyDuelFinished(raceId); // у дуэли из гонки уведомлений ещё нет
+    check('сначала запись в БД, потом событие в сокет (на каждого участника)',
+      order.join(' ') === 'db socket db socket', order);
+    const raceNotes = await countFor(2, `AND (data->>'duel_id') = '${raceId}'`);
+    check('у создателя ровно одно уведомление о дуэли из гонки', raceNotes === 1, raceNotes);
+    unMod.createNotification = origCreate;
+    notifMod.initNotifications(null);
+
     Math.random = origRandom;
     server.close();
+    return finish();
+  }
+  if (MODE === 'vault') {
+    console.log('\n[vault] вклад: одно движение денег = одна операция (без двойной блокировки)');
+    await seedSettings();
+    const vaultSvc = require(path.join(BACKEND, 'src/services/vault-deposit.ts'));
+    const { getAvailableBalance } = require(path.join(BACKEND, 'src/services/balance.ts'));
+
+    // Выручка сегодня и вчера: от неё считается пул (15%) и динамический
+    // максимум вклада (пул × 10), поэтому без неё тест упёрся бы в $100.
+    const todayStr = nowMSK().toISOString().slice(0, 10);
+    const y = new Date(nowMSK().getTime() - 86400000); y.setHours(0, 0, 0, 0);
+    const yStr = y.toISOString().slice(0, 10);
+    for (const d of [todayStr, yStr]) {
+      await query(`INSERT INTO daily_revenue (date, source, amount) VALUES ($1, 'duel', 400)`, [d]);
+    }
+
+    const money = async id => (await query(
+      `SELECT balance, frozen_balance FROM users WHERE id = $1`, [id])).rows[0];
+
+    // ── Блокировка вклада ────────────────────────────────────────────────
+    const dep = await vaultSvc.lockVaultDeposit(1, 500, 7);
+    check('вклад открыт', Number.isFinite(dep.deposit_id), dep);
+    const m1 = await money(1);
+    check('вклад СПИСАН, но НЕ заморожен: баланс 500, frozen 0',
+      Number(m1.balance) === 500 && Number(m1.frozen_balance) === 0, m1);
+    check('доступно 500 (раньше было 0 — сумма блокировалась дважды)',
+      (await getAvailableBalance(1)) === 500, await getAvailableBalance(1));
+    let err = null;
+    try { await vaultSvc.lockVaultDeposit(1, 100, 7); } catch (e) { err = e.message; }
+    check('второй активный вклад не открывается', err === 'У вас уже есть активный вклад', err);
+    err = null;
+    try { await vaultSvc.lockVaultDeposit(1, 10_000, 7); } catch (e) { err = e.message; }
+    check('сумма больше динамического максимума отклонена', /Максимум/.test(err || ''), err);
+
+    // ── Досрочный возврат ────────────────────────────────────────────────
+    const un = await vaultSvc.earlyUnlock(1, dep.deposit_id);
+    const m2 = await money(1);
+    check('досрочный возврат: тело вернулось целиком (1000), заморозки нет',
+      Number(un.returned) === 500 && Number(m2.balance) === 1000 && Number(m2.frozen_balance) === 0, [un, m2]);
+
+    // ── Выплата в срок ───────────────────────────────────────────────────
+    const dep30 = await vaultSvc.lockVaultDeposit(1, 200, 30);
+    await query(`UPDATE vault_deposits SET days_elapsed = 29 WHERE id = $1`, [dep30.deposit_id]);
+    const dist = await vaultSvc.dailyVaultDistribution();
+    const m3 = await money(1);
+    // пул вчера = 400 × 15% = 60, вклад один → вся прибыль ему: 200 + 60 = 260
+    check('выплата в срок: 800 + (200 тело + 60 прибыль) = 1060, заморозки нет',
+      Number(m3.balance) === 1060 && Number(m3.frozen_balance) === 0, m3);
+    const row = (await query(
+      `SELECT status, accumulated_profit FROM vault_deposits WHERE id = $1`, [dep30.deposit_id])).rows[0];
+    check('вклад закрыт с прибылью 60', row.status === 'completed' && Number(row.accumulated_profit) === 60, row);
+    const pool = (await query(`SELECT total_pool, total_locked FROM vault_pool_daily WHERE date = $1`, [yStr])).rows[0];
+    check('пул дня записан: 60 распределено, 200 заблокировано',
+      Number(pool.total_pool) === 60 && Number(pool.total_locked) === 200, pool);
+    check('отчёт о распределении', dist.distributed === 60 && dist.completed === 1, dist);
+
+    // ── Починка вкладов, открытых прежним кодом ──────────────────────────
+    await query(`INSERT INTO vault_deposits (user_id, amount, term_days, multiplier, status)
+                 VALUES (2, 100, 7, 1.3, 'active') RETURNING id`);
+    await query(`UPDATE users SET frozen_balance = frozen_balance + 100, balance = balance - 100 WHERE id = 2`);
+    const before = await money(2);
+    check('старый вклад блокировал сумму дважды: доступно 800 вместо 900',
+      Number(before.balance) === 900 && Number(before.frozen_balance) === 100
+      && (await getAvailableBalance(2)) === 800, [before, await getAvailableBalance(2)]);
+    const fixed = await vaultSvc.repairVaultFreeze();
+    const after = await money(2);
+    check('починка сняла лишнюю заморозку: 900 на балансе, frozen 0',
+      fixed === 1 && Number(after.balance) === 900 && Number(after.frozen_balance) === 0, [fixed, after]);
+    const fixedAgain = await vaultSvc.repairVaultFreeze();
+    check('повторный запуск не размораживает второй раз', fixedAgain === 0 &&
+      Number((await money(2)).frozen_balance) === 0, fixedAgain);
+    const oldDep = (await query(`SELECT id FROM vault_deposits WHERE user_id = 2`)).rows[0];
+    await vaultSvc.earlyUnlock(2, oldDep.id);
+    const m4 = await money(2);
+    check('старый вклад после починки возвращается целиком: 1000, заморозки нет',
+      Number(m4.balance) === 1000 && Number(m4.frozen_balance) === 0, m4);
+
+    const frozenTotal = (await query(`SELECT COALESCE(SUM(frozen_balance),0) AS s FROM users`)).rows[0];
+    check('ни у кого не осталось заморозки от вкладов', Number(frozenTotal.s) === 0, frozenTotal.s);
+
+    return finish();
+  }
+  if (MODE === 'money') {
+    console.log('\n[money] гонки денежных операций: ракета, вклад в сейф, возврат, отмена раунда');
+    await seedSettings();
+    const rocketSvc = require(path.join(BACKEND, 'src/services/rocket.ts'));
+    const close = (a, b) => Math.abs(a - b) < 0.005;
+    const bal = async id => Number((await query(`SELECT balance FROM users WHERE id = $1`, [id])).rows[0].balance);
+
+    await query(`INSERT INTO rocket_bankroll (id, amount) VALUES (1, 1500)`);
+
+    // ── Ракета: два одновременных «ЗАБРАТЬ» ──────────────────────────────
+    const round = await rocketSvc.placeBet(1, 100);
+    check('ставка в ракету списана один раз (900 из 1000)', close(await bal(1), 900), await bal(1));
+    // Точку взрыва фиксируем, иначе случайный crash_at мог бы оказаться раньше
+    // нашего кэшаута и проверка ушла бы в ветку «too_late»
+    await query(`UPDATE rocket_rounds SET crash_at = 50 WHERE id = $1`, [round.round_id]);
+    const beforeWin = await bal(1);
+    const cashouts = await Promise.all([
+      rocketSvc.processCashout(round.round_id, 1, 4).then(r => ({ ok: true, r })).catch(e => ({ ok: false, msg: e.message })),
+      rocketSvc.processCashout(round.round_id, 1, 4).then(r => ({ ok: true, r })).catch(e => ({ ok: false, msg: e.message }))
+    ]);
+    check('два одновременных «ЗАБРАТЬ»: заплатил только один запрос',
+      cashouts.filter(x => x.ok).length === 1
+      && cashouts.some(x => !x.ok && /Уже забрали/.test(x.msg || '')),
+      cashouts.map(x => (x.ok ? x.r.result : x.msg)));
+    const won = cashouts.find(x => x.ok).r;
+    check('баланс вырос ровно на один выигрыш', close(await bal(1), beforeWin + won.gross_win),
+      [await bal(1), beforeWin, won.gross_win]);
+    const winTx = (await query(
+      `SELECT COUNT(*)::int AS c FROM transactions
+        WHERE user_id = 1 AND type = 'win' AND game_type = 'rocket' AND game_id = ${round.round_id}`)).rows[0];
+    check('транзакция выигрыша одна', Number(winTx.c) === 1, winTx.c);
+    const roundRow = (await query(`SELECT cashout_at, profit FROM rocket_rounds WHERE id = ${round.round_id}`)).rows[0];
+    check('раунд отмечен как забранный с прибылью', roundRow.cashout_at != null
+      && close(Number(roundRow.profit), won.gross_win - 100), roundRow);
+
+    // ── Сейф: два одновременных вклада ──────────────────────────────────
+    const safe = await safeSvc.getCollectingSafe();
+    const beforeDep = await bal(2);
+    const deps = await Promise.all([
+      safeSvc.safeDeposit(2, 50).then(() => 'ok').catch(e => e.message),
+      safeSvc.safeDeposit(2, 50).then(() => 'ok').catch(e => e.message)
+    ]);
+    check('два одновременных вклада приняты оба (деньги не зависли)',
+      deps.every(x => x === 'ok'), deps);
+    const depRow = (await query(
+      `SELECT COUNT(*)::int AS c, COALESCE(SUM(amount),0) AS s
+         FROM safe_deposits WHERE safe_id = ${safe.id} AND user_id = 2`)).rows[0];
+    check('строка вклада одна на сумму 100', Number(depRow.c) === 1 && Number(depRow.s) === 100, depRow);
+    check('баланс уменьшился ровно на 100', close(await bal(2), beforeDep - 100), [await bal(2), beforeDep]);
+    const safeRow = (await query(`SELECT bank, participants_count FROM safes WHERE id = ${safe.id}`)).rows[0];
+    check('банк 100, участник посчитан один раз',
+      Number(safeRow.bank) === 100 && Number(safeRow.participants_count) === 1, safeRow);
+
+    // ── Сейф: два одновременных возврата вклада ─────────────────────────
+    const cancels = await Promise.all([
+      safeSvc.cancelSafeDeposit(2).then(() => 'ok').catch(e => e.message),
+      safeSvc.cancelSafeDeposit(2).then(() => 'ok').catch(e => e.message)
+    ]);
+    check('два одновременных возврата: сработал один',
+      cancels.filter(x => x === 'ok').length === 1
+      && cancels.some(x => /уже возвращён/i.test(String(x))), cancels);
+    check('деньги вернулись один раз (баланс прежний)', close(await bal(2), beforeDep), await bal(2));
+    const safeRow2 = (await query(`SELECT bank, participants_count FROM safes WHERE id = ${safe.id}`)).rows[0];
+    check('банк и число участников вернулись к нулю',
+      Number(safeRow2.bank) === 0 && Number(safeRow2.participants_count) === 0, safeRow2);
+
+    // ── Отмена раунда, не набравшего минимум ────────────────────────────
+    await safeSvc.safeDeposit(2, 10); // банк 10 < 25 и участник 1 < 2 → раунд отменяется
+    const beforeRoundCancel = await bal(2);
+    await Promise.all([safeSvc.startCracking(), safeSvc.startCracking()]);
+    check('вклад при отмене раунда возвращён один раз',
+      close(await bal(2), beforeRoundCancel + 10), [await bal(2), beforeRoundCancel]);
+    const refundTx = (await query(
+      `SELECT COUNT(*)::int AS c FROM transactions
+        WHERE user_id = 2 AND type = 'safe_cancel' AND amount = 10`)).rows[0];
+    check('транзакция возврата при отмене одна', Number(refundTx.c) === 1, refundTx.c);
+
     return finish();
   }
 })().catch(e => {

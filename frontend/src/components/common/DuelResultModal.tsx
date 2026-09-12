@@ -42,9 +42,30 @@ export default function DuelResultModal() {
     fetchNotifications();
     const iv = setInterval(fetchNotifications, 20_000);
     const off = onNotificationEvent(d => {
-      if (d?.type === 'duel_result') fetchNotifications();
+      if (d?.type !== 'duel_result') return;
+      fetchNotifications();
+      // Повтор через полторы секунды: событие могло прийти, пока предыдущий
+      // запрос ещё шёл (в сторе защита от параллельных загрузок), — иначе
+      // окно появилось бы только через 20 с.
+      setTimeout(fetchNotifications, 1500);
     });
-    return () => { clearInterval(iv); off(); };
+
+    // Фоновая вкладка — главный сценарий потери уведомления: браузер
+    // замораживает таймеры, а сокет за это время может оборваться и
+    // переподключиться уже без события. Перечитываем список, как только
+    // игрок вернулся во вкладку.
+    const onResume = () => {
+      if (document.visibilityState === 'visible') fetchNotifications();
+    };
+    document.addEventListener('visibilitychange', onResume);
+    window.addEventListener('focus', onResume);
+
+    return () => {
+      clearInterval(iv);
+      off();
+      document.removeEventListener('visibilitychange', onResume);
+      window.removeEventListener('focus', onResume);
+    };
   }, [fetchNotifications]);
 
   // Дуэли, которые игрок в этой сессии уже закрыл или посмотрел. Страховка на

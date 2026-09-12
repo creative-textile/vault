@@ -1,4 +1,4 @@
-import { query } from '../db/pool';
+import { query, getClient } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { getSetting, setSetting, getPlatformRevenueForDate } from './revenue';
 import { VAULT_MULTIPLIERS, roundDownClean } from '../config';
@@ -40,8 +40,13 @@ export async function lockVaultDeposit(userId: number, amount: number, termDays:
   if (!(termDays in VAULT_MULTIPLIERS)) throw new Error('Срок: 1, 7, 14 или 30 дней');
   if (await getActiveDeposit(userId)) throw new Error('У вас уже есть активный вклад');
 
-  // Заморозить
-  await query('UPDATE users SET frozen_balance = frozen_balance + $1 WHERE id = $2', [amount, userId]);
+  // Деньги уходят со счета ОДНОЙ операцией. Раньше сумма и замораживалась, и
+  // списывалась, а available = balance − frozen_balance, поэтому на весь срок
+  // вклада доступный баланс был занижен вдвое: положил $500 из $1000 — и играть
+  // нечем, хотя свободных денег по факту $500. Заморозка в проекте означает
+  // «деньги зарезервированы, но ещё не потрачены» (открытый вызов дуэли), а
+  // вклад — это именно трата: тело возвращается только при досрочном разлоке
+  // или выплате в срок.
   await modifyBalance(userId, -amount, 'vault_lock', { description: `Вклад на ${termDays} дней` });
 
   const res = await query(
@@ -64,8 +69,7 @@ export async function earlyUnlock(userId: number, depositId: number) {
   const burned = parseFloat(d.accumulated_profit);
   const amount = parseFloat(d.amount);
 
-  // Вернуть тело
-  await query('UPDATE users SET frozen_balance = frozen_balance - $1 WHERE id = $2', [amount, userId]);
+  // Вернуть тело (одна операция: при блокировке деньги списаны, не заморожены)
   await modifyBalance(userId, amount, 'vault_return', { description: 'Досрочный возврат тела вклада' });
 
   await query("UPDATE vault_deposits SET status = 'early_unlock' WHERE id = $1", [depositId]);
@@ -125,7 +129,6 @@ export async function dailyVaultDistribution() {
     if (newDaysElapsed >= d.term_days) {
       // Выплата
       const payout = Math.round((amount + newProfit) * 100) / 100;
-      await query('UPDATE users SET frozen_balance = frozen_balance - $1 WHERE id = $2', [amount, d.user_id]);
       await modifyBalance(d.user_id, payout, 'vault_payout', {
         description: `Вклад ${d.term_days} дней завершён, прибыль $${newProfit}`
       });
@@ -205,4 +208,52 @@ export async function getVaultPool(): Promise<number> {
   const autoPool = revenue * poolPercent;
   const manual = parseFloat(await getSetting('manual_pool_addition') || '0');
   return Math.round((autoPool + manual) * 100) / 100;
+}
+
+/**
+ * Разовая починка вкладов, открытых ПРЕЖНИМ кодом (заморозка + списание).
+ *
+ * Теперь вклад только списывается, поэтому накопленную заморозку надо снять:
+ * иначе она осталась бы у пользователя навсегда и занижала доступный баланс.
+ * Вызывается ОДИН раз (флаг `vault_freeze_fix_applied` в settings): вклады,
+ * открытые уже по новой схеме, не заморожены, и повторный запуск увёл бы
+ * frozen_balance в минус. Маркер-транзакция `vault_unfreeze` защищает от
+ * двойной разморозки, если процесс упал посреди починки.
+ */
+export async function repairVaultFreeze(): Promise<number> {
+  const res = await query(`SELECT id, user_id, amount FROM vault_deposits WHERE status = 'active'`);
+  let fixed = 0;
+  for (const d of res.rows) {
+    const amount = parseFloat(d.amount);
+    if (!(amount > 0)) continue;
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const already = await client.query(
+        `SELECT 1 FROM transactions
+          WHERE user_id = $1 AND type = 'vault_unfreeze' AND game_id = $2 LIMIT 1`,
+        [d.user_id, d.id]
+      );
+      if (already.rows.length) {
+        await client.query('ROLLBACK');
+        continue;
+      }
+      await client.query(
+        `UPDATE users SET frozen_balance = frozen_balance - $1 WHERE id = $2`, [amount, d.user_id]);
+      const bal = await client.query(`SELECT balance FROM users WHERE id = $1`, [d.user_id]);
+      await client.query(
+        `INSERT INTO transactions (user_id, type, amount, balance_after, game_type, game_id, description)
+         VALUES ($1, 'vault_unfreeze', 0, $2, 'vault', $3, 'Снятие двойной блокировки вклада')`,
+        [d.user_id, parseFloat(bal.rows[0]?.balance || '0'), d.id]
+      );
+      await client.query('COMMIT');
+      fixed++;
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch { /* соединение уже могло закрыться */ }
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+  return fixed;
 }

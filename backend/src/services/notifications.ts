@@ -32,12 +32,10 @@ export async function notify(
   title: string = 'Уведомление',
   expiresAt?: Date
 ) {
-  // Отправляем через WebSocket если пользователь подключён
-  if (io) {
-    io.to(`user:${userId}`).emit('notification', { message, data, type, title });
-  }
-  
-  // Сохраняем в базе данных
+  // Сохраняем в базе данных — ДО отправки в сокет. Клиент на событие
+  // `notification` сразу перечитывает список с сервера: если событие ушло
+  // раньше записи, он получал пустой ответ, а досоздание уведомлений о дуэлях
+  // (ensureDuelResultNotifications) не находило строку и плодило дубли.
   if (persist) {
     try {
       await createNotification(userId, type, title, message, data);
@@ -45,7 +43,12 @@ export async function notify(
       console.error(`[NOTIFY] Error saving notification for user ${userId}:`, e.message);
     }
   }
-  
+
+  // Отправляем через WebSocket если пользователь подключён
+  if (io) {
+    io.to(`user:${userId}`).emit('notification', { message, data, type, title });
+  }
+
   console.log(`[NOTIFY user ${userId}] ${type}: ${message}`);
 }
 

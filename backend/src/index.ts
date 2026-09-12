@@ -152,16 +152,52 @@ server.listen(config.port, async () => {
       console.error('[DB] Error cleaning notifications:', e.message);
     }
 
-    // Вызовы дуэли, созданные до исправления двойной блокировки ставки:
-    // прежний createDuel и замораживал, и списывал деньги. Возвращаем зависшие
-    // в лобби ставки на баланс — иначе при принятии такого вызова ставка
-    // списалась бы у создателя второй раз, а при отмене пропала бы вовсе.
+    // ── Одноразовые починки двойной блокировки денег ────────────────────
+    // И вызов дуэли, и вклад раньше и ЗАМАРАЖИВАЛИ сумму, и СПИСЫВАЛИ её, а
+    // available = balance − frozen_balance, поэтому деньги блокировались
+    // дважды. Теперь одно движение денег = одна операция. Починки выполняются
+    // ОДИН раз (флаг в settings): вызовы и вклады, созданные уже по новой
+    // схеме, не заморожены, и повторный прогон испортил бы баланс.
     try {
-      const { repairDoubleLockedOpenDuels } = await import('./services/duel');
-      const n = await repairDoubleLockedOpenDuels();
-      if (n > 0) console.log(`[DB] Возвращены на баланс ставки ${n} зависших вызовов дуэли`);
+      const { getSetting, setSetting } = await import('./services/revenue');
+
+      if ((await getSetting('duel_double_lock_fixed')) !== '1') {
+        const { repairDoubleLockedOpenDuels } = await import('./services/duel');
+        const n = await repairDoubleLockedOpenDuels();
+        await setSetting('duel_double_lock_fixed', '1');
+        console.log(`[DB] Дуэли: возвращены на баланс ставки ${n} зависших вызовов, созданных прежним кодом`);
+      }
+
+      if ((await getSetting('vault_freeze_fix_applied')) !== '1') {
+        const { repairVaultFreeze } = await import('./services/vault-deposit');
+        const n = await repairVaultFreeze();
+        await setSetting('vault_freeze_fix_applied', '1');
+        console.log(`[DB] Вклады: снята лишняя заморозка с ${n} активных вкладов`);
+      }
+
+      // Отрицательная заморозка завышала доступный баланс (можно было ставить
+      // больше, чем есть). Возникала, например, при гонке двух «Принять» в
+      // дуэли. Починка идемпотентна — можно на каждом старте.
+      const neg = await query(`UPDATE users SET frozen_balance = 0 WHERE frozen_balance < 0`);
+      if (neg.rowCount) console.log(`[DB] Сброшена отрицательная заморозка у ${neg.rowCount} пользователей`);
     } catch (e: any) {
-      console.error('[DB] Repair open duels:', e.message);
+      console.error('[DB] Repair double-locked money:', e.message);
+    }
+
+    // Дубли уведомлений о дуэлях (плодились, когда сокет-событие уходило
+    // раньше записи в БД): оставляем по одному на пару (игрок, дуэль).
+    try {
+      const dup = await query(`
+        DELETE FROM user_notifications a
+         USING user_notifications b
+         WHERE a.type = 'duel_result' AND b.type = 'duel_result'
+           AND a.user_id = b.user_id
+           AND a.data->>'duel_id' IS NOT NULL
+           AND a.data->>'duel_id' = b.data->>'duel_id'
+           AND a.id > b.id`);
+      if (dup.rowCount) console.log(`[DB] Удалено дублей уведомлений о дуэлях: ${dup.rowCount}`);
+    } catch (e: any) {
+      console.error('[DB] Dedupe duel notifications:', e.message);
     }
   } catch (e: any) {
     console.error('[DB] Migration warning:', e.message);

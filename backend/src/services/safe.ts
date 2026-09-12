@@ -267,37 +267,36 @@ export async function safeDeposit(userId: number, amount: number) {
   const available = await getAvailableBalance(userId);
   if (amount > available) throw new Error('Недостаточно средств');
 
-  // Если у пользователя уже есть вклад, добавляем к нему
-  const existingRes = await query(
-    'SELECT id, amount FROM safe_deposits WHERE safe_id = $1 AND user_id = $2',
-    [safe.id, userId]
-  );
-
   const commPercent = 10;
   const commission = Math.round(amount * (commPercent / 100) * 100) / 100;
   const toSafe = Math.round((amount - commission) * 100) / 100;
 
   await modifyBalance(userId, -amount, 'bet', { gameType: 'safe' });
+
+  // Вклад одним атомарным upsert'ом. Раньше строку сначала искали SELECT'ом, а
+  // потом вставляли: два одновременных вклада (двойной клик по «ВНЕСТИ») оба не
+  // находили существующей строки, второй упирался в UNIQUE(safe_id, user_id) и
+  // падал УЖЕ ПОСЛЕ списания денег — сумма зависала: баланс уменьшился, вклада
+  // в сейфе нет. Теперь повторный вклад просто дополняет существующий.
+  const upserted = await query(
+    `INSERT INTO safe_deposits (safe_id, user_id, amount) VALUES ($1, $2, $3)
+     ON CONFLICT (safe_id, user_id) DO UPDATE SET amount = safe_deposits.amount + $3
+     RETURNING amount`,
+    [safe.id, userId, amount]
+  );
+  // Строка создана (а не дополнена), если сумма в ней равна нашему вкладу:
+  // до этого вклад всегда больше нуля, значит дополненная строка всегда больше.
+  const isFirstDeposit = Math.round(parseFloat(upserted.rows[0].amount) * 100)
+    === Math.round(amount * 100);
+
   await query(
     `UPDATE safes
      SET bank = bank + $1, prize_pool = prize_pool + $2,
          commission_amount = commission_amount + $3,
          participants_count = participants_count + CASE WHEN $4::boolean THEN 1 ELSE 0 END
      WHERE id = $5`,
-    [amount, toSafe, commission, existingRes.rows.length === 0, safe.id]
+    [amount, toSafe, commission, isFirstDeposit, safe.id]
   );
-
-  if (existingRes.rows.length) {
-    await query(
-      'UPDATE safe_deposits SET amount = amount + $1 WHERE id = $2',
-      [amount, existingRes.rows[0].id]
-    );
-  } else {
-    await query(
-      'INSERT INTO safe_deposits (safe_id, user_id, amount) VALUES ($1, $2, $3)',
-      [safe.id, userId, amount]
-    );
-  }
 
   // Комиссия распределяется
   const refPercent = parseInt(await getSetting('referral_percent') || '3');
@@ -351,9 +350,16 @@ export async function cancelSafeDeposit(userId: number) {
   }
 
   const dep = depRes.rows[0];
-  const amount = parseFloat(dep.amount);
 
   const commPercent = 0.10;
+
+  // Сначала атомарно удаляем вклад и смотрим, сколько реально удалили: два
+  // одновременных «Вернуть» раньше читали одну и ту же строку и возвращали
+  // сумму дважды.
+  const deleted = await query(
+    'DELETE FROM safe_deposits WHERE id = $1 RETURNING amount', [dep.id]);
+  if (!deleted.rows.length) throw new Error('Вклад уже возвращён');
+  const amount = parseFloat(deleted.rows[0].amount);
   const depositedPrizeShare = Math.round(amount * (1 - commPercent) * 100) / 100;
 
   await modifyBalance(userId, amount, 'safe_cancel', { gameType: 'safe' });
@@ -363,7 +369,6 @@ export async function cancelSafeDeposit(userId: number) {
      participants_count = participants_count - 1 WHERE id = $4`,
     [amount, depositedPrizeShare, Math.round(amount * commPercent * 100) / 100, safe.id]
   );
-  await query('DELETE FROM safe_deposits WHERE id = $1', [dep.id]);
 
   const updated = await getSafeById(safe.id);
   if (updated) {
@@ -805,11 +810,19 @@ export async function startCracking() {
 }
 
 async function cancelSafeReturnDeposits(safe: any) {
+  // Сначала атомарно занимаем сейф (тот же приём, что и при старте взлома):
+  // два параллельных вызова — например, cron и действие админа — вернули бы
+  // вклады дважды.
+  const claimed = await query(
+    `UPDATE safes SET status = 'cancelled' WHERE id = $1 AND status = 'collecting' RETURNING id`,
+    [safe.id]
+  );
+  if (!claimed.rows.length) return;
+
   const depRes = await query('SELECT * FROM safe_deposits WHERE safe_id = $1', [safe.id]);
   for (const d of depRes.rows) {
     await modifyBalance(d.user_id, parseFloat(d.amount), 'safe_cancel', {
       gameType: 'safe', description: 'Сейф отменён (не набрал минимум)'
     });
   }
-  await query("UPDATE safes SET status = 'cancelled' WHERE id = $1", [safe.id]);
 }
