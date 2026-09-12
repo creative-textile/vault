@@ -172,7 +172,7 @@ export default function Home() {
           <>
             <div className="timer" style={{marginTop:8}}>⏰ {timeToStr(collectTimeToCrack)}</div>
             <div className="text-center text-dim" style={{fontSize:12, marginTop:-4}}>
-              до взлома СЕЙФА #{collect.id}
+              СЕЙФ #{collect.id}{collect.crack_at_msk ? ` · взлом в ${collect.crack_at_msk} МСК` : ' · до взлома'}
             </div>
             <div style={{display:'flex', gap:16, justifyContent:'space-between', alignItems:'center', fontSize:16, margin:'8px 0'}}>
               <div>💰 <span className="text-accent" style={{fontWeight:900}}>${fmt(collect.bank)}</span></div>

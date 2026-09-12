@@ -5,7 +5,7 @@ import {
   getSafeResults, getUserSafeDeposit, getSafeById,
   getCrackWindowMs, getCrackRemainingMs, getPendingCracksCount
 } from '../../services/safe';
-import { nextMSK } from '../../utils/time';
+import { nextMSK, fmtMSK } from '../../utils/time';
 
 const router = Router();
 
@@ -66,6 +66,8 @@ router.get('/current', auth, async (req, res) => {
       my_last_deposit: myLastDeposit,
       collecting_safe: collecting ? {
         id: collecting!.id,
+        // «взлом в 21:00 МСК» — подпись под обратным отсчётом на экранах
+        crack_at_msk: fmtMSK(crackAt),
         bank: collecting.bank,
         prize_pool: collecting.prize_pool,
         participants_count: collecting.participants_count,
@@ -77,6 +79,7 @@ router.get('/current', auth, async (req, res) => {
       my_collecting_deposit: myCollectingDeposit,
       safe: safe ? {
         id: safe.id,
+        crack_at_msk: fmtMSK(crackAt),
         bank: safe.bank,
         prize_pool: safe.prize_pool,
         participants_count: safe.participants_count,

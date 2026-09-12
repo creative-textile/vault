@@ -46,10 +46,15 @@ io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next();
   try {
-    const jwt = await import('jsonwebtoken');
-    const decoded = jwt.verify(token, config.jwtSecret) as any;
-    socket.data.userId = decoded.userId;
-    socket.join(`user:${decoded.userId}`);
+    // Та же проверка, что и в HTTP-auth: токен должен принадлежать ЭТОМУ
+    // пользователю (telegram_id совпал). Иначе сокет с устаревшим токеном
+    // попадает в чужую комнату user:<id> и получает чужие уведомления и баланс.
+    const { getUserFromToken } = await import('./services/user');
+    const user = await getUserFromToken(token);
+    if (user) {
+      socket.data.userId = user.id;
+      socket.join(`user:${user.id}`);
+    }
   } catch {}
   next();
 });

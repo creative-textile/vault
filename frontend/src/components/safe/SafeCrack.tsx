@@ -25,7 +25,7 @@ function fmtWindow(ms: number) {
 }
 
 export default function SafeCrack() {
-  const { showToast, refreshUser } = useAuth();
+  const { user, showToast, refreshUser } = useAuth();
   const nav = useNavigate();
 
   const [safe, setSafe] = useState<any>(null);
@@ -237,6 +237,14 @@ export default function SafeCrack() {
   return (
     <>
       <Header title="🔒 ВЗЛОМ СЕЙФА" />
+
+      {/* Какой аккаунт играет сейчас: при нескольких вкладках/браузерах это
+          единственное место, где видно, чей результат засчитывается */}
+      {user && (
+        <div className="text-dim text-center" style={{ fontSize: 12, margin: '2px 0 6px' }}>
+          👤 играет @{user.username || 'demo'}
+        </div>
+      )}
 
       <SafeCrackScene
         phase={phase === 'spinning' ? 'spinning' : phase === 'done' ? 'result' : 'idle'}

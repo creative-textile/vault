@@ -150,14 +150,15 @@ export default function Safe() {
       .catch(() => { resultsForRef.current = null; });
   }, [lastId, lastStatus]);
 
-  // Итоги показываем один раз: если игрок их ещё не видел — раскрываем карточку,
-  // если видел (ключ вкладки) — оставляем свёрнутой строкой
+  // Итоги показываем один раз и только участнику раунда: если игрок в нём не
+  // вкладывался, чужие результаты не должны раскрываться перед ним сами
+  // (строка раунда остаётся, кнопка «ИТОГИ» — по желанию).
   useEffect(() => {
     if (!lastId) return;
     const seen = !!tabStore.get(seenKey(lastId));
-    setShowLast(lastStatus === 'finished' && !seen);
+    setShowLast(lastStatus === 'finished' && !seen && !!lastDeposit);
     sawResultRef.current = null;
-  }, [lastId, lastStatus]);
+  }, [lastId, lastStatus, lastDeposit]);
 
   // Уходим со страницы — результат этого раунда игрок уже видел, дальше не показываем
   useEffect(() => () => {
@@ -180,17 +181,31 @@ export default function Safe() {
   // сейфа, и выдёргивать игрока оттуда каждый раз нельзя (это и была «ловушка»).
   const isCracking = safe?.status === 'cracking';
   const autoSentRef = useRef<number | null>(null);
+  // В фоновой вкладке requestAnimationFrame остановлен, а серверные секунды
+  // идут: открыв там мини-игру, игрок потерял бы раунд, даже не увидев его.
+  // Поэтому автоматически переходим только в видимой вкладке, а если игрок
+  // вернулся в неё позже — переход сработает в этот момент.
+  const [tabVisible, setTabVisible] = useState(
+    typeof document === 'undefined' ? true : document.visibilityState === 'visible'
+  );
+  useEffect(() => {
+    const onVis = () => setTabVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   useEffect(() => {
     if (!isCracking || !safe?.id || !safeDeposit) return;
     if ((safeDeposit.crack_time_ms ?? null) != null) return; // результат уже сдан
     if (autoSentRef.current === safe.id) return;
+    if (!tabVisible) return; // игрок не смотрит в эту вкладку
     const key = `vault:safe-crack-visited:${safe.id}`;
     if (tabStore.get(key)) return; // в этом раунде игрок уже заходил в игру
     autoSentRef.current = safe.id;
     tabStore.set(key, '1');
     // replace: редирект не добавляет запись в историю — «назад» не зацикливается
     nav('/safe/crack', { replace: true });
-  }, [isCracking, safe?.id, safeDeposit, nav]);
+  }, [isCracking, safe?.id, safeDeposit, nav, tabVisible]);
 
   const deposit = async () => {
     const a = parseFloat(amount);
@@ -248,6 +263,11 @@ export default function Safe() {
   return (
     <>
       <Header title="🔒 Сейф" />
+      {user && (
+        <div className="text-dim text-center" style={{ fontSize: 12, margin: '2px 0 8px' }}>
+          👤 @{user.username || 'demo'} · баланс ${fmt(user.balance)}
+        </div>
+      )}
       <SafeCrackScene
         phase={isCracking ? 'spinning' : last?.status === 'finished' ? 'result' : 'idle'}
         code={isCracking ? safe.code : (last?.code ?? undefined)}
@@ -294,7 +314,7 @@ export default function Safe() {
 
           <div className="timer">⏰ {timeToStr(collectTime)}</div>
           <div className="text-center text-dim" style={{ fontSize: 12, marginTop: -4 }}>
-            до взлома (время МСК)
+            {collect.crack_at_msk ? `взлом в ${collect.crack_at_msk} МСК` : 'до взлома'}
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-around', margin: '12px 0', fontSize: 18 }}>

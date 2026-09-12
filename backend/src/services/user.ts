@@ -59,7 +59,17 @@ export async function authenticateTelegram(initData: string, refCode?: string) {
 export async function getUserFromToken(token: string): Promise<any> {
   try {
     const decoded = jwt.verify(token, config.jwtSecret) as any;
-    return await getUser(decoded.userId);
+    const user = await getUser(decoded.userId);
+    if (!user) return null;
+    // Токен выдаётся конкретному человеку (telegram_id), а не «строке с номером N».
+    // После сброса/пересоздания БД id снова начинаются с 1, и старый токен из другого
+    // браузера иначе молча садится в чужой аккаунт с тем же id: человек видит
+    // чужой баланс и играет чужой вклад. Несовпал telegram_id — токен недействителен,
+    // клиент получит 401 и войдёт заново уже своим аккаунтом.
+    if (decoded.telegramId != null && Number(user.telegram_id) !== Number(decoded.telegramId)) {
+      return null;
+    }
+    return user;
   } catch {
     return null;
   }
