@@ -13,9 +13,16 @@ const router = Router();
 router.get('/current', auth, async (req, res) => {
   try {
     const user = (req as any).user;
+
+    // Сейф, который принимает вклады прямо сейчас: во время взлома и после
+    // розыгрыша это сейф следующей даты, и сбор не останавливается ни на минуту.
+    // Считаем его ПЕРВЫМ: getCollectingSafe() при необходимости создаёт сейф сам.
+    // Раньше при отсутствии «активного» сейфа маршрут отдавал collecting_safe: null,
+    // и главная зависала на «Создаём сейф...» без таймера.
+    const collecting = await getCollectingSafe();
+
     const safe = await getActiveSafe();
-    if (!safe) return res.json({ safe: null, my_deposit: null, collecting_safe: null, my_collecting_deposit: null });
-    const myDeposit = await getUserSafeDeposit(safe.id, user.id);
+    const myDeposit = safe ? await getUserSafeDeposit(safe.id, user.id) : null;
     // Время до взлома — читается из настроек (час/минута в МСК)
     const { getSetting } = await import('../../services/revenue');
     const hour = parseInt((await getSetting('safe_crack_hour')) || '21');
@@ -26,15 +33,12 @@ router.get('/current', auth, async (req, res) => {
 
     // Во время взлома клиенту нужно знать длину окна и остаток (считается на
     // сервере от crack_started_at — клиентские часы могут врать)
-    const isCracking = safe.status === 'cracking';
+    const isCracking = safe?.status === 'cracking';
     const crackWindowMs = isCracking ? await getCrackWindowMs() : null;
-    const crackRemainingMs = isCracking ? await getCrackRemainingMs(safe.id, crackWindowMs ?? undefined) : null;
-    const pendingCracks = isCracking ? await getPendingCracksCount(safe.id) : null;
+    const crackRemainingMs = isCracking ? await getCrackRemainingMs(safe!.id, crackWindowMs ?? undefined) : null;
+    const pendingCracks = isCracking ? await getPendingCracksCount(safe!.id) : null;
 
-    // Сейф, который принимает вклады прямо сейчас. Во время взлома и после
-    // розыгрыша это сейф следующего дня: сбор не останавливается ни на минуту.
-    const collecting = await getCollectingSafe();
-    const collectingIsOther = !!collecting && collecting.id !== safe.id;
+    const collectingIsOther = !!collecting && collecting?.id !== safe?.id;
     const myCollectingDeposit = collectingIsOther
       ? await getUserSafeDeposit(collecting!.id, user.id)
       : myDeposit;
@@ -42,9 +46,9 @@ router.get('/current', auth, async (req, res) => {
     // Последний завершённый раунд: экран сейфа показывает итоги только его
     // (вся история в БД остаётся, но клиенту достаточно последнего раунда)
     const lastFinished = await getLastFinishedSafe();
-    const myLastDeposit = lastFinished && lastFinished.id !== safe.id
+    const myLastDeposit = lastFinished && lastFinished.id !== safe?.id
       ? await getUserSafeDeposit(lastFinished.id, user.id)
-      : (lastFinished && lastFinished.id === safe.id ? myDeposit : null);
+      : (lastFinished && lastFinished.id === safe?.id ? myDeposit : null);
 
     res.json({
       last_finished: lastFinished ? {
@@ -61,7 +65,7 @@ router.get('/current', auth, async (req, res) => {
       } : null,
       my_last_deposit: myLastDeposit,
       collecting_safe: collecting ? {
-        id: collecting.id,
+        id: collecting!.id,
         bank: collecting.bank,
         prize_pool: collecting.prize_pool,
         participants_count: collecting.participants_count,
@@ -71,7 +75,7 @@ router.get('/current', auth, async (req, res) => {
         time_to_crack_ms: timeToCrack
       } : null,
       my_collecting_deposit: myCollectingDeposit,
-      safe: {
+      safe: safe ? {
         id: safe.id,
         bank: safe.bank,
         prize_pool: safe.prize_pool,
@@ -86,7 +90,7 @@ router.get('/current', auth, async (req, res) => {
         crack_window_ms: crackWindowMs,
         crack_remaining_ms: crackRemainingMs,
         pending_cracks: pendingCracks
-      },
+      } : null,
       my_deposit: myDeposit
     });
   } catch (e: any) {

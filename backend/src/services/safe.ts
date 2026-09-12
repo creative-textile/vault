@@ -95,6 +95,33 @@ function normalizeSafe(s: any) {
   return s;
 }
 
+/**
+ * 'YYYY-MM-DD' из того, что вернул pg для колонки DATE.
+ *
+ * pg при TZ впереди UTC (в контейнере TZ=Europe/Moscow) отдаёт DATE как
+ * Date в ЛОКАЛЬНОЙ полночи, поэтому toISOString() сдвигает дату на день
+ * назад. Берём локальные компоненты — так дата не «теряется».
+ */
+export function toDateStr(v: any, fallback: string): string {
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+  }
+  return fallback;
+}
+
+/**
+ * Дата следующего сейфа: «максимальная дата в таблице + 1 день», но не раньше
+ * сегодняшней (иначе после простоя сервера сейф создался бы в прошлом и клиенты
+ * его бы не увидели — они берут date >= сегодня). Арифметика чисто строковая,
+ * без Date: см. toDateStr().
+ */
+export function nextSafeDate(maxDate: any, today: string): string {
+  const [y, m, d] = toDateStr(maxDate, today).split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  return next > today ? next : today;
+}
+
 export async function getTodaySafe() {
   const today = todayMSK();
   const res = await query('SELECT * FROM safes WHERE date = $1', [today]);
@@ -143,7 +170,10 @@ export async function getCollectingSafe() {
   // а сейф следующего дня ещё не создан) — создаём и берём его.
   await ensureNextDaySafe();
   res = await findCollecting();
-  if (!res.rows.length) return null;
+  if (!res.rows.length) {
+    console.error('[SAFE] Собирающий сейф не создан — вклады принимать некуда');
+    return null;
+  }
   return normalizeSafe(res.rows[0]);
 }
 
@@ -560,17 +590,31 @@ export async function getUserSafeDeposit(safeId: number, userId: number) {
  * сейф #2 при этом уже имеет дату завтрашнего дня, и «завтра» было бы занято.
  */
 export async function ensureNextDaySafe(): Promise<void> {
-  const collecting = await query(`SELECT id FROM safes WHERE status = 'collecting' LIMIT 1`);
-  if (collecting.rows.length) return; // сбор уже идёт — второй сейф не нужен
+  const today = todayMSK();
+
+  // Сбор, который видят клиенты (date >= сегодня), — второй сейф не нужен
+  const visible = await query(
+    `SELECT id FROM safes WHERE status = 'collecting' AND date >= CAST($1 AS DATE) LIMIT 1`,
+    [today]
+  );
+  if (visible.rows.length) return;
 
   const maxRes = await query(`SELECT MAX(date) AS max_date FROM safes`);
-  const raw = maxRes.rows[0]?.max_date;
-  const today = todayMSK();
-  const base = raw ? new Date(raw) : new Date(`${today}T00:00:00Z`);
-  base.setUTCDate(base.getUTCDate() + 1);
-  // Если сервер долго не работал, «максимум + 1» может оказаться в прошлом —
-  // такой сейф никто бы не увидел (клиент берёт date >= сегодня)
-  const nextDate = base.toISOString().slice(0, 10) > today ? base.toISOString().slice(0, 10) : today;
+  const nextDate = nextSafeDate(maxRes.rows[0]?.max_date, today);
+
+  // «Протухший» собирающий сейф (дата в прошлом — сервер долго не работал):
+  // клиенты его не видят, а новый из-за него не создать. Переносим дату вперёд,
+  // сохраняя уже внесённые вклады.
+  const stale = await query(
+    `SELECT id FROM safes WHERE status = 'collecting' AND date < CAST($1 AS DATE) ORDER BY date ASC LIMIT 1`,
+    [today]
+  );
+  if (stale.rows.length) {
+    await query(`UPDATE safes SET date = $1, collect_started_at = NOW() WHERE id = $2`, [nextDate, stale.rows[0].id]);
+    console.log(`[SAFE] Сейф #${stale.rows[0].id} с просроченной датой перенесён на ${nextDate} (сбор продолжается)`);
+    broadcast('safe_created', { date: nextDate });
+    return;
+  }
 
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
   const drumSpeeds = generateDrumSpeeds();
@@ -582,7 +626,11 @@ export async function ensureNextDaySafe(): Promise<void> {
      ON CONFLICT (date) DO NOTHING`,
     [nextDate, code, drumSpeeds]
   );
-  if (ins.rowCount === 0) return;
+  if (!ins.rowCount) {
+    // Сюда попадаем только если на nextDate уже есть сейф — иначе сбор встал бы
+    console.log(`[SAFE] Сейф на ${nextDate} уже существует (status не collecting) — сбор недоступен, нужна проверка`);
+    return;
+  }
   console.log(`[SAFE] Создан сейф на ${nextDate} (сбор следующего раунда)`);
   broadcast('safe_created', { date: nextDate });
 }

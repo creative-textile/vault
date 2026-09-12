@@ -19,7 +19,22 @@ function timeToStr(ms: number) {
 
 const CHIPS_DEFAULTS = [10, 50, 100, 250, 500, 1000];
 
-/** Ключ localStorage: игрок уже видел итоги этого раунда. */
+/**
+ * Флаги «показать один раз» держим в sessionStorage — он свой для каждой
+ * вкладки. В localStorage две вкладки одного браузера делили флаг: в одной
+ * мини-игра открывалась сама, в другой нужно было жать кнопку (и секунды
+ * уходили), а итоги в одной раскрывались, в другой — нет.
+ */
+const tabStore = {
+  get(k: string): string | null {
+    try { return window.sessionStorage.getItem(k); } catch { return null; }
+  },
+  set(k: string, v: string) {
+    try { window.sessionStorage.setItem(k, v); } catch { /* приватный режим — не критично */ }
+  }
+};
+
+/** Ключ флага: игрок уже видел итоги этого раунда. */
 const seenKey = (id: number) => `vault:safe-result-seen:${id}`;
 
 /**
@@ -136,17 +151,17 @@ export default function Safe() {
   }, [lastId, lastStatus]);
 
   // Итоги показываем один раз: если игрок их ещё не видел — раскрываем карточку,
-  // если видел (ключ в localStorage) — оставляем свёрнутой строкой
+  // если видел (ключ вкладки) — оставляем свёрнутой строкой
   useEffect(() => {
     if (!lastId) return;
-    const seen = !!localStorage.getItem(seenKey(lastId));
+    const seen = !!tabStore.get(seenKey(lastId));
     setShowLast(lastStatus === 'finished' && !seen);
     sawResultRef.current = null;
   }, [lastId, lastStatus]);
 
   // Уходим со страницы — результат этого раунда игрок уже видел, дальше не показываем
   useEffect(() => () => {
-    if (sawResultRef.current != null) localStorage.setItem(seenKey(sawResultRef.current), String(Date.now()));
+    if (sawResultRef.current != null) tabStore.set(seenKey(sawResultRef.current), String(Date.now()));
   }, []);
   useEffect(() => {
     if (showLast && lastId && lastStatus === 'finished' && results.length) sawResultRef.current = lastId;
@@ -154,7 +169,7 @@ export default function Safe() {
 
   const markSeen = () => {
     if (lastId) {
-      localStorage.setItem(seenKey(lastId), String(Date.now()));
+      tabStore.set(seenKey(lastId), String(Date.now()));
       sawResultRef.current = null;
     }
     setShowLast(false);
@@ -170,9 +185,9 @@ export default function Safe() {
     if ((safeDeposit.crack_time_ms ?? null) != null) return; // результат уже сдан
     if (autoSentRef.current === safe.id) return;
     const key = `vault:safe-crack-visited:${safe.id}`;
-    if (localStorage.getItem(key)) return; // в этом раунде игрок уже заходил в игру
+    if (tabStore.get(key)) return; // в этом раунде игрок уже заходил в игру
     autoSentRef.current = safe.id;
-    localStorage.setItem(key, '1');
+    tabStore.set(key, '1');
     // replace: редирект не добавляет запись в историю — «назад» не зацикливается
     nav('/safe/crack', { replace: true });
   }, [isCracking, safe?.id, safeDeposit, nav]);
@@ -257,8 +272,7 @@ export default function Safe() {
             {crackTime > 0 ? `⏱ Нужно взломать сейф за: ${timeToStr(crackTime)}` : '⏳ Время вышло — подводим итоги...'}
           </div>
           <div className="text-dim" style={{ fontSize: 13, marginTop: 6 }}>
-            Не сдали результат: {safe.pending_cracks ?? 0} из {safe.participants_count}.
-            Итоги появятся сразу, как только все сдадут код, либо когда окно закроется.
+            Сдали результат: {Math.max(0, (safe.participants_count ?? 0) - (safe.pending_cracks ?? 0))} из {safe.participants_count}
           </div>
           {safeDeposit
             ? ((safeDeposit.crack_time_ms ?? null) != null

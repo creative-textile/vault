@@ -191,9 +191,9 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Проект в цифрах */}
+      {/* Статистика VAULT */}
       <div className="card" style={{padding:'12px 14px'}}>
-        <div className="card-title" style={{fontSize:13, marginBottom:10}}>📊 ПРОЕКТ В ЦИФРАХ</div>
+        <div className="card-title" style={{fontSize:13, marginBottom:10}}>📊 СТАТИСТИКА VAULT</div>
         <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 8px'}}>
           <div>
             <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>УЧАСТНИКОВ</div>
