@@ -32,6 +32,7 @@ export async function createDailySafe() {
   const exists = await query('SELECT id FROM safes WHERE date = $1', [today]);
   if (exists.rows.length) return;
 
+  // Получаем одинаковые цифры для всех игроков в этот день
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
   const drumSpeeds = [0, 1, 2].map(() => +(1.5 + Math.random() * 2.5).toFixed(2));
 
@@ -40,6 +41,7 @@ export async function createDailySafe() {
      VALUES ($1, 'collecting', false, $2, $3)`,
     [today, code, drumSpeeds]
   );
+  console.log(`[SAFE] Создан дневной сейф с кодом: ${code.join(',')}`);
 }
 
 export async function safeDeposit(userId: number, amount: number) {
@@ -142,8 +144,11 @@ export async function cancelSafeDeposit(userId: number) {
 }
 
 export async function submitCrackTime(userId: number, timeMs: number) {
+  const timeoutMinutes = parseInt(await getSetting('safe_crack_timeout_minutes') || '2');
+  const maxTimeMs = timeoutMinutes * 60 * 1000; // Преобразуем минуты в миллисекунды
+  
   if (timeMs < 500) throw new Error('Слишком быстро');
-  if (timeMs > 30000) throw new Error('Таймаут');
+  if (timeMs > maxTimeMs) throw new Error(`Таймаут: ${timeoutMinutes} мин`);
   const safe = await getTodaySafe();
   if (!safe) throw new Error('Сейф не найден');
   if (safe.status !== 'cracking') throw new Error('Не фаза взлома');
@@ -256,6 +261,25 @@ export async function startCracking() {
     await cancelSafeReturnDeposits(safe);
     return { cancelled: true };
   }
+  
+  // Перед началом взлома создаём сейф на следующий день, чтобы депозиты не терялись
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  
+  const nextSafeExists = await query('SELECT id FROM safes WHERE date = $1', [tomorrowStr]);
+  if (!nextSafeExists.rows.length) {
+    const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
+    const drumSpeeds = [0, 1, 2].map(() => +(1.5 + Math.random() * 2.5).toFixed(2));
+    
+    await query(
+      `INSERT INTO safes (date, status, bonus, code, drum_speeds)
+       VALUES ($1, 'collecting', false, $2, $3)`,
+      [tomorrowStr, code, drumSpeeds]
+    );
+    console.log(`[SAFE] Создан сейф на ${tomorrowStr} для предотвращения потери депозитов`);
+  }
+  
   await query("UPDATE safes SET status = 'cracking' WHERE id = $1", [safe.id]);
   return { cancelled: false, safe };
 }

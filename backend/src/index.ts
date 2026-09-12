@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import { config } from './config';
 import { initCrons } from './cron';
 import { initNotifications } from './services/notifications';
+import { initNotificationsTable } from './services/user-notifications';
 import { startDepositListener } from './services/ton';
 
 import userRoutes from './api/routes/user';
@@ -102,13 +103,31 @@ server.listen(config.port, async () => {
       min_bet:'1', rocket_max_bet_percent:'50', vault_pool_percent:'15',
       safe_min_bank:'25', safe_min_participants:'2', beautiful_flight_chance:'3',
       vault_min_deposit:'10', vault_max_deposit:'100',
-      safe_crack_hour:'21', safe_crack_minute:'0'
+      safe_crack_hour:'21', safe_crack_minute:'0',
+      safe_crack_timeout_minutes: '2'
     };
     // Принудительно обновим min_bank/safe_min_bank на корректные (на случай если в БД остались старые значения $2/$5)
     await query(`UPDATE settings SET value='25' WHERE key='safe_min_bank'`);
     await query(`UPDATE settings SET value='2' WHERE key='safe_min_participants'`);
     for (const [k,v] of Object.entries(defaults)) {
       await query(`INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING`, [k,v]);
+    }
+    
+    // Инициализируем таблицу уведомлений
+    await initNotificationsTable();
+    
+    // Очищаем уведомления с невалидными duel_id (NaN)
+    try {
+      await query(`
+        DELETE FROM user_notifications 
+        WHERE type = 'duel_result' 
+          AND (data->>'duel_id' IS NULL 
+               OR data->>'duel_id' = 'NaN' 
+               OR data->>'duel_id' ~ '^[^0-9]+$')
+      `);
+      console.log('[DB] Cleaned up notifications with invalid duel_id');
+    } catch (e: any) {
+      console.error('[DB] Error cleaning notifications:', e.message);
     }
   } catch (e: any) {
     console.error('[DB] Migration warning:', e.message);

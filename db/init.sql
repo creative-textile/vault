@@ -131,6 +131,20 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS user_notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    data JSONB,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    related_entity_type VARCHAR(50),
+    related_entity_id INTEGER
+);
+
 -- Seed rocket bankroll ($1500 seed)
 INSERT INTO rocket_bankroll (amount) VALUES (1500) ON CONFLICT DO NOTHING;
 

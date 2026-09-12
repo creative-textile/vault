@@ -80,6 +80,7 @@ router.get('/results/:id', auth, async (req, res) => {
   try {
     const user = (req as any).user;
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID сейфа');
     const results = await getSafeResults(id);
     res.json({ results, my_user_id: user.id });
   } catch (e: any) {
@@ -91,6 +92,7 @@ router.get('/results/:id', auth, async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID сейфа');
     const safe = await getSafeById(id);
     if (!safe) return res.status(404).json({ error: 'Не найдено' });
     res.json(safe);

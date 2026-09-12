@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import { createDuel, getLobby, acceptDuel, cancelDuel, getDuelHistory, getDuel } from '../../services/duel';
-import { notify } from '../../services/notifications';
+import { notify, notifyDuelResult, getUnreadUserNotifications } from '../../services/notifications';
+import { markNotificationAsRead, getUnreadCount } from '../../services/user-notifications';
 
 const router = Router();
 
@@ -32,11 +33,11 @@ router.get('/pending', auth, async (req, res) => {
     const user = (req as any).user;
     const r = await import('../../db/pool');
     // Ищет последнюю завершённую дуэль, где пользователь — участник
+    // Убираем ограничение по времени, чтобы показывать все непросмотренные дуэли
     const res2 = await r.query(
       `SELECT * FROM duels
        WHERE status = 'finished'
        AND (creator_id = $1 OR opponent_id = $1)
-       AND finished_at > NOW() - INTERVAL '1 day'
        ORDER BY finished_at DESC LIMIT 1`,
       [user.id]
     );
@@ -68,9 +69,48 @@ router.post('/accept/:id', auth, async (req, res) => {
   try {
     const user = (req as any).user;
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID дуэли');
+    const duel = await getDuel(id);
+    if (!duel) throw new Error('Дуэль не найдена');
+    
     const result = await acceptDuel(id, user.id);
-    notify(result.creator_id, `⚔️ Вызов на $${await getDuel(id).then(d => d?.amount)} принят!`);
-    notify(user.id, `⚔️ Вы приняли вызов. Результат: ${result.result === 'heads' ? 'орёл' : 'решка'}`);
+    
+    // Уведомляем создателя дуэли
+    const amount = parseFloat(duel.amount);
+    const prize = Math.round(amount * 2 * 0.9 * 100) / 100;
+    
+    // Уведомление создателю - сохраняем в базе данных
+    await notifyDuelResult(
+      result.creator_id,
+      id,
+      `⚔️ Ваш вызов на $${amount} принят! Посмотрите результат.`,
+      {
+        duel_id: id,
+        amount,
+        prize,
+        result: result.result,
+        winner_id: result.winner,
+        i_won: result.winner === result.creator_id,
+        coin_trajectory: result.coin_trajectory
+      }
+    );
+    
+    // Уведомление оппоненту
+    await notifyDuelResult(
+      user.id,
+      id,
+      `⚔️ Вы приняли вызов. Результат: ${result.result === 'heads' ? 'орёл' : 'решка'}`,
+      {
+        duel_id: id,
+        amount,
+        prize,
+        result: result.result,
+        winner_id: result.winner,
+        i_won: result.winner === user.id,
+        coin_trajectory: result.coin_trajectory
+      }
+    );
+    
     res.json(result);
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -82,6 +122,7 @@ router.post('/cancel/:id', auth, async (req, res) => {
   try {
     const user = (req as any).user;
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID дуэли');
     res.json(await cancelDuel(id, user.id));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -101,6 +142,7 @@ router.get('/history', async (_req, res) => {
 router.get('/:id', auth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID дуэли');
     const d = await getDuel(id);
     if (!d) return res.status(404).json({ error: 'Не найдено' });
     const user = (req as any).user;
@@ -121,6 +163,45 @@ router.get('/:id', auth, async (req, res) => {
       finished_at: d.finished_at,
       status: d.status
     });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// GET /api/duel/notifications - получить непрочитанные уведомления о дуэлях
+router.get('/notifications', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !user.id) {
+      return res.json({ notifications: [] });
+    }
+    const notifications = await getUnreadUserNotifications(user.id);
+    res.json({ notifications });
+  } catch (e: any) {
+    console.error('[NOTIFICATIONS ERROR]', e.message, e.stack);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/duel/notifications/:id/read - отметить уведомление как прочитанное
+router.post('/notifications/:id/read', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const notificationId = parseInt(req.params.id);
+    if (isNaN(notificationId)) throw new Error('Некорректный ID уведомления');
+    const success = await markNotificationAsRead(notificationId, user.id);
+    res.json({ success });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// GET /api/duel/notifications/count - получить количество непрочитанных уведомлений
+router.get('/notifications/count', auth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const count = await getUnreadCount(user.id);
+    res.json({ count });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

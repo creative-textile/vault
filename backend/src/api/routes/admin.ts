@@ -4,6 +4,8 @@ import { query } from '../../db/pool';
 import { getSetting, setSetting } from '../../services/revenue';
 import { getRocketBankroll, updateRocketBankroll } from '../../services/rocket';
 import { addManualPool, getVaultPool } from '../../services/vault-deposit';
+import { startCracking, getTodaySafe } from '../../services/safe';
+import { broadcast } from '../../services/notifications';
 
 const router = Router();
 
@@ -308,6 +310,7 @@ router.get('/users', async (req, res) => {
 router.get('/users/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     const u = (await query('SELECT * FROM users WHERE id = $1', [id])).rows[0];
     if (!u) return res.status(404).json({ error: 'не найден' });
     const txs = await query(
@@ -363,6 +366,7 @@ router.get('/users/:id', async (req, res) => {
 router.post('/users/:id/ban', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     const { reason } = req.body;
     await query('UPDATE users SET banned = TRUE, ban_reason = $2 WHERE id = $1', [id, reason || '']);
     res.json({ ok: true });
@@ -375,6 +379,7 @@ router.post('/users/:id/ban', async (req, res) => {
 router.post('/users/:id/unban', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     await query('UPDATE users SET banned = FALSE, ban_reason = NULL WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (e: any) {
@@ -386,6 +391,7 @@ router.post('/users/:id/unban', async (req, res) => {
 router.post('/users/:id/adjust', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     const { delta, reason } = req.body;
     const d = parseFloat(delta);
     const { modifyBalance } = await import('../../services/balance');
@@ -403,14 +409,14 @@ router.get('/settings', async (_req, res) => {
     'min_bet', 'rocket_max_bet_percent', 'vault_pool_percent',
     'safe_min_bank', 'safe_min_participants', 'beautiful_flight_chance',
     'vault_min_deposit', 'vault_max_deposit',
-    'safe_crack_hour', 'safe_crack_minute'
+    'safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes'
   ];
   const defaults: Record<string, string> = {
     commission_percent: '10', withdraw_commission: '1', referral_percent: '3',
     min_bet: '1', rocket_max_bet_percent: '50', vault_pool_percent: '15',
     safe_min_bank: '5', safe_min_participants: '2', beautiful_flight_chance: '3',
     vault_min_deposit: '10', vault_max_deposit: '100',
-    safe_crack_hour: '21', safe_crack_minute: '0'
+    safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '2'
   };
   const out: Record<string, string> = {};
   const labels: Record<string, string> = {
@@ -426,7 +432,8 @@ router.get('/settings', async (_req, res) => {
     vault_min_deposit: 'Мин. вклад ВАУЛЬТ ($)',
     vault_max_deposit: 'Начальный макс. вклад ВАУЛЬТ ($)',
     safe_crack_hour: 'Час взлома сейфа МСК (0-23)',
-    safe_crack_minute: 'Минута взлома сейфа (0-59)'
+    safe_crack_minute: 'Минута взлома сейфа (0-59)',
+    safe_crack_timeout_minutes: 'Время "не успел" (минуты)'
   };
   for (const k of keys) out[k] = (await getSetting(k)) || defaults[k] || '';
   res.json({ values: out, labels });
@@ -439,6 +446,37 @@ router.post('/settings', async (req, res) => {
       await setSetting(k, String(v));
     }
     res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/start-cracking - ручной запуск взлома сейфа
+router.post('/start-cracking', async (req, res) => {
+  try {
+    const safe = await getTodaySafe();
+    if (!safe) return res.status(400).json({ error: 'Сейф не создан' });
+    if (safe.status !== 'collecting') return res.status(400).json({ error: 'Сейф не в фазе сбора' });
+    
+    const resCrack = await startCracking();
+    if (!resCrack || resCrack.cancelled) {
+      broadcast('safe_cancelled', {});
+      return res.json({ ok: false, message: 'Сейф отменён (не набрал минимум)' });
+    }
+    
+    broadcast('safe_crack_started', { safe: resCrack.safe });
+    
+    // Финализация через 1 секунду
+    setTimeout(async () => {
+      const safeAfter = await getTodaySafe();
+      if (safeAfter) {
+        const { calculateSafeWinners } = await import('../../services/safe');
+        await calculateSafeWinners(safeAfter.id);
+        broadcast('safe_finished', { safe_id: safeAfter.id });
+      }
+    }, 1000);
+    
+    res.json({ ok: true, message: 'Взлом запущен' });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

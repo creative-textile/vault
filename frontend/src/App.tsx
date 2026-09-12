@@ -4,6 +4,7 @@ import WebApp from '@twa-dev/sdk';
 import { AuthContext, User } from './stores/auth';
 import { authApi, profileApi } from './api/client';
 import { getSocket, disconnectSocket } from './api/socket';
+import { useNotifications } from './stores/notifications';
 
 import Onboarding from './components/onboarding/Onboarding';
 import Home from './components/layout/Home';
@@ -20,6 +21,7 @@ import Profile from './components/profile/Profile';
 import AdminPanel from './components/profile/AdminPanel';
 import SetPin from './components/wallet/SetPin';
 import PendingDuelModal from './components/common/PendingDuelModal';
+import NotificationsModal from './components/common/NotificationsModal';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -29,6 +31,7 @@ export default function App() {
     localStorage.getItem('onboarding_done') === '1'
   );
   const [toast, setToast] = useState<string | null>(null);
+  const { addNotification, fetchNotifications } = useNotifications();
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -47,20 +50,61 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let sock: any = null;
+    let intervalId: number | null = null;
+    
     (async () => {
-      if (token) {
-        await refreshUser();
-        // Init socket
-        const sock = getSocket(token);
-        sock.on('notification', (data: any) => {
-          showToast(data.message);
-          refreshUser();
-        });
+      try {
+        if (token) {
+          await refreshUser();
+          // Init socket
+          sock = getSocket(token);
+          sock.on('notification', (data: any) => {
+            showToast(data.message);
+            refreshUser();
+            if (data.type === 'duel_result') {
+              addNotification({
+                id: Date.now(),
+                user_id: user?.id || 0,
+                type: data.type,
+                title: data.title || 'Результат дуэли',
+                message: data.message,
+                data: data.data,
+                is_read: false,
+                created_at: new Date().toISOString()
+              });
+            }
+          });
+          
+          sock.on('safe_crack_started', (data: any) => {
+            console.log('[SOCKET] Safe crack started:', data);
+            if (window.location.pathname === '/safe') {
+              window.location.reload();
+            }
+          });
+          sock.on('safe_finished', (data: any) => {
+            console.log('[SOCKET] Safe finished:', data);
+            if (window.location.pathname === '/safe') {
+              window.location.reload();
+            }
+          });
+          
+          intervalId = window.setInterval(() => {
+            if (token) {
+              fetchNotifications();
+            }
+          }, 15000);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     })();
-    return () => { disconnectSocket(); };
-  }, [token, refreshUser, showToast]);
+    
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      disconnectSocket();
+    };
+  }, [token, refreshUser, showToast, addNotification, fetchNotifications, user?.id]);
 
   useEffect(() => {
     // Telegram WebApp init
@@ -132,6 +176,7 @@ export default function App() {
         <div className="app">
           {toast && <div className="toast">{toast}</div>}
           {onboardingDone && <PendingDuelModal />}
+          {onboardingDone && <NotificationsModal />}
           <div className="container">
             <Routes>
               {!onboardingDone && <Route path="*" element={<Onboarding />} />}

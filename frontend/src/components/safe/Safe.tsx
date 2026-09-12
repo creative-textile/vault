@@ -16,7 +16,7 @@ function timeToStr(ms: number) {
   return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-const CHIPS_DEFAULTS = [10, 50, 250, 500, 1000];
+const CHIPS_DEFAULTS = [10, 50, 100, 250, 500, 1000];
 
 export default function Safe() {
   const { user, refreshUser, showToast } = useAuth();
@@ -28,10 +28,11 @@ export default function Safe() {
   const [timeToCrack, setTimeToCrack] = useState(0);
   const [safeMinBank, setSafeMinBank] = useState(25);
   const [minBet, setMinBet] = useState(1);
+  const [crackAt, setCrackAt] = useState<Date | null>(null);
 
   useEffect(() => {
     publicConfig().then(c => {
-      setSafeMinBank(c.safe_min_bank || 5);
+      setSafeMinBank(c.safe_min_bank || 25);
       setMinBet(c.min_bet || 1);
     }).catch(()=>{});
   }, []);
@@ -46,18 +47,32 @@ export default function Safe() {
         const res = await safeApi.results(r.safe.id);
         setResults(res.results);
       }
+      // Обновляем время взлома из настроек
+      if (r.safe?.crack_at) {
+        setCrackAt(new Date(r.safe.crack_at));
+      }
     } catch {}
   }, []);
 
   useEffect(() => {
     load();
-    const iv = setInterval(() => setTimeToCrack(t => Math.max(0, t - 1000)), 1000);
-    const iv2 = setInterval(load, 10000);
+    const iv = setInterval(() => {
+      if (crackAt) {
+        const now = new Date();
+        const newTimeToCrack = Math.max(0, crackAt.getTime() - now.getTime());
+        setTimeToCrack(newTimeToCrack);
+      } else {
+        setTimeToCrack(t => Math.max(0, t - 1000));
+      }
+    }, 1000);
+    const iv2 = setInterval(load, 5000);
     return () => { clearInterval(iv); clearInterval(iv2); };
-  }, [load]);
+  }, [load, crackAt]);
 
   useEffect(() => {
-    if (safe?.status === 'cracking') nav('/safe/crack');
+    if (safe?.status === 'cracking') {
+      nav('/safe/crack');
+    }
   }, [safe?.status, nav]);
 
   const deposit = async () => {
@@ -93,7 +108,7 @@ export default function Safe() {
   return (
     <>
       <Header title="🔒 Сейф" />
-      <SafeCrackScene phase={safe.status === 'finished' ? 'result' : 'idle'} code={safe.code} drumSpeeds={safe.drum_speeds} />
+      <SafeCrackScene phase={safe.status === 'cracking' ? 'spinning' : safe.status === 'finished' ? 'result' : 'idle'} code={safe.code} drumSpeeds={safe.drum_speeds} />
 
       <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
         <span className="text-dim">Баланс:</span>

@@ -38,6 +38,11 @@ export default function DuelGame() {
           setTimeout(() => nav('/duel'), 1500);
           return;
         }
+        
+        // Проверяем, была ли уже просмотрена эта дуэль
+        const seenKey = `duel_seen_${duelId}`;
+        const alreadySeen = localStorage.getItem(seenKey) === '1';
+        
         // ВСЕГДА подтягиваем актуальные данные дуэли с сервера, чтобы не было -$0.00
         try {
           const d = await duelApi.get(duelId);
@@ -49,6 +54,14 @@ export default function DuelGame() {
           setTimeout(() => nav('/duel'), 1500);
           return;
         }
+        
+        // Если уже просмотрено, сразу показываем результат без анимации
+        if (alreadySeen) {
+          setPhase('result');
+        } else {
+          setPhase('flipping');
+        }
+        
         setResult(res.result || 'heads');
         const defaultTraj = { rotation_speed: 8, height: 2.5, bounces: 2, final_angle: res.i_won ? 0 : 180 };
         setTraj(res.coin_trajectory && typeof res.coin_trajectory === 'object'
@@ -62,29 +75,34 @@ export default function DuelGame() {
         setWon(iWon);
 
         const seenId = res.id || duelId;
-        const duelKey = `duel_seen_${seenId}`;
-        localStorage.setItem(duelKey, '1');
+        localStorage.setItem(seenKey, '1');
         localStorage.removeItem(`duel_dismissed_${seenId}`);
         sessionStorage.removeItem(`duel_pending_${seenId}`);
 
-        setTimeout(async () => {
-          if (!mounted) return;
-          setPhase('result');
-          await refreshUser().catch(() => {});
-          if (iWon && prz - amt >= 1) {
-            const autoPct = userRef.current?.auto_safe_percent || 0;
-            if (autoPct > 0) {
-              const toDeposit = Math.round((prz - amt) * (autoPct / 100) * 100) / 100;
-              if (toDeposit >= 1) {
-                try {
-                  await safeApi.deposit(toDeposit);
-                  if (mounted) setAutoDeposited(toDeposit);
-                  await refreshUser();
-                } catch {}
+        // Если анимация не была просмотрена, запускаем её
+        if (!alreadySeen) {
+          setTimeout(async () => {
+            if (!mounted) return;
+            setPhase('result');
+            await refreshUser().catch(() => {});
+            if (iWon && prz - amt >= 1) {
+              const autoPct = userRef.current?.auto_safe_percent || 0;
+              if (autoPct > 0) {
+                const toDeposit = Math.round((prz - amt) * (autoPct / 100) * 100) / 100;
+                if (toDeposit >= 1) {
+                  try {
+                    await safeApi.deposit(toDeposit);
+                    if (mounted) setAutoDeposited(toDeposit);
+                    await refreshUser();
+                  } catch {}
+                }
               }
             }
-          }
-        }, 2800);
+          }, 2800);
+        } else {
+          // Если уже просмотрено, просто обновляем баланс
+          await refreshUser().catch(() => {});
+        }
       } catch (e: any) {
         if (!mounted) return;
         setLoadErr(e?.message || 'Ошибка загрузки дуэли');

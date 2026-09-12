@@ -31,8 +31,8 @@ export default function SafeCrack() {
       last = now;
       setCurrentDigits(prev => prev.map((d, i) => {
         if (taps[i] !== undefined) return d;
-        // Медленно — одна цифра ≈ за 0.8 сек (достаточно, чтобы тапнуть)
-        const speed = 0.7 + i * 0.15; // чуть разная скорость на барабанах
+        // Ускорено на 20% - одна цифра ≈ за 0.64 сек
+        const speed = (0.7 + i * 0.15) * 1.2; // ускорение на 20%
         const next = d + (dt * speed * 0.0013);
         return next % 10;
       }));
@@ -62,7 +62,7 @@ export default function SafeCrack() {
       setTimeout(() => {
         setPhase('spinning');
         setStartedAt(Date.now());
-      }, 4000); // 4 сек, чтобы запомнить код
+      }, 3000); // 3 сек, чтобы запомнить код
     }
   }, [countdown, codeRevealed, safe]);
 
@@ -75,9 +75,9 @@ export default function SafeCrack() {
 
     if (newTaps.filter(t => t !== undefined).length === 3) {
       const maxTap = Math.max(...newTaps);
-      // Проверка попадания: та же формула скорости, что и в анимации
+      // Проверка попадания: та же формула скорости, что и в анимации (с ускорением 20%)
       const misses = newTaps.filter((_, idx) => {
-        const speed = 0.7 + idx * 0.15;
+        const speed = (0.7 + idx * 0.15) * 1.2; // ускорение на 20%
         const digitAtTap = Math.floor((newTaps[idx] * speed * 0.0013) % 10);
         return digitAtTap !== safe.code[idx];
       }).length;
@@ -125,7 +125,7 @@ export default function SafeCrack() {
           <div className="drums">
             {[0,1,2].map(i => {
               const isTapped = taps[i] !== undefined;
-              const speed = 0.7 + i * 0.15;
+              const speed = (0.7 + i * 0.15) * 1.2; // ускорение на 20%
               const tappedDigit = isTapped ? Math.floor(((taps[i] || 0) * speed * 0.0013) % 10) : 0;
               return (
                 <div

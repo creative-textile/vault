@@ -2,8 +2,10 @@
  * Уведомления.
  * В проде — отправка через Telegram Bot API sendMessage.
  * В демо — рассылаем через WebSocket как in-app уведомления.
+ * Также сохраняем уведомления в базе данных для отображения при следующем входе.
  */
 import { Server } from 'socket.io';
+import { createNotification, getUnreadNotifications } from './user-notifications';
 
 let io: Server | null = null;
 
@@ -11,13 +13,68 @@ export function initNotifications(socketServer: Server) {
   io = socketServer;
 }
 
-export function notify(userId: number, message: string, data?: any) {
+/**
+ * Отправить уведомление пользователю
+ * @param userId - ID пользователя
+ * @param message - Текст уведомления
+ * @param data - Дополнительные данные
+ * @param persist - Сохранить в базе данных (по умолчанию true)
+ * @param type - Тип уведомления (для классификации)
+ * @param title - Заголовок уведомления
+ * @param expiresAt - Дата истечения (опционально, по умолчанию не истекает)
+ */
+export async function notify(
+  userId: number, 
+  message: string, 
+  data?: any,
+  persist: boolean = true,
+  type: string = 'general',
+  title: string = 'Уведомление',
+  expiresAt?: Date
+) {
+  // Отправляем через WebSocket если пользователь подключён
   if (io) {
-    io.to(`user:${userId}`).emit('notification', { message, data });
+    io.to(`user:${userId}`).emit('notification', { message, data, type, title });
   }
-  console.log(`[NOTIFY user ${userId}] ${message}`);
+  
+  // Сохраняем в базе данных
+  if (persist) {
+    try {
+      await createNotification(userId, type, title, message, data);
+    } catch (e: any) {
+      console.error(`[NOTIFY] Error saving notification for user ${userId}:`, e.message);
+    }
+  }
+  
+  console.log(`[NOTIFY user ${userId}] ${type}: ${message}`);
+}
+
+/**
+ * Отправить уведомление о дуэли (с сохранением в базе)
+ */
+export async function notifyDuelResult(
+  userId: number,
+  duelId: number,
+  message: string,
+  data?: any
+) {
+  await notify(
+    userId,
+    message,
+    data,
+    true,
+    'duel_result',
+    'Результат дуэли'
+  );
 }
 
 export function broadcast(event: string, data: any) {
   if (io) io.emit(event, data);
+}
+
+/**
+ * Получить непрочитанные уведомления пользователя из базы
+ */
+export async function getUnreadUserNotifications(userId: number) {
+  return await getUnreadNotifications(userId);
 }

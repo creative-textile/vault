@@ -38,7 +38,7 @@ export default function PendingDuelModal() {
   };
 
   const watch = () => {
-    if (!pending) return;
+    if (!pending || isNaN(pending.id)) return;
     localStorage.setItem(`duel_seen_${pending.id}`, '1');
     setPending(null);
     nav(`/duel/${pending.id}`, { state: { result: pending } });
