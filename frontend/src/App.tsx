@@ -23,6 +23,8 @@ import AdminPanel from './components/profile/AdminPanel';
 import SetPin from './components/wallet/SetPin';
 import PendingDuelModal from './components/common/PendingDuelModal';
 import NotificationsModal from './components/common/NotificationsModal';
+import SafeCrackRedirector from './components/safe/SafeCrackRedirector';
+import RocketFlightBadge from './components/common/RocketFlightBadge';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -180,6 +182,10 @@ export default function App() {
           {toast && <div className="toast">{toast}</div>}
           {onboardingDone && <PendingDuelModal />}
           {onboardingDone && <NotificationsModal />}
+          {/* Уводит игрока во взлом сейфа с любого экрана и держит летящую
+              ракету доступной для кэшаута, пока он не на /rocket */}
+          {onboardingDone && token && <SafeCrackRedirector />}
+          {onboardingDone && token && <RocketFlightBadge />}
           <div className="container">
             <Routes>
               {!onboardingDone && <Route path="*" element={<Onboarding />} />}

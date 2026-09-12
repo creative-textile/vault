@@ -5,6 +5,7 @@ import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
+import { tabStore, resultSeenKey } from '../../utils/tabStore';
 
 function fmt(n: number) { return (Number(n) || 0).toFixed(2); }
 
@@ -19,23 +20,8 @@ function timeToStr(ms: number) {
 
 const CHIPS_DEFAULTS = [10, 50, 100, 250, 500, 1000];
 
-/**
- * Флаги «показать один раз» держим в sessionStorage — он свой для каждой
- * вкладки. В localStorage две вкладки одного браузера делили флаг: в одной
- * мини-игра открывалась сама, в другой нужно было жать кнопку (и секунды
- * уходили), а итоги в одной раскрывались, в другой — нет.
- */
-const tabStore = {
-  get(k: string): string | null {
-    try { return window.sessionStorage.getItem(k); } catch { return null; }
-  },
-  set(k: string, v: string) {
-    try { window.sessionStorage.setItem(k, v); } catch { /* приватный режим — не критично */ }
-  }
-};
-
 /** Ключ флага: игрок уже видел итоги этого раунда. */
-const seenKey = (id: number) => `vault:safe-result-seen:${id}`;
+const seenKey = resultSeenKey;
 
 /**
  * Исход розыгрыша для одного вклада.
@@ -180,32 +166,9 @@ export default function Safe() {
   // только ОДИН раз за раунд: на этой же странице теперь живёт сбор следующего
   // сейфа, и выдёргивать игрока оттуда каждый раз нельзя (это и была «ловушка»).
   const isCracking = safe?.status === 'cracking';
-  const autoSentRef = useRef<number | null>(null);
-  // В фоновой вкладке requestAnimationFrame остановлен, а серверные секунды
-  // идут: открыв там мини-игру, игрок потерял бы раунд, даже не увидев его.
-  // Поэтому автоматически переходим только в видимой вкладке, а если игрок
-  // вернулся в неё позже — переход сработает в этот момент.
-  const [tabVisible, setTabVisible] = useState(
-    typeof document === 'undefined' ? true : document.visibilityState === 'visible'
-  );
-  useEffect(() => {
-    const onVis = () => setTabVisible(document.visibilityState === 'visible');
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []);
-
-  useEffect(() => {
-    if (!isCracking || !safe?.id || !safeDeposit) return;
-    if ((safeDeposit.crack_time_ms ?? null) != null) return; // результат уже сдан
-    if (autoSentRef.current === safe.id) return;
-    if (!tabVisible) return; // игрок не смотрит в эту вкладку
-    const key = `vault:safe-crack-visited:${safe.id}`;
-    if (tabStore.get(key)) return; // в этом раунде игрок уже заходил в игру
-    autoSentRef.current = safe.id;
-    tabStore.set(key, '1');
-    // replace: редирект не добавляет запись в историю — «назад» не зацикливается
-    nav('/safe/crack', { replace: true });
-  }, [isCracking, safe?.id, safeDeposit, nav, tabVisible]);
+  // Автопереход в мини-игру делает SafeCrackRedirector (App.tsx): он срабатывает
+  // с любого экрана, а не только когда игрок уже стоит на /safe. Здесь остаётся
+  // лишь кнопка для того, кто зашёл в игру сам или вернулся в неё повторно.
 
   const deposit = async () => {
     const a = parseFloat(amount);

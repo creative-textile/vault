@@ -5,6 +5,8 @@ import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
+import { tabStore, crackVisitedKey } from '../../utils/tabStore';
+import { useHasRocketFlight } from '../../utils/rocketFlight';
 
 /**
  * Скорости барабанов приходят с сервера (одинаковые для всех игроков в этот день).
@@ -26,6 +28,9 @@ function fmtWindow(ms: number) {
 
 export default function SafeCrack() {
   const { user, showToast, refreshUser } = useAuth();
+  // Полёт ракеты не останавливается, пока игрок взламывает сейф: внизу появится
+  // бейдж «ЗАБРАТЬ». Ре-рендер только на старт/конец раунда, не на каждый тик.
+  const rocketFlying = useHasRocketFlight();
   const nav = useNavigate();
 
   const [safe, setSafe] = useState<any>(null);
@@ -40,6 +45,12 @@ export default function SafeCrack() {
   const [flash, setFlash] = useState<{ i: number; digit: number } | null>(null);
   const [spinElapsed, setSpinElapsed] = useState(0);
   const [windowLeft, setWindowLeft] = useState<number | null>(null);
+  // Остаток окна на момент ПЕРВОГО ответа сервера. Игрока теперь выдёргивает в
+  // мини-игру с любого экрана (SafeCrackRedirector), поэтому он может прийти в
+  // последние секунды окна — тогда обычная церемония «3-2-1 → код 3 с» съела бы
+  // всё время до старта вращения. -1 значит «данных нет, играем по обычной схеме».
+  const [firstRemaining, setFirstRemaining] = useState<number | null>(null);
+  const firstRemainingRef = useRef<number | null>(null);
   const [finished, setFinished] = useState(false);
   // Уже засчитанное время (пришли на экран после сдачи результата) — мини-игру не перезапускаем
   const [myTime, setMyTime] = useState<number | null>(null);
@@ -64,6 +75,8 @@ export default function SafeCrack() {
       setSafe(r.safe);
       setMyDeposit(r.my_deposit);
       hasDepositRef.current = !!r.my_deposit;
+      // Раунд в этой вкладке уже открывали — SafeCrackRedirector повторно не выдёргивает
+      if (r.safe?.id && r.safe?.status === 'cracking') tabStore.set(crackVisitedKey(r.safe.id), '1');
       const ds = r.safe?.drum_speeds;
       if (!speedsLockedRef.current && Array.isArray(ds) && ds.length === 3) {
         const nums = ds.map((x: any) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0);
@@ -79,6 +92,10 @@ export default function SafeCrack() {
       }
       if (r.safe?.crack_remaining_ms != null) {
         windowDeadlineRef.current = Date.now() + r.safe.crack_remaining_ms;
+        if (firstRemainingRef.current == null) {
+          firstRemainingRef.current = r.safe.crack_remaining_ms;
+          setFirstRemaining(r.safe.crack_remaining_ms);
+        }
       }
       if (r.safe && r.safe.status !== 'cracking') setFinished(true);
     } catch {}
@@ -98,26 +115,50 @@ export default function SafeCrack() {
 
   useEffect(() => () => { if (flashTimerRef.current) clearTimeout(flashTimerRef.current); }, []);
 
+  // Страховка: если сервер молчит 1.5 с, не держим игрока на цифре «3»
+  useEffect(() => {
+    if (firstRemaining != null) return;
+    const t = window.setTimeout(() => setFirstRemaining(-1), 1500);
+    return () => window.clearTimeout(t);
+  }, [firstRemaining]);
+
   // ── Предстартовая последовательность: 3-2-1 → код (3 с) → вращение ─────
+  // В последние 12 с окна церемония короткая: код сразу и на 1.2 с. Пришедший
+  // с другого экрана игрок успевает начать вращение, а не досмотреть отсчёт.
   useEffect(() => {
     if (myTime != null) return; // результат уже засчитан — отсчёт не запускаем
+    if (firstRemaining == null) return; // ждём остаток окна (или страховочные 1.5 с)
+    const urgent = firstRemaining >= 0 && firstRemaining < 12000;
     let cancelled = false;
-    const timers = [
-      window.setTimeout(() => !cancelled && setCountdown(2), 1000),
-      window.setTimeout(() => !cancelled && setCountdown(1), 2000),
-      window.setTimeout(() => {
-        if (cancelled) return;
-        setCountdown(0);
-        setCodeRevealed(true);
-      }, 3000),
-      window.setTimeout(() => {
-        if (cancelled) return;
-        startedAtRef.current = Date.now();
-        setPhase('spinning');
-      }, 6000)
-    ];
+    const timers = urgent
+      ? [
+          window.setTimeout(() => {
+            if (cancelled) return;
+            setCountdown(0);
+            setCodeRevealed(true);
+          }, 100),
+          window.setTimeout(() => {
+            if (cancelled) return;
+            startedAtRef.current = Date.now();
+            setPhase('spinning');
+          }, 1500)
+        ]
+      : [
+          window.setTimeout(() => !cancelled && setCountdown(2), 1000),
+          window.setTimeout(() => !cancelled && setCountdown(1), 2000),
+          window.setTimeout(() => {
+            if (cancelled) return;
+            setCountdown(0);
+            setCodeRevealed(true);
+          }, 3000),
+          window.setTimeout(() => {
+            if (cancelled) return;
+            startedAtRef.current = Date.now();
+            setPhase('spinning');
+          }, 6000)
+        ];
     return () => { cancelled = true; timers.forEach(clearTimeout); };
-  }, [myTime]);
+  }, [myTime, firstRemaining]);
 
   // ── Обратный отсчёт окна взлома (серверное время, тикает локально) ─────
   useEffect(() => {
@@ -366,6 +407,9 @@ export default function SafeCrack() {
           <button className="btn btn-secondary" onClick={() => nav('/')}>🏠 НА ГЛАВНУЮ</button>
         </>
       )}
+
+      {/* Запас прокрутки под плавающий бейдж ракеты, чтобы он не накрывал барабаны */}
+      {rocketFlying && <div style={{ height: 72 }} />}
     </>
   );
 }

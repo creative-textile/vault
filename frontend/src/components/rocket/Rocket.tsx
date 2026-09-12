@@ -5,6 +5,8 @@ import { rocketApi, safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { getSocket } from '../../api/socket';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
+import { acquireGameLock } from '../../utils/gameLock';
+import { setFlight, setFlightMultiplier, clearFlight, getFlight } from '../../utils/rocketFlight';
 
 type Phase = 'betting' | 'flying' | 'win' | 'lose';
 
@@ -31,6 +33,8 @@ export default function Rocket() {
   const [roundId, setRoundId] = useState<number | null>(null);
   const [profit, setProfit] = useState(0);
   const [showSafePrompt, setShowSafePrompt] = useState(false);
+  // true от нажатия «ЗАПУСТИТЬ» до ухода rocket:launch — см. acquireGameLock ниже
+  const [starting, setStarting] = useState(false);
   const [sceneKey, setSceneKey] = useState(0); // форсируем ремаунт сцены
   const launchTimeRef = useRef(0);
   const userRef = useRef(user);
@@ -60,9 +64,16 @@ export default function Rocket() {
   useEffect(() => {
     const sock = getSocket();
 
-    const onTick = (data: any) => setMultiplier(data.multiplier);
+    const onTick = (data: any) => {
+      setMultiplier(data.multiplier);
+      // Дублируем в общий стор: бейдж «ЗАБРАТЬ» рисует этот же множитель,
+      // если игрока увели с экрана ракеты во время полёта
+      setFlightMultiplier(data.multiplier);
+    };
 
     const onCrashEvt = (_data: any) => {
+      // Раунд закончился — общий стор полёта гасим (бейдж больше не нужен)
+      clearFlight();
       // Если во время полёта не было кэшаута — проигрыш
       setPhase(p => {
         if (p === 'flying') {
@@ -75,6 +86,7 @@ export default function Rocket() {
     };
 
     const onCashoutResult = async (res: any) => {
+      clearFlight();
       if (res?.result === 'win') {
         setCashoutMult(res.cashout_at);
         setCrashAt(res.crash_at);
@@ -116,6 +128,10 @@ export default function Rocket() {
     const b = parseFloat(bet);
     if (!b || b < minBet) return showToast(`Мин. ставка $${minBet}`);
     if (b > (user?.balance || 0) - (user?.frozen_balance || 0)) return showToast('Недостаточно средств');
+    // Критический участок: раунд уже создан на сервере и ставка списана, но
+    // тики стартуют только после нашего rocket:launch. Уведи игрока в этот
+    // момент (например, во взлом сейфа) — раунд зависнет навсегда.
+    setStarting(true);
     try {
       const res = await rocketApi.start(b);
       setRoundId(res.round_id);
@@ -124,14 +140,41 @@ export default function Rocket() {
       setMultiplier(1.0);
       setPhase('flying');
       launchTimeRef.current = Date.now();
+      // Полёт принадлежит серверу (тики и падение идут без клиента), поэтому
+      // состояние раунда отдаём в общий стор — кнопка «ЗАБРАТЬ» сможет
+      // появиться на любом экране, куда игрока выдернут
+      setFlight(res.round_id, res.crash_at);
       const sock = getSocket();
       sock.emit('rocket:join', res.round_id);
       setSceneKey(k => k + 1);
-      setTimeout(() => sock.emit('rocket:launch', { round_id: res.round_id }), 100);
+      setTimeout(() => {
+        sock.emit('rocket:launch', { round_id: res.round_id });
+        setStarting(false);
+      }, 100);
     } catch (e: any) {
+      setStarting(false);
       showToast(e.message);
     }
   };
+
+  // Пока запускаем раунд, игрока нельзя уводить на другой экран
+  useEffect(() => {
+    if (!starting) return;
+    return acquireGameLock('rocket-start');
+  }, [starting]);
+
+  // Вернулись на экран во время полёта (могли выдернуть во взлом сейфа):
+  // сервер продолжает тикать, поэтому восстанавливаем раунд — иначе игрок
+  // увидел бы форму ставки и не смог забрать выигрыш
+  useEffect(() => {
+    const f = getFlight();
+    if (!f) return;
+    setRoundId(f.roundId);
+    setCrashAt(f.crashAt);
+    setMultiplier(f.multiplier || 1.0);
+    setPhase('flying');
+    getSocket().emit('rocket:join', f.roundId);
+  }, []);
 
   const cashout = () => {
     if (phase !== 'flying' || !roundId) return;
