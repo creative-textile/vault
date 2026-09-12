@@ -91,7 +91,9 @@ export default function Rocket() {
               await safeApi.deposit(amt);
               showToast(`🔒 $${amt.toFixed(2)} автоматически в Сейф`);
               refreshUser();
-            } catch {}
+            } catch (e: any) {
+              console.warn('[safe] автовклад не прошёл:', e?.message || e);
+            }
           }
         } else {
           setShowSafePrompt(true);

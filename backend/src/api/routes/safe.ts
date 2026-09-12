@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import {
-  getActiveSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
+  getActiveSafe, getCollectingSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
   getSafeResults, getUserSafeDeposit, getSafeById,
   getCrackWindowMs, getCrackRemainingMs, getPendingCracksCount
 } from '../../services/safe';
@@ -14,7 +14,7 @@ router.get('/current', auth, async (req, res) => {
   try {
     const user = (req as any).user;
     const safe = await getActiveSafe();
-    if (!safe) return res.json({ safe: null, my_deposit: null });
+    if (!safe) return res.json({ safe: null, my_deposit: null, collecting_safe: null, my_collecting_deposit: null });
     const myDeposit = await getUserSafeDeposit(safe.id, user.id);
     // Время до взлома — читается из настроек (час/минута в МСК)
     const { getSetting } = await import('../../services/revenue');
@@ -31,7 +31,26 @@ router.get('/current', auth, async (req, res) => {
     const crackRemainingMs = isCracking ? await getCrackRemainingMs(safe.id, crackWindowMs ?? undefined) : null;
     const pendingCracks = isCracking ? await getPendingCracksCount(safe.id) : null;
 
+    // Сейф, который принимает вклады прямо сейчас. Во время взлома и после
+    // розыгрыша это сейф следующего дня: сбор не останавливается ни на минуту.
+    const collecting = await getCollectingSafe();
+    const collectingIsOther = !!collecting && collecting.id !== safe.id;
+    const myCollectingDeposit = collectingIsOther
+      ? await getUserSafeDeposit(collecting!.id, user.id)
+      : myDeposit;
+
     res.json({
+      collecting_safe: collecting ? {
+        id: collecting.id,
+        bank: collecting.bank,
+        prize_pool: collecting.prize_pool,
+        participants_count: collecting.participants_count,
+        status: collecting.status,
+        date: collecting.date,
+        crack_at: crackAt.toISOString(),
+        time_to_crack_ms: timeToCrack
+      } : null,
+      my_collecting_deposit: myCollectingDeposit,
       safe: {
         id: safe.id,
         bank: safe.bank,

@@ -12,6 +12,42 @@ import { todayMSK, tomorrowMSK } from '../utils/time';
  */
 const CRACK_GRACE_MS = 5_000;
 
+/**
+ * Скорость барабана определяет, сколько миллисекунд видна каждая цифра:
+ *     время цифры = 1000 / (speed × 1.3) мс
+ * Диапазон 1.45–2.00 → 385–530 мс на цифру. Это калибровано под живого
+ * игрока: простая зрительная реакция ~250–300 мс, поэтому обычный игрок
+ * попадает примерно в 80% попыток, а опытный (ловит ритм заранее) — чаще.
+ * Разброс между игроками при этом остаётся в десятках миллисекунд —
+ * порядок сдачи результата по-прежнему решает, кто заберёт пул.
+ */
+const DRUM_SPEED_MIN = 1.45;
+const DRUM_SPEED_MAX = 2.0;
+const DRUM_SPEED_FALLBACK = [1.55, 1.72, 1.9];
+
+/** Скорости на день: три разных значения, чтобы барабаны не синхронизировались. */
+export function generateDrumSpeeds(): number[] {
+  const base = 1.5 + Math.random() * 0.15;
+  return [
+    base,
+    base + 0.13 + Math.random() * 0.07,
+    base + 0.26 + Math.random() * 0.1
+  ].map(v => +v.toFixed(2));
+}
+
+/**
+ * Привести скорости к игровому диапазону. Сейфы, созданные до настройки,
+ * могли получить 1.5–4.0 (цифра мелькала 190 мс — попасть почти невозможно).
+ */
+export function clampDrumSpeeds(speeds: any): number[] {
+  if (!Array.isArray(speeds) || speeds.length !== 3) return [...DRUM_SPEED_FALLBACK];
+  const nums = speeds.map((x: any) => parseFloat(x));
+  if (nums.some((n: number) => !Number.isFinite(n) || n < DRUM_SPEED_MIN || n > DRUM_SPEED_MAX)) {
+    return [...DRUM_SPEED_FALLBACK];
+  }
+  return nums;
+}
+
 /** Таймеры финализации взлома по сейфам (пересоздаются после рестарта). */
 const finalizeTimers = new Map<number, NodeJS.Timeout>();
 
@@ -23,8 +59,8 @@ const finalizingSafes = new Set<number>();
 
 /** Сколько минут длится фаза взлома (настройка safe_crack_timeout_minutes). */
 async function getCrackTimeoutMs(): Promise<number> {
-  const raw = parseInt(await getSetting('safe_crack_timeout_minutes') || '2');
-  const minutes = Number.isFinite(raw) && raw > 0 ? raw : 2;
+  const raw = parseInt(await getSetting('safe_crack_timeout_minutes') || '1');
+  const minutes = Number.isFinite(raw) && raw > 0 ? raw : 1;
   return minutes * 60 * 1000;
 }
 
@@ -46,7 +82,7 @@ function normalizeSafe(s: any) {
   s.bank = parseFloat(s.bank);
   s.prize_pool = parseFloat(s.prize_pool);
   s.commission_amount = parseFloat(s.commission_amount);
-  s.drum_speeds = s.drum_speeds ? s.drum_speeds.map((x: string) => parseFloat(x)) : [];
+  s.drum_speeds = clampDrumSpeeds(s.drum_speeds);
   return s;
 }
 
@@ -77,6 +113,31 @@ export async function getActiveSafe() {
   return getTodaySafe();
 }
 
+/**
+ * Сейф, который сейчас принимает вклады.
+ * Как только дневной сейф ушёл во взлом или уже разыгран, сбор продолжается
+ * на сейф следующего дня (он создаётся в момент старта взлома). Поэтому ни
+ * ручной вклад, ни автовклад с выигрыша никогда не блокируются фазой взлома.
+ */
+export async function getCollectingSafe() {
+  const findCollecting = () => query(
+    `SELECT * FROM safes
+      WHERE status = 'collecting' AND date >= CAST($1 AS DATE)
+      ORDER BY date ASC LIMIT 1`,
+    [todayMSK()]
+  );
+
+  let res = await findCollecting();
+  if (res.rows.length) return normalizeSafe(res.rows[0]);
+
+  // Собирающего сейфа нет (например, дневной только что ушёл во взлом,
+  // а сейф следующего дня ещё не создан) — создаём и берём его.
+  await ensureNextDaySafe();
+  res = await findCollecting();
+  if (!res.rows.length) return null;
+  return normalizeSafe(res.rows[0]);
+}
+
 export async function createDailySafe() {
   const today = todayMSK();
   const exists = await query('SELECT id FROM safes WHERE date = $1', [today]);
@@ -84,7 +145,7 @@ export async function createDailySafe() {
 
   // Получаем одинаковые цифры для всех игроков в этот день
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
-  const drumSpeeds = [0, 1, 2].map(() => +(1.5 + Math.random() * 2.5).toFixed(2));
+  const drumSpeeds = generateDrumSpeeds();
 
   await query(
     `INSERT INTO safes (date, status, bonus, code, drum_speeds)
@@ -95,7 +156,9 @@ export async function createDailySafe() {
 }
 
 export async function safeDeposit(userId: number, amount: number) {
-  const safe = await getTodaySafe();
+  // Вклад всегда идёт в сейф, который сейчас собирает: во время взлома
+  // сегодняшнего это сейф следующего дня (иначе деньги «зависали» бы до полуночи).
+  const safe = await getCollectingSafe();
   if (!safe) throw new Error('Сейф не создан');
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
@@ -104,7 +167,6 @@ export async function safeDeposit(userId: number, amount: number) {
   if (amount < minBet) throw new Error(`Минимум $${minBet}`);
   const available = await getAvailableBalance(userId);
   if (amount > available) throw new Error('Недостаточно средств');
-  if (safe.status !== 'collecting') throw new Error('Сейф закрыт');
 
   // Если у пользователя уже есть вклад, добавляем к нему
   const existingRes = await query(
@@ -157,7 +219,19 @@ export async function safeDeposit(userId: number, amount: number) {
   );
   const totalDeposit = parseFloat(depositRes.rows[0].amount);
 
+  // Банк на главном экране должен обновляться у всех без перезагрузки страницы
+  const updated = await getSafeById(safe.id);
+  if (updated) {
+    broadcast('safe_deposit', {
+      safe_id: updated.id,
+      bank: updated.bank,
+      prize_pool: updated.prize_pool,
+      participants_count: updated.participants_count
+    });
+  }
+
   return {
+    safe_id: safe.id,
     prize_if_win: Math.round(totalDeposit * 1.5 * 100) / 100,
     total_deposit: totalDeposit,
     bonus: safe.bonus
@@ -165,15 +239,17 @@ export async function safeDeposit(userId: number, amount: number) {
 }
 
 export async function cancelSafeDeposit(userId: number) {
-  const safe = await getTodaySafe();
+  const safe = await getCollectingSafe();
   if (!safe) throw new Error('Сейф не найден');
-  if (safe.status !== 'collecting') throw new Error('Сейф уже закрыт');
 
   const depRes = await query(
     'SELECT * FROM safe_deposits WHERE safe_id = $1 AND user_id = $2',
     [safe.id, userId]
   );
-  if (!depRes.rows.length) throw new Error('Нет вклада');
+  if (!depRes.rows.length) {
+    // Вклад может лежать в сейфе, который уже ушёл во взлом, — вернуть его нельзя
+    throw new Error(`Нет вклада в СЕЙФ #${safe.id} (возврат доступен только до начала взлома)`);
+  }
 
   const dep = depRes.rows[0];
   const amount = parseFloat(dep.amount);
@@ -190,7 +266,17 @@ export async function cancelSafeDeposit(userId: number) {
   );
   await query('DELETE FROM safe_deposits WHERE id = $1', [dep.id]);
 
-  return { returned: amount };
+  const updated = await getSafeById(safe.id);
+  if (updated) {
+    broadcast('safe_deposit', {
+      safe_id: updated.id,
+      bank: updated.bank,
+      prize_pool: updated.prize_pool,
+      participants_count: updated.participants_count
+    });
+  }
+
+  return { returned: amount, safe_id: safe.id };
 }
 
 export async function submitCrackTime(userId: number, timeMs: number) {
@@ -206,7 +292,10 @@ export async function submitCrackTime(userId: number, timeMs: number) {
     'SELECT * FROM safe_deposits WHERE safe_id = $1 AND user_id = $2',
     [safe.id, userId]
   );
-  if (!depRes.rows.length) throw new Error('Нет вклада');
+  if (!depRes.rows.length) {
+    // Вклад может лежать в сейфе, который уже ушёл во взлом, — вернуть его нельзя
+    throw new Error(`Нет вклада в СЕЙФ #${safe.id} (возврат доступен только до начала взлома)`);
+  }
 
   // Результат уже засчитан — повторная отправка его не перезаписывает
   // (иначе повторный заход на экран взлома ухудшил бы честное время).
@@ -380,7 +469,7 @@ export async function ensureNextDaySafe(): Promise<void> {
   if (nextSafeExists.rows.length) return;
 
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
-  const drumSpeeds = [0, 1, 2].map(() => +(1.5 + Math.random() * 2.5).toFixed(2));
+  const drumSpeeds = generateDrumSpeeds();
 
   await query(
     `INSERT INTO safes (date, status, bonus, code, drum_speeds)

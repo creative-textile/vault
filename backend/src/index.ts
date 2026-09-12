@@ -110,11 +110,14 @@ server.listen(config.port, async () => {
       safe_min_bank:'25', safe_min_participants:'2', beautiful_flight_chance:'3',
       vault_min_deposit:'10', vault_max_deposit:'100',
       safe_crack_hour:'21', safe_crack_minute:'0',
-      safe_crack_timeout_minutes: '2'
+      safe_crack_timeout_minutes: '1'
     };
     // Принудительно обновим min_bank/safe_min_bank на корректные (на случай если в БД остались старые значения $2/$5)
     await query(`UPDATE settings SET value='25' WHERE key='safe_min_bank'`);
     await query(`UPDATE settings SET value='2' WHERE key='safe_min_participants'`);
+    // Окно взлома по умолчанию сокращено с 2 минут до 1. Обновляем только те БД,
+    // где осталось прежнее значение по умолчанию — осознанный выбор админа не трогаем.
+    await query(`UPDATE settings SET value='1' WHERE key='safe_crack_timeout_minutes' AND value='2'`);
     for (const [k,v] of Object.entries(defaults)) {
       await query(`INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING`, [k,v]);
     }

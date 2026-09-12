@@ -100,7 +100,11 @@ export default function DuelGame() {
                     await safeApi.deposit(toDeposit);
                     if (mounted) setAutoDeposited(toDeposit);
                     await refreshUser();
-                  } catch {}
+                  } catch (e: any) {
+                    // Автовклад больше не блокируется фазой взлома (деньги уходят
+                    // в собирающий сейф), но молча терять ошибку тоже не стоит
+                    console.warn('[safe] автовклад не прошёл:', e?.message || e);
+                  }
                 }
               }
             }

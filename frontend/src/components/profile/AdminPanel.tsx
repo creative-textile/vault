@@ -160,28 +160,6 @@ export default function AdminPanel() {
             )}
           </div>
 
-          <div className="card">
-            <h3 style={{color:'#ffd700', margin:'0 0 8px'}}>🔒 УПРАВЛЕНИЕ ВЗЛОМОМ СЕЙФА</h3>
-            <div className="text-dim" style={{fontSize:12, marginBottom:10}}>
-              Взлом стартует сам в настроенное время МСК (вкладка «Настройки» — «Час/Минута взлома сейфа»).
-              Окно длится ровно «Дедлайн взлома сейфа (минуты)». Итоги подводятся автоматически:
-              сразу, как только все участники сдали результат, иначе — по закрытию окна
-              (не сдавшим достаётся «не успел» и приз 0).
-            </div>
-            <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-              <button className="btn btn-small btn-secondary" onClick={async () => {
-                try {
-                  const r = await adminApi.finalizeCracking();
-                  showToast(`Итоги подведены (сейф #${r.safe_id})`);
-                  loadStats();
-                } catch (e: any) { showToast(e.message); }
-              }}>🏁 ПОДВЕСТИ ИТОГИ</button>
-            </div>
-            <div className="text-dim" style={{fontSize:11, marginTop:8}}>
-              «Подвести итоги» — принудительно закрыть окно взлома (например, если кто-то из участников завис).
-            </div>
-          </div>
-
           {stats.recent_transactions?.length > 0 && (
             <div className="card">
               <h3 style={{margin:'0 0 8px'}}>🕒 ПОСЛЕДНИЕ ОПЕРАЦИИ</h3>

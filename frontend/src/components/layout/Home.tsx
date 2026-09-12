@@ -22,16 +22,28 @@ export default function Home() {
   const nav = useNavigate();
   const [vaultStatus, setVaultStatus] = useState<any>(null);
   const [safe, setSafe] = useState<any>(null);
+  // Сейф, который принимает вклады (во время взлома и после розыгрыша — следующий)
+  const [collect, setCollect] = useState<any>(null);
   const [timeToCrack, setTimeToCrack] = useState(0);
+  const [collectTimeToCrack, setCollectTimeToCrack] = useState(0);
 
   const loadSafe = useCallback(() => {
     safeApi.current().then(s => {
       setSafe(s.safe);
+      setCollect(s.collecting_safe || s.safe);
       if (s.safe?.crack_at) {
         const d = new Date(s.safe.crack_at).getTime();
         setTimeToCrack(Math.max(0, d - Date.now()));
       } else {
         setTimeToCrack(s.safe?.time_to_crack_ms || 0);
+      }
+      const cms = s.collecting_safe?.time_to_crack_ms;
+      if (cms != null) {
+        setCollectTimeToCrack(Math.max(0, cms));
+      } else if (s.collecting_safe?.crack_at) {
+        setCollectTimeToCrack(Math.max(0, new Date(s.collecting_safe.crack_at).getTime() - Date.now()));
+      } else {
+        setCollectTimeToCrack(s.safe?.time_to_crack_ms || 0);
       }
     }).catch(() => {});
   }, []);
@@ -43,9 +55,12 @@ export default function Home() {
     const off = onSafeEvent(loadSafe);
     const iv = setInterval(() => {
       setTimeToCrack(t => Math.max(0, t - 1000));
+      setCollectTimeToCrack(t => Math.max(0, t - 1000));
     }, 1000);
+    // Страховка на случай потерянного socket: банк не должен «застывать»
+    const poll = setInterval(loadSafe, 15000);
     const refresh = setInterval(refreshUser, 5000);
-    return () => { off(); clearInterval(iv); clearInterval(refresh); };
+    return () => { off(); clearInterval(iv); clearInterval(poll); clearInterval(refresh); };
   }, [refreshUser, loadSafe]);
 
   if (!user) return null;
@@ -131,27 +146,43 @@ export default function Home() {
           </span>
         </div>
 
-        {safe?.status === 'cracking' ? (
-          <div className="text-red text-center" style={{fontSize:22, fontWeight:900, padding:'12px 0'}}>🔥 ИДЁТ ВЗЛОМ!</div>
-        ) : safe?.status === 'collecting' ? (
+        {safe?.status === 'cracking' && (
+          <div className="text-red text-center" style={{fontSize:22, fontWeight:900, padding:'12px 0'}}>
+            🔥 ИДЁТ ВЗЛОМ СЕЙФА #{safe.id}!
+          </div>
+        )}
+        {safe?.status === 'finished' && (
+          <>
+            <div className="text-green text-center" style={{fontSize:18, fontWeight:900, padding:'8px 0'}}>
+              ✅ СЕЙФ #{safe.id} ВЗЛОМАН
+            </div>
+            <div className="text-dim text-center" style={{fontSize:13}}>
+              Банк: ${fmt(safe.bank)} · Победителей: {safe.winners_count}
+            </div>
+          </>
+        )}
+        {!safe && <div className="text-dim" style={{fontSize:13}}>Создаём сейф...</div>}
+
+        {/* Банк и отсчёт — всегда по сейфу, который принимает вклады прямо сейчас:
+            во время взлома и после розыгрыша это уже сейф следующего дня */}
+        {collect?.status === 'collecting' && (
           <>
             <div style={{display:'flex', gap:16, justifyContent:'space-between', alignItems:'center', fontSize:16, margin:'8px 0'}}>
-              <div>💰 <span className="text-accent" style={{fontWeight:900}}>${fmt(safe.bank)}</span></div>
-              <div>👥 {safe.participants_count}</div>
-              <div className="timer" style={{fontSize:18}}>⏰ {timeToStr(timeToCrack)}</div>
+              <div>💰 <span className="text-accent" style={{fontWeight:900}}>${fmt(collect.bank)}</span></div>
+              <div>👥 {collect.participants_count}</div>
+              <div className="timer" style={{fontSize:18}}>
+                ⏰ {timeToStr(collect.id === safe?.id ? timeToCrack : collectTimeToCrack)}
+              </div>
             </div>
-            <div className="text-dim" style={{marginTop:8, fontSize:13}}>Приз: ×1.5 · мин. $1</div>
+            <div className="text-dim" style={{marginTop:8, fontSize:13}}>
+              {collect.id !== safe?.id ? `СЕЙФ #${collect.id} · сбор открыт · ` : ''}Приз: ×1.5 · мин. $1
+            </div>
           </>
-        ) : safe?.status === 'finished' ? (
-          <>
-            <div className="text-green text-center" style={{fontSize:18, fontWeight:900, padding:'8px 0'}}>✅ ВЗЛОМАН</div>
-            <div className="text-dim text-center" style={{fontSize:13}}>Банк: ${fmt(safe.bank)} · Победителей: {safe.winners_count}</div>
-          </>
-        ) : (
-          <div className="text-dim" style={{fontSize:13}}>Создаём сейф...</div>
         )}
         <button className="btn mt" style={{padding:'14px', fontSize:16}}>
-          {safe?.status === 'cracking' ? '🔥 УЧАСТВОВАТЬ' : '💰 ВНЕСТИ'}
+          {collect?.status === 'collecting'
+            ? (collect.id !== safe?.id ? `💰 ВНЕСТИ В СЕЙФ #${collect.id}` : '💰 ВНЕСТИ')
+            : '🔥 УЧАСТВОВАТЬ'}
         </button>
       </div>
 

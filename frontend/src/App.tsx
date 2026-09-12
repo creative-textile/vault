@@ -81,6 +81,9 @@ export default function App() {
           });
           sock.on('safe_cancelled', (data: any) => emitSafeEvent('safe_cancelled', data));
           sock.on('safe_created', (data: any) => emitSafeEvent('safe_created', data));
+          // Вклад/возврат вклада: банк в карточках обновляется у всех сразу,
+          // без перезагрузки страницы (тост не показываем — был бы спам)
+          sock.on('safe_deposit', (data: any) => emitSafeEvent('safe_deposit', data));
         }
       } finally {
         setLoading(false);

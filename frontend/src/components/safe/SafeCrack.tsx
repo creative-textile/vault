@@ -6,10 +6,16 @@ import { safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
 
-/** Скорость каждого барабана (общая для отрисовки и проверки попадания). */
-const drumSpeed = (i: number) => (0.7 + i * 0.15) * 1.2;
+/**
+ * Скорости барабанов приходят с сервера (одинаковые для всех игроков в этот день).
+ * Каждая цифра видна 1000 / (speed × 1.3) мс: при 1.45–2.00 это 385–530 мс —
+ * обычный игрок попадает примерно в 80% попыток, но разница между игроками
+ * остаётся в десятках миллисекунд. Запасные значения — те же, что генерирует сервер.
+ */
+const DEFAULT_SPEEDS = [1.55, 1.72, 1.9];
 /** Цифра барабана i в момент, когда с начала вращения прошло ms миллисекунд. */
-const digitAt = (i: number, ms: number) => Math.floor((ms * drumSpeed(i) * 0.0013) % 10);
+const digitAt = (speeds: number[], i: number, ms: number) =>
+  Math.floor((ms * (speeds[i] ?? DEFAULT_SPEEDS[i]) * 0.0013) % 10);
 
 function fmtWindow(ms: number) {
   const total = Math.max(0, Math.ceil(ms / 1000));
@@ -33,6 +39,10 @@ export default function SafeCrack() {
   const [finished, setFinished] = useState(false);
   // Уже засчитанное время (пришли на экран после сдачи результата) — мини-игру не перезапускаем
   const [myTime, setMyTime] = useState<number | null>(null);
+  // Скорости барабанов: фиксируем один раз при первой загрузке, чтобы отрисовка
+  // и проверка попадания не разъехались, если данные перезагрузятся во время игры
+  const [speeds, setSpeeds] = useState<number[]>(DEFAULT_SPEEDS);
+  const speedsLockedRef = useRef(false);
 
   const startedAtRef = useRef(0);
   const submittedRef = useRef(false);
@@ -48,6 +58,11 @@ export default function SafeCrack() {
       setSafe(r.safe);
       setMyDeposit(r.my_deposit);
       hasDepositRef.current = !!r.my_deposit;
+      const ds = r.safe?.drum_speeds;
+      if (!speedsLockedRef.current && Array.isArray(ds) && ds.length === 3) {
+        const nums = ds.map((x: any) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0);
+        if (nums.length === 3) { setSpeeds(nums); speedsLockedRef.current = true; }
+      }
       const recorded = r.my_deposit?.crack_time_ms;
       if (recorded != null) {
         // Игрок уже сдал результат (перезаход на экран, возврат с /safe) —
@@ -142,7 +157,7 @@ export default function SafeCrack() {
     if (newTaps.filter(t => t !== undefined).length < 3) return;
 
     const maxTap = Math.max(...(newTaps as number[]));
-    const misses = newTaps.filter((t, idx) => digitAt(idx, t as number) !== safe.code[idx]).length;
+    const misses = newTaps.filter((t, idx) => digitAt(speeds, idx, t as number) !== safe.code[idx]).length;
     const totalTime = maxTap + misses * 500;
 
     submittedRef.current = true;
@@ -220,7 +235,7 @@ export default function SafeCrack() {
           <div className="drums">
             {[0, 1, 2].map(i => {
               const isTapped = taps[i] !== undefined;
-              const tappedDigit = isTapped ? digitAt(i, taps[i] as number) : 0;
+              const tappedDigit = isTapped ? digitAt(speeds, i, taps[i] as number) : 0;
               return (
                 <div
                   key={i}
@@ -234,14 +249,15 @@ export default function SafeCrack() {
                     fontSize: 40
                   }}
                 >
-                  {isTapped ? tappedDigit : digitAt(i, spinElapsed)}
+                  {isTapped ? tappedDigit : digitAt(speeds, i, spinElapsed)}
                 </div>
               );
             })}
           </div>
           <div className="text-dim text-center" style={{ fontSize: 14 }}>
-            Кликните по барабану в момент, когда видна нужная цифра.<br />
-            Промах = +0.5 сек штраф.
+            Тапните по барабану ровно в тот момент, когда в нём видна нужная цифра.<br />
+            Тап по другой цифре засчитывается как промах и добавляет +0.5 с к вашему времени.<br />
+            Побеждает тот, кто сдал код раньше остальных.
           </div>
         </>
       )}

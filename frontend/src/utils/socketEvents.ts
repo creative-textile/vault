@@ -13,7 +13,8 @@ export type SafeEventType =
   | 'safe_crack_started'
   | 'safe_finished'
   | 'safe_cancelled'
-  | 'safe_created';
+  | 'safe_created'
+  | 'safe_deposit';
 
 export interface SafeEventDetail {
   type: SafeEventType;
