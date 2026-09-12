@@ -48,6 +48,18 @@ export function clampDrumSpeeds(speeds: any): number[] {
   return nums;
 }
 
+/** Штраф за промах по барабану (мс) — одинаков на клиенте и на сервере. */
+export const MISS_PENALTY_MS = 500;
+
+/**
+ * Цифра, которую видно на барабане в момент ms от старта вращения.
+ * Формула ЕДИНАЯ для клиента и сервера: клиент по ней рисует и проверяет тап,
+ * сервер — перепроверяет присланные моменты тапов по коду сейфа.
+ */
+export function digitAt(speed: number, ms: number): number {
+  return Math.floor((ms * speed * 0.0013) % 10);
+}
+
 /** Таймеры финализации взлома по сейфам (пересоздаются после рестарта). */
 const finalizeTimers = new Map<number, NodeJS.Timeout>();
 
@@ -138,6 +150,47 @@ export async function getCollectingSafe() {
   return normalizeSafe(res.rows[0]);
 }
 
+/**
+ * Собирающий сейф без создания нового (для планировщика):
+ * возвращает null, если сейчас никто не собирает.
+ */
+export async function getCollectingSafeOrNull() {
+  const res = await query(
+    `SELECT * FROM safes
+      WHERE status = 'collecting' AND date >= CAST($1 AS DATE)
+      ORDER BY date ASC LIMIT 1`,
+    [todayMSK()]
+  );
+  return res.rows.length ? normalizeSafe(res.rows[0]) : null;
+}
+
+/**
+ * Последний завершённый раунд (взломан или отменён) — тот, чьи итоги
+ * показывает экран сейфа. Вся история раундов в БД остаётся, но клиенту
+ * отдаётся только последний: игроку достаточно увидеть свой результат один раз.
+ */
+export async function getLastFinishedSafe() {
+  const res = await query(
+    `SELECT * FROM safes
+      WHERE status <> 'collecting' AND status <> 'cracking'
+      ORDER BY id DESC LIMIT 1`
+  );
+  return res.rows.length ? normalizeSafe(res.rows[0]) : null;
+}
+
+/**
+ * Когда сейф начал собирать вклады.
+ * Основное значение — колонка collect_started_at; если её нет (старая строка),
+ * берём момент взлома предыдущего сейфа: сбор следующего начинается именно тогда.
+ */
+export async function getCollectStartedAt(safeId: number): Promise<Date | null> {
+  const own = await query('SELECT collect_started_at FROM safes WHERE id = $1', [safeId]);
+  if (own.rows.length && own.rows[0].collect_started_at) return new Date(own.rows[0].collect_started_at);
+  const prev = await query('SELECT MAX(crack_started_at) AS prev FROM safes WHERE id < $1', [safeId]);
+  if (prev.rows.length && prev.rows[0].prev) return new Date(prev.rows[0].prev);
+  return null;
+}
+
 export async function createDailySafe() {
   const today = todayMSK();
   const exists = await query('SELECT id FROM safes WHERE date = $1', [today]);
@@ -148,8 +201,8 @@ export async function createDailySafe() {
   const drumSpeeds = generateDrumSpeeds();
 
   await query(
-    `INSERT INTO safes (date, status, bonus, code, drum_speeds)
-     VALUES ($1, 'collecting', false, $2, $3)`,
+    `INSERT INTO safes (date, status, bonus, code, drum_speeds, collect_started_at)
+     VALUES ($1, 'collecting', false, $2, $3, NOW())`,
     [today, code, drumSpeeds]
   );
   console.log(`[SAFE] Создан дневной сейф с кодом: ${code.join(',')}`);
@@ -279,7 +332,15 @@ export async function cancelSafeDeposit(userId: number) {
   return { returned: amount, safe_id: safe.id };
 }
 
-export async function submitCrackTime(userId: number, timeMs: number) {
+/**
+ * Принять результат взлома.
+ * Клиент присылает не только время, но и моменты тапов по барабанам (мс от
+ * старта вращения) и число промахов. Сервер сам считает, какие цифры были
+ * видны в эти моменты, и сверяет их с кодом сейфа: подставить произвольные
+ * числа больше не выйдет — несовпавшие цифры дают штраф, а засчитанное время
+ * никогда не может оказаться лучше честно пересчитанного.
+ */
+export async function submitCrackTime(userId: number, timeMs: number, taps?: any, misses?: any) {
   const clientMs = Math.round(Number(timeMs));
   if (!Number.isFinite(clientMs)) throw new Error('Некорректное время');
 
@@ -313,9 +374,33 @@ export async function submitCrackTime(userId: number, timeMs: number) {
   if (elapsedMs > deadlineMs) throw new Error('Окно взлома закрыто');
 
   const timeoutMinutes = Math.round((await getCrackTimeoutMs()) / 60000);
+
+  // ── Пересчёт времени по тапам (проверка кода на сервере) ────────────────
+  const speeds = Array.isArray(safe.drum_speeds) && safe.drum_speeds.length === 3 ? safe.drum_speeds : null;
+  const code = Array.isArray(safe.code) ? safe.code.map((c: any) => Number(c)) : null;
+  const tapList = Array.isArray(taps) ? taps.map((x: any) => Math.round(Number(x))) : null;
+  let verifiedMs = 0;
+  let serverMisses = 0;
+  const tapsOk = !!speeds && !!code && code.length === 3 && !!tapList && tapList.length === 3
+    && tapList.every((t: number) => Number.isFinite(t) && t >= 0 && t <= 24 * 3600 * 1000);
+  if (tapsOk) {
+    serverMisses = tapList!.filter((t: number, i: number) => digitAt(speeds![i], t) !== code![i]).length;
+    verifiedMs = Math.max(...tapList!) + serverMisses * MISS_PENALTY_MS;
+    if (serverMisses > 0) {
+      console.log(`[SAFE] user ${userId}: тапы не совпали с кодом (${serverMisses}/3) — штраф ${serverMisses * MISS_PENALTY_MS} мс`);
+    }
+  } else if (Array.isArray(taps)) {
+    console.log(`[SAFE] user ${userId}: прислан некорректный список тапов — считаем только время клиента`);
+  }
+  const reportedMisses = Number.isFinite(Number(misses))
+    ? Math.max(0, Math.min(50, Math.round(Number(misses))))
+    : 0;
+  // Заявленное клиентом время не может быть лучше пересчитанного сервером
+  const honestMs = Math.max(clientMs, verifiedMs, reportedMisses * MISS_PENALTY_MS);
+
   // Клиент считает время от старта барабанов, сервер — от старта фазы взлома,
   // поэтому берём большее из двух значений (честный порядок "кто раньше").
-  const recordedMs = Math.max(clientMs, elapsedMs);
+  const recordedMs = Math.max(honestMs, elapsedMs);
   if (recordedMs < 500) throw new Error('Слишком быстро');
   if (recordedMs > deadlineMs) throw new Error(`Таймаут: ${timeoutMinutes} мин`);
 
@@ -472,8 +557,8 @@ export async function ensureNextDaySafe(): Promise<void> {
   const drumSpeeds = generateDrumSpeeds();
 
   await query(
-    `INSERT INTO safes (date, status, bonus, code, drum_speeds)
-     VALUES ($1, 'collecting', false, $2, $3)`,
+    `INSERT INTO safes (date, status, bonus, code, drum_speeds, collect_started_at)
+     VALUES ($1, 'collecting', false, $2, $3, NOW())`,
     [tomorrow, code, drumSpeeds]
   );
   console.log(`[SAFE] Создан сейф на ${tomorrow} (сбор следующего дня)`);
@@ -566,7 +651,10 @@ export async function resumeCracking(): Promise<void> {
 }
 
 export async function startCracking() {
-  const safe = await getTodaySafe();
+  // Ломаем тот сейф, который сейчас собирает. Обычно это сейф сегодняшнего дня,
+  // но после розыгрыша (или если админ перенёс время взлома) собирать может уже
+  // сейф следующей даты — он и должен открыться в настроенное время.
+  const safe = (await getCollectingSafeOrNull()) || (await getTodaySafe());
   if (!safe) return;
 
   // Взлом уже идёт — не начинаем заново, только восстанавливаем таймер финализации

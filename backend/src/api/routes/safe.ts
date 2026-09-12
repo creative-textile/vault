@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import {
-  getActiveSafe, getCollectingSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
+  getActiveSafe, getCollectingSafe, getLastFinishedSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
   getSafeResults, getUserSafeDeposit, getSafeById,
   getCrackWindowMs, getCrackRemainingMs, getPendingCracksCount
 } from '../../services/safe';
@@ -39,7 +39,27 @@ router.get('/current', auth, async (req, res) => {
       ? await getUserSafeDeposit(collecting!.id, user.id)
       : myDeposit;
 
+    // Последний завершённый раунд: экран сейфа показывает итоги только его
+    // (вся история в БД остаётся, но клиенту достаточно последнего раунда)
+    const lastFinished = await getLastFinishedSafe();
+    const myLastDeposit = lastFinished && lastFinished.id !== safe.id
+      ? await getUserSafeDeposit(lastFinished.id, user.id)
+      : (lastFinished && lastFinished.id === safe.id ? myDeposit : null);
+
     res.json({
+      last_finished: lastFinished ? {
+        id: lastFinished.id,
+        // Раунд закрыт — код уже не секрет: по нему 3D-сцена выравнивает барабаны
+        code: lastFinished.status === 'finished' ? lastFinished.code : null,
+        date: lastFinished.date,
+        status: lastFinished.status,
+        bank: lastFinished.bank,
+        prize_pool: lastFinished.prize_pool,
+        participants_count: lastFinished.participants_count,
+        winners_count: lastFinished.winners_count,
+        cracked_at: lastFinished.cracked_at
+      } : null,
+      my_last_deposit: myLastDeposit,
       collecting_safe: collecting ? {
         id: collecting.id,
         bank: collecting.bank,
@@ -99,10 +119,12 @@ router.post('/cancel', auth, async (req, res) => {
 router.post('/crack', auth, async (req, res) => {
   try {
     const user = (req as any).user;
-    const { time_ms } = req.body;
+    const { time_ms, taps, misses } = req.body;
     const t = Number(time_ms);
     if (!Number.isFinite(t) || t < 0) throw new Error('Некорректное время взлома');
-    res.json(await submitCrackTime(user.id, t));
+    // taps — моменты тапов по барабанам (мс от старта вращения): по ним сервер
+    // сам проверяет, что игрок остановил барабаны на цифрах кода
+    res.json(await submitCrackTime(user.id, t, taps, misses));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

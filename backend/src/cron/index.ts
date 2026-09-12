@@ -1,18 +1,24 @@
 import cron from 'node-cron';
 import {
   createDailySafe, startCracking, getTodaySafe, ensureNextDaySafe,
-  finalizeCrackIfDue, resumeCracking
+  finalizeCrackIfDue, resumeCracking, getCollectingSafeOrNull, getCollectStartedAt
 } from '../services/safe';
 import { dailyVaultDistribution } from '../services/vault-deposit';
 import { getSetting } from '../services/revenue';
 import { broadcast } from '../services/notifications';
-import { nowMSK, todayMSK } from '../utils/time';
+import { nowMSK, todayMSK, todaySlotMSK } from '../utils/time';
 
 /**
- * Старт взлома в настроенное время МСК (или «догоняюще», если время уже прошло,
- * а сейф ещё в фазе сбора — например, после простоя контейнера).
- * Финализация не делается здесь: её ставит startCracking() по окончании окна
- * взлома, плюс каждую минуту работает страховка finalizeCrackIfDue().
+ * Старт взлома в настроенное время МСК.
+ *
+ * Ломаем сейф, который сейчас СОБИРАЕТ (обычно сегодняшний, а после розыгрыша —
+ * сейф следующего дня). Слотом взлома считается настроенное время сегодняшнего
+ * дня; если админ перенёс время в настройках, собирающий сейф откроется в новый
+ * слот — ждать сутки не нужно.
+ *
+ * Защита от повторного старта в том же слоте: если сейф начал собирать позже
+ * текущего слота, значит этот слот уже отыгран предыдущим сейфом (он только что
+ * был взломан), и следующий взлом — завтра.
  */
 async function maybeStartCrack(lastCrackDate: string): Promise<string> {
   const hour = parseInt(await getSetting('safe_crack_hour') || '21');
@@ -20,24 +26,27 @@ async function maybeStartCrack(lastCrackDate: string): Promise<string> {
   const now = nowMSK();
   const today = todayMSK();
 
-  const safe = await getTodaySafe();
+  const safe = await getCollectingSafeOrNull();
   if (!safe) {
-    await createDailySafe();
-    return lastCrackDate;
+    // Собирать некому: создаём сегодняшний сейф (и следующий, если сегодня уже разыгран)
+    if (!(await getTodaySafe())) await createDailySafe();
+    await ensureNextDaySafe();
+    const created = await getCollectingSafeOrNull();
+    return created ? lastCrackDate : today;
   }
 
-  if (safe.status !== 'collecting') {
-    // Взлом уже идёт или сейф разыгран/отменён — сегодня больше не стартуем
-    if (safe.status === 'finished' || safe.status === 'cancelled') await ensureNextDaySafe();
+  const slot = todaySlotMSK(hour, minute);
+  if (now.getTime() < slot.getTime()) return lastCrackDate; // слот ещё не наступил
+
+  // Слот уже наступил. Проверяем, не отыгран ли он предыдущим сейфом
+  const collectStarted = await getCollectStartedAt(safe.id);
+  if (collectStarted && collectStarted.getTime() >= slot.getTime()) {
+    // Сейф начал собирать после текущего слота → ждём следующий (завтра)
     return today;
   }
 
-  const crackTimeToday = new Date(now);
-  crackTimeToday.setHours(hour, minute, 0, 0);
-  if (now.getTime() < crackTimeToday.getTime()) return lastCrackDate; // ещё рано
-
   lastCrackDate = today;
-  console.log(`[CRON] Старт взлома сейфа в ${hour}:${String(minute).padStart(2, '0')} МСК (текущее время: ${now.getHours()}:${now.getMinutes()})`);
+  console.log(`[CRON] Старт взлома сейфа #${safe.id} в ${hour}:${String(minute).padStart(2, '0')} МСК (текущее время: ${now.getHours()}:${now.getMinutes()})`);
   const res = await startCracking();
   if (!res || res.cancelled) {
     console.log('[CRON] Сейф отменён (не набрал минимум)');
@@ -47,6 +56,17 @@ async function maybeStartCrack(lastCrackDate: string): Promise<string> {
     broadcast('safe_crack_started', { safe: res.safe, window_ms: res.window_ms });
   }
   return lastCrackDate;
+}
+
+/**
+ * Один тик планировщика сейфа: страховка по финализации + проверка старта взлома.
+ * Экспортирован, чтобы тесты (и отладка) могли вызвать тик детерминированно,
+ * не дожидаясь границы минуты.
+ */
+export async function runSafeTick(lastCrackDate = ''): Promise<string> {
+  const finalized = await finalizeCrackIfDue();
+  if (finalized) console.log(`[CRON] Окно взлома сейфа #${finalized} истекло — итоги подведены`);
+  return maybeStartCrack(lastCrackDate);
 }
 
 /** Запущенные задачи — нужны для корректного завершения процесса. */
@@ -71,9 +91,7 @@ export function initCrons() {
   let lastCrackDate = '';
   tasks.push(cron.schedule('* * * * *', async () => {
     try {
-      const finalized = await finalizeCrackIfDue();
-      if (finalized) console.log(`[CRON] Окно взлома сейфа #${finalized} истекло — итоги подведены`);
-      lastCrackDate = await maybeStartCrack(lastCrackDate);
+      lastCrackDate = await runSafeTick(lastCrackDate);
     } catch (e: any) {
       console.error('[CRON safe] error:', e.message);
     }

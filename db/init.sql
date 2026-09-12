@@ -79,7 +79,10 @@ CREATE TABLE IF NOT EXISTS safes (
     date               DATE UNIQUE DEFAULT CURRENT_DATE,
     cracked_at         TIMESTAMP,
     -- Момент старта фазы взлома: по нему считается окно взлома и время игрока
-    crack_started_at   TIMESTAMPTZ
+    crack_started_at   TIMESTAMPTZ,
+    -- Момент начала сбора: сбор следующего сейфа стартует в момент взлома
+    -- предыдущего, и по нему планировщик определяет слот взлома
+    collect_started_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS safe_deposits (

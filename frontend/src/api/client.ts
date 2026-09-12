@@ -80,7 +80,13 @@ export const safeApi = {
   current: () => api('/api/safe/current'),
   deposit: (amount: number) => api('/api/safe/deposit', { method: 'POST', body: JSON.stringify({ amount }) }),
   cancel: () => api('/api/safe/cancel', { method: 'POST' }),
-  crack: (time_ms: number) => api('/api/safe/crack', { method: 'POST', body: JSON.stringify({ time_ms }) }),
+  /**
+   * Сдать результат взлома. Кроме времени отправляем моменты тапов (мс от старта
+   * вращения) и число промахов: сервер сам сверяет цифры с кодом сейфа и
+   * пересчитывает время — подставить произвольные числа не получится.
+   */
+  crack: (time_ms: number, taps?: number[], misses?: number) =>
+    api('/api/safe/crack', { method: 'POST', body: JSON.stringify({ time_ms, taps, misses }) }),
   results: (id: number) => api(`/api/safe/results/${id}`),
   get: (id: number) => api(`/api/safe/${id}`)
 };

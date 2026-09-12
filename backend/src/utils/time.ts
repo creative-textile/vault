@@ -39,6 +39,18 @@ export function nextMSK(hour: number, minute: number): Date {
   return fromMSK(target);
 }
 
+/**
+ * Настоящий Date для сегодняшнего слота hour:minute по МСК.
+ * В отличие от nextMSK() не переносится на завтра, если время уже прошло —
+ * нужно планировщику, чтобы понять, наступил ли слот взлома.
+ */
+export function todaySlotMSK(hour: number, minute: number): Date {
+  const n = nowMSK();
+  const target = new Date(n);
+  target.setHours(hour, minute, 0, 0);
+  return fromMSK(target);
+}
+
 /** Форматировать время (HH:MM) в MSK. */
 export function fmtMSK(d: Date): string {
   const m = toMSK(d);

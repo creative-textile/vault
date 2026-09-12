@@ -92,6 +92,13 @@ server.listen(config.port, async () => {
     // Отметка старта фазы взлома сейфа (нужна существующим БД: окно взлома считается от неё)
     try {
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS crack_started_at TIMESTAMPTZ`);
+      // Момент начала сбора: по нему планировщик понимает, не отыгран ли
+      // сегодняшний слот взлома предыдущим сейфом (важно при переносе времени в админке)
+      await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS collect_started_at TIMESTAMPTZ`);
+      await query(`UPDATE safes s
+                      SET collect_started_at = COALESCE(
+                        (SELECT MAX(p.crack_started_at) FROM safes p WHERE p.id < s.id), NOW())
+                    WHERE s.collect_started_at IS NULL`);
     } catch (e: any) {
       console.error('[DB] Migration safes.crack_started_at:', e.message);
     }

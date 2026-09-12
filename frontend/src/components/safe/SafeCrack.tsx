@@ -13,6 +13,8 @@ import { onSafeEvent } from '../../utils/socketEvents';
  * остаётся в десятках миллисекунд. Запасные значения — те же, что генерирует сервер.
  */
 const DEFAULT_SPEEDS = [1.55, 1.72, 1.9];
+/** Штраф за промах (мс) — тот же, что на сервере. */
+const MISS_PENALTY_MS = 500;
 /** Цифра барабана i в момент, когда с начала вращения прошло ms миллисекунд. */
 const digitAt = (speeds: number[], i: number, ms: number) =>
   Math.floor((ms * (speeds[i] ?? DEFAULT_SPEEDS[i]) * 0.0013) % 10);
@@ -33,7 +35,11 @@ export default function SafeCrack() {
   const [phase, setPhase] = useState<'countdown' | 'spinning' | 'done'>('countdown');
   const [countdown, setCountdown] = useState(3);
   const [codeRevealed, setCodeRevealed] = useState(false);
+  // taps[i] — момент остановки барабана (мс от старта вращения); барабан
+  // останавливается ТОЛЬКО на правильной цифре, поэтому промахи считаем отдельно
   const [taps, setTaps] = useState<(number | undefined)[]>([]);
+  const [misses, setMisses] = useState(0);
+  const [flash, setFlash] = useState<{ i: number; digit: number } | null>(null);
   const [spinElapsed, setSpinElapsed] = useState(0);
   const [windowLeft, setWindowLeft] = useState<number | null>(null);
   const [finished, setFinished] = useState(false);
@@ -50,6 +56,9 @@ export default function SafeCrack() {
   const hasDepositRef = useRef(false);
   const windowDeadlineRef = useRef<number | null>(null);
   const spinRef = useRef<number | null>(null);
+  const missesRef = useRef(0);
+  const tapsRef = useRef<(number | undefined)[]>([]);
+  const flashTimerRef = useRef<number | null>(null);
 
   // ── Данные сейфа: опрос + мгновенная реакция на socket-событие ──────────
   const load = useCallback(async () => {
@@ -80,7 +89,7 @@ export default function SafeCrack() {
 
   useEffect(() => {
     load();
-    const iv = setInterval(load, 3000);
+    const iv = setInterval(load, 5000);
     const off = onSafeEvent(d => {
       if (d.type === 'safe_finished' || d.type === 'safe_cancelled') {
         setFinished(true);
@@ -89,6 +98,8 @@ export default function SafeCrack() {
     });
     return () => { clearInterval(iv); off(); };
   }, [load]);
+
+  useEffect(() => () => { if (flashTimerRef.current) clearTimeout(flashTimerRef.current); }, []);
 
   // ── Предстартовая последовательность: 3-2-1 → код (3 с) → вращение ─────
   useEffect(() => {
@@ -116,7 +127,7 @@ export default function SafeCrack() {
     const iv = setInterval(() => {
       const deadline = windowDeadlineRef.current;
       setWindowLeft(deadline == null ? null : Math.max(0, deadline - Date.now()));
-    }, 500);
+    }, 250);
     return () => clearInterval(iv);
   }, []);
 
@@ -146,19 +157,9 @@ export default function SafeCrack() {
     return () => clearTimeout(t);
   }, [finished, phase, nav]);
 
-  const tapDrum = (i: number) => {
-    if (phase !== 'spinning' || taps[i] !== undefined || submittedRef.current) return;
-
-    const tapTime = Date.now() - startedAtRef.current;
-    const newTaps = [...taps];
-    newTaps[i] = tapTime;
-    setTaps(newTaps);
-
-    if (newTaps.filter(t => t !== undefined).length < 3) return;
-
-    const maxTap = Math.max(...(newTaps as number[]));
-    const misses = newTaps.filter((t, idx) => digitAt(speeds, idx, t as number) !== safe.code[idx]).length;
-    const totalTime = maxTap + misses * 500;
+  const submit = (finalTaps: number[], finalMisses: number) => {
+    const maxTap = Math.max(...finalTaps);
+    const totalTime = maxTap + finalMisses * MISS_PENALTY_MS;
 
     submittedRef.current = true;
     setPhase('done');
@@ -169,12 +170,13 @@ export default function SafeCrack() {
     }
 
     submittedNowRef.current = true;
-    safeApi.crack(totalTime)
+    // Сервер получает моменты тапов и сам сверяет цифры с кодом сейфа:
+    // засчитанное время не может быть лучше честно пересчитанного
+    safeApi.crack(totalTime, finalTaps, finalMisses)
       .then((r: any) => {
-        // Сервер пишет max(время клиента, время от старта фазы взлома)
         const shown = Number.isFinite(r?.crack_time_ms) ? r.crack_time_ms : totalTime;
         setMyTime(shown);
-        showToast(`✅ Взлом за ${(shown / 1000).toFixed(2)}с (промахи: ${misses})`);
+        showToast(`✅ Код собран за ${(shown / 1000).toFixed(2)} с (промахов: ${finalMisses})`);
         refreshUser();
         // Все участники сдали результат — сервер подвёл итоги досрочно
         if (r?.finished) setFinished(true);
@@ -183,10 +185,43 @@ export default function SafeCrack() {
       .catch((e: any) => showToast(e.message));
   };
 
+  /**
+   * Тап по барабану. Останавливает его только попадание в нужную цифру:
+   * промах НЕ фиксирует барабан, а добавляет +0.5 с штрафа — сейф нельзя
+   * открыть произвольными числами.
+   */
+  const tapDrum = (i: number) => {
+    if (phase !== 'spinning' || tapsRef.current[i] !== undefined || submittedRef.current) return;
+    const code: number[] = safe?.code || [];
+    if (code.length !== 3) return;
+
+    const tapTime = Math.round(Date.now() - startedAtRef.current);
+    const shown = digitAt(speeds, i, tapTime);
+
+    if (shown !== code[i]) {
+      missesRef.current += 1;
+      setMisses(missesRef.current);
+      setFlash({ i, digit: shown });
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = window.setTimeout(() => setFlash(null), 400);
+      return;
+    }
+
+    const newTaps = [...tapsRef.current];
+    newTaps[i] = tapTime;
+    tapsRef.current = newTaps;
+    setTaps(newTaps);
+
+    const done = newTaps.filter(t => t !== undefined) as number[];
+    if (done.length === 3) submit(newTaps as number[], missesRef.current);
+  };
+
   if (!safe) return <><Header title="🔒 ВЗЛОМ СЕЙФА" /><div className="text-center mt">Загрузка...</div></>;
 
   const code: number[] = safe.code || [0, 0, 0];
   const showWindow = windowLeft != null && windowLeft > 0;
+  const windowClosed = windowLeft === 0;
+  const stoppedCount = taps.filter(t => t !== undefined).length;
 
   return (
     <>
@@ -201,6 +236,11 @@ export default function SafeCrack() {
       {showWindow && phase !== 'done' && (
         <div className="timer" style={{ color: (windowLeft as number) < 15000 ? '#ef4444' : undefined }}>
           ⏱ Окно взлома: {fmtWindow(windowLeft as number)}
+        </div>
+      )}
+      {windowClosed && phase !== 'done' && (
+        <div className="timer" style={{ color: '#ef4444' }}>
+          ⏱ Окно взлома закрыто — результат не будет засчитан
         </div>
       )}
 
@@ -225,39 +265,59 @@ export default function SafeCrack() {
             <span>{code[1]}</span>
             <span>{code[2]}</span>
           </div>
-          <div className="text-dim">Запоминайте! Барабаны сейчас начнут вращаться...</div>
+          <div className="text-dim">Барабан остановится только на своей цифре. Промах — +0.5 с.</div>
         </div>
       )}
 
       {phase === 'spinning' && (
         <>
-          <div className="text-center mt" style={{ fontSize: 18 }}>Тапните по нужной цифре!</div>
+          <div className="text-center mt" style={{ fontSize: 18 }}>
+            Остановите барабаны на цифрах кода
+            <span style={{ color: '#ffd700', fontWeight: 900 }}> {code[0]} · {code[1]} · {code[2]}</span>
+          </div>
           <div className="drums">
             {[0, 1, 2].map(i => {
-              const isTapped = taps[i] !== undefined;
-              const tappedDigit = isTapped ? digitAt(speeds, i, taps[i] as number) : 0;
+              const isStopped = taps[i] !== undefined;
+              const isFlash = flash?.i === i;
+              const shownDigit = isStopped
+                ? digitAt(speeds, i, taps[i] as number)
+                : isFlash
+                  ? (flash as any).digit
+                  : digitAt(speeds, i, spinElapsed);
               return (
-                <div
-                  key={i}
-                  className="drum"
-                  onClick={() => tapDrum(i)}
-                  style={{
-                    opacity: isTapped ? 0.5 : 1,
-                    background: isTapped ? '#111' : '#1a1a3a',
-                    position: 'relative',
-                    color: isTapped ? (tappedDigit === code[i] ? '#22c55e' : '#ef4444') : '#ffd700',
-                    fontSize: 40
-                  }}
-                >
-                  {isTapped ? tappedDigit : digitAt(speeds, i, spinElapsed)}
+                <div key={i} style={{ textAlign: 'center' }}>
+                  <div className="text-dim" style={{ fontSize: 13, marginBottom: 4 }}>
+                    цель: <b style={{ color: '#ffd700', fontSize: 16 }}>{code[i]}</b>
+                  </div>
+                  <div
+                    className="drum"
+                    onClick={() => tapDrum(i)}
+                    style={{
+                      opacity: isStopped ? 0.6 : 1,
+                      background: isStopped ? '#111' : '#1a1a3a',
+                      // в покое оставляем рамку из CSS-класса, подсвечиваем только состояние
+                      border: isFlash ? '3px solid #ef4444' : isStopped ? '3px solid #22c55e' : undefined,
+                      position: 'relative',
+                      color: isStopped ? '#22c55e' : isFlash ? '#ef4444' : '#ffd700',
+                      fontSize: 40
+                    }}
+                  >
+                    {shownDigit}
+                  </div>
+                  <div style={{ fontSize: 12, marginTop: 4, color: isStopped ? '#22c55e' : '#8888aa' }}>
+                    {isStopped ? `✓ ${(taps[i]! / 1000).toFixed(2)} с` : isFlash ? 'промах +0.5 с' : 'крутится'}
+                  </div>
                 </div>
               );
             })}
           </div>
           <div className="text-dim text-center" style={{ fontSize: 14 }}>
-            Тапните по барабану ровно в тот момент, когда в нём видна нужная цифра.<br />
-            Тап по другой цифре засчитывается как промах и добавляет +0.5 с к вашему времени.<br />
-            Побеждает тот, кто сдал код раньше остальных.
+            Собрано {stoppedCount} из 3 · Промахов: {misses}
+            {misses > 0 ? ` (+${((misses * MISS_PENALTY_MS) / 1000).toFixed(1)} с к времени)` : ''}
+          </div>
+          <div className="text-dim text-center" style={{ fontSize: 13, marginTop: 6 }}>
+            Барабан останавливается только на нужной цифре — сервер проверяет каждый тап.
+            Тап мимо добавляет +0.5 с. Побеждает тот, кто собрал код раньше остальных.
           </div>
         </>
       )}
@@ -265,10 +325,15 @@ export default function SafeCrack() {
       {phase === 'done' && (
         <>
           <div className="card mt text-center">
-            <div className="result-text win">✅ ВЗЛОМ!</div>
+            <div className="result-text win">✅ КОД СОБРАН: {code[0]} {code[1]} {code[2]}</div>
             {myTime != null && (
               <div className="text-accent" style={{ fontWeight: 900, fontSize: 20 }}>
                 Ваше время: {(myTime / 1000).toFixed(2)} с
+              </div>
+            )}
+            {misses > 0 && (
+              <div className="text-dim" style={{ fontSize: 13 }}>
+                Включая штраф за промахи: {misses} × 0.5 с = +{(misses * MISS_PENALTY_MS / 1000).toFixed(1)} с
               </div>
             )}
             <div className="text-dim">

@@ -99,9 +99,13 @@ export default function SafeCrackScene({ phase, code = [0,0,0], drumSpeeds = [2,
 
       redLight.intensity = phase === 'spinning' ? 2 + Math.sin(t * 8) * 1.5 : 1;
 
+      // code/drumSpeeds могут прийти как null (сейф ещё не взламывают) —
+      // иначе в фазе 'result' исключение возникало бы на каждом кадре
+      const speeds = stateRef.current.drumSpeeds || [2, 2, 2];
+      const digits = stateRef.current.code || [0, 0, 0];
       if (phase === 'spinning') {
         drums.forEach((d, i) => {
-          d.rotation.z += stateRef.current.drumSpeeds[i] * 0.05;
+          d.rotation.z += (speeds[i] ?? 2) * 0.05;
         });
       } else if (phase === 'idle') {
         drums.forEach(d => {
@@ -110,7 +114,7 @@ export default function SafeCrackScene({ phase, code = [0,0,0], drumSpeeds = [2,
       } else if (phase === 'result') {
         // Выравнивание по коду
         drums.forEach((d, i) => {
-          const target = (code[i] / 10) * Math.PI * 2;
+          const target = ((digits[i] ?? 0) / 10) * Math.PI * 2;
           d.rotation.z += (target - d.rotation.z) * 0.1;
         });
       }
