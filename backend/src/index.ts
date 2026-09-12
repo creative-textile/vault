@@ -151,6 +151,18 @@ server.listen(config.port, async () => {
     } catch (e: any) {
       console.error('[DB] Error cleaning notifications:', e.message);
     }
+
+    // Вызовы дуэли, созданные до исправления двойной блокировки ставки:
+    // прежний createDuel и замораживал, и списывал деньги. Возвращаем зависшие
+    // в лобби ставки на баланс — иначе при принятии такого вызова ставка
+    // списалась бы у создателя второй раз, а при отмене пропала бы вовсе.
+    try {
+      const { repairDoubleLockedOpenDuels } = await import('./services/duel');
+      const n = await repairDoubleLockedOpenDuels();
+      if (n > 0) console.log(`[DB] Возвращены на баланс ставки ${n} зависших вызовов дуэли`);
+    } catch (e: any) {
+      console.error('[DB] Repair open duels:', e.message);
+    }
   } catch (e: any) {
     console.error('[DB] Migration warning:', e.message);
   }

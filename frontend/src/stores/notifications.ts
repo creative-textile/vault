@@ -81,10 +81,19 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
     }
     try {
       await duelApi.markDuelNotificationsAsRead(duelId);
-      await get().fetchNotifications();
     } catch (error) {
       console.error('Error marking duel notifications as read:', error);
+      // Сервер не записал «прочитано» — пробуем ещё, иначе следующий опрос
+      // вернёт уведомление, и окно, которое игрок уже закрыл, всплывёт снова.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          await duelApi.markDuelNotificationsAsRead(duelId);
+          break;
+        } catch { /* попробуем ещё раз */ }
+      }
     }
+    await get().fetchNotifications();
   },
 
   clear: () => set({ notifications: [], unreadCount: 0 })

@@ -21,7 +21,7 @@ import Referral from './components/profile/Referral';
 import Profile from './components/profile/Profile';
 import AdminPanel from './components/profile/AdminPanel';
 import SetPin from './components/wallet/SetPin';
-import PendingDuelModal from './components/common/PendingDuelModal';
+import DuelResultModal from './components/common/DuelResultModal';
 import NotificationsModal from './components/common/NotificationsModal';
 import SafeCrackRedirector from './components/safe/SafeCrackRedirector';
 import RocketFlightBadge from './components/common/RocketFlightBadge';
@@ -65,7 +65,10 @@ export default function App() {
           // Подделывать уведомление на клиенте (id: Date.now()) нельзя: такой id
           // не существует в БД, и «отметить прочитанным» по нему не сработает.
           sock.on('notification', (data: any) => {
-            showToast(data.message);
+            // Результат дуэли показывает DuelResultModal (очередь с кнопками
+            // «реплей» / «закрыть»). Тост поверх него жил 3.5 с и терялся —
+            // именно так уведомление о дуэли и проглядели.
+            if (data?.type !== 'duel_result') showToast(data.message);
             refreshUser();
             fetchNotifications();
             emitNotificationEvent(data || {});
@@ -180,7 +183,9 @@ export default function App() {
       <BrowserRouter>
         <div className="app">
           {toast && <div className="toast">{toast}</div>}
-          {onboardingDone && <PendingDuelModal />}
+          {/* Очередь результатов дуэлей: модальное окно из непрочитанных
+              уведомлений в БД, переживает перезапуск приложения */}
+          {token && onboardingDone && <DuelResultModal />}
           {onboardingDone && <NotificationsModal />}
           {/* Уводит игрока во взлом сейфа с любого экрана и держит летящую
               ракету доступной для кэшаута, пока он не на /rocket. От онбординга

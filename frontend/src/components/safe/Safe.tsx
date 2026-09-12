@@ -48,6 +48,10 @@ const fmtNet = (net: number) =>
 export default function Safe() {
   const { user, refreshUser, showToast } = useAuth();
   const nav = useNavigate();
+  // С экрана сейфа «назад» всегда ведёт в главное меню — независимо от того,
+  // откуда игрока сюда перебросили (требование: фича «вернуться, откуда забрали»
+  // убрана). replace, чтобы не плодить записи истории и не ходить по кругу.
+  const backToMenu = useCallback(() => nav('/', { replace: true }), [nav]);
 
   // Активный сейф: нужен только для фазы взлома (остальное — собирающий и последний раунд)
   const [safe, setSafe] = useState<any>(null);
@@ -197,7 +201,7 @@ export default function Safe() {
   };
 
   if (!safe && !collect) {
-    return <><Header title="🔒 Сейф" /><div className="text-center mt">Загрузка...</div></>;
+    return <><Header title="🔒 Сейф" onBack={backToMenu} /><div className="text-center mt">Загрузка...</div></>;
   }
 
   const collecting = collect?.status === 'collecting';
@@ -225,7 +229,7 @@ export default function Safe() {
 
   return (
     <>
-      <Header title="🔒 Сейф" />
+      <Header title="🔒 Сейф" onBack={backToMenu} />
       {user && (
         <div className="text-dim text-center" style={{ fontSize: 12, margin: '2px 0 8px' }}>
           👤 @{user.username || 'demo'} · баланс ${fmt(user.balance)}

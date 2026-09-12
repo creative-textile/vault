@@ -4,15 +4,18 @@ interface Props {
   title: string;
   back?: boolean;
   right?: React.ReactNode;
+  /** Куда ведёт «←». По умолчанию — на одну запись назад по истории. */
+  onBack?: () => void;
 }
 
-export default function Header({ title, back = true, right }: Props) {
+export default function Header({ title, back = true, right, onBack }: Props) {
   const nav = useNavigate();
 
   // В Telegram WebView страница нередко открывается сразу глубоким URL —
   // истории «назад» просто нет, и nav(-1) не делает ничего (кнопка «мертвая»).
   // react-router хранит индекс текущей записи в history.state.idx.
   const goBack = () => {
+    if (onBack) return onBack();
     const idx = (window.history.state as any)?.idx;
     if (typeof idx === 'number' && idx > 0) nav(-1);
     else nav('/', { replace: true });

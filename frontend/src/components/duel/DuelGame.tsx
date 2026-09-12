@@ -25,6 +25,8 @@ export default function DuelGame() {
   const [showSafe, setShowSafe] = useState(false);
   const [autoDeposited, setAutoDeposited] = useState(0);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  /** Если это повтор сыгранной дуэли — подпись с датой, чтобы игрок понимал контекст. */
+  const [replayOf, setReplayOf] = useState<string | null>(null);
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
 
@@ -41,7 +43,9 @@ export default function DuelGame() {
           return;
         }
         
-        // Проверяем, была ли уже просмотрена эта дуэль
+        // Флаг «анимацию уже смотрели» ставит ТОЛЬКО этот экран (ниже).
+        // Вызывающая сторона его не проставляет: иначе повтор дуэли открывался
+        // бы сразу на результате, без броска монеты, — а смысл реплея в броске.
         const seenKey = `duel_seen_${duelId}`;
         const alreadySeen = localStorage.getItem(seenKey) === '1';
         
@@ -53,6 +57,15 @@ export default function DuelGame() {
         if (!mounted) return;
         if (!res || !res.id) {
           setLoadErr('Дуэль не найдена');
+          setTimeout(() => nav('/duel', { replace: true }), 1500);
+          return;
+        }
+
+        // Несыгранная дуэль: результата нет, и выдумывать «орёл/решка» нельзя
+        if (res.status && res.status !== 'finished') {
+          setLoadErr(res.status === 'waiting'
+            ? 'Дуэль ещё не состоялась — ждём соперника'
+            : 'Дуэль отменена');
           setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
@@ -76,10 +89,17 @@ export default function DuelGame() {
         const iWon = !!res.i_won;
         setWon(iWon);
 
+        // Повтор: либо анимацию уже смотрели в этом браузере, либо дуэль
+        // сыграна давно (игрок пришёл из уведомления спустя часы или дни)
+        const finishedAt = res.finished_at ? new Date(res.finished_at) : null;
+        if (alreadySeen || (finishedAt && Date.now() - finishedAt.getTime() > 60_000)) {
+          if (finishedAt) {
+            setReplayOf(finishedAt.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }));
+          }
+        }
+
         const seenId = res.id || duelId;
         localStorage.setItem(seenKey, '1');
-        localStorage.removeItem(`duel_dismissed_${seenId}`);
-        sessionStorage.removeItem(`duel_pending_${seenId}`);
 
         // Результат просмотрен — гасим уведомления по этой дуэли,
         // иначе бейдж непрочитанных висит, даже когда игрок всё увидел
@@ -170,6 +190,11 @@ export default function DuelGame() {
             {won ? '🏆 ВЫ ПОБЕДИЛИ!' : '❌ ВЫ ПРОИГРАЛИ'}
           </div>
           <div className="text-center" style={{fontSize:22}}>🪙 {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}</div>
+          {replayOf && (
+            <div className="text-dim text-center" style={{fontSize:12, marginBottom:6}}>
+              📼 Повтор дуэли от {replayOf} МСК
+            </div>
+          )}
           <div className={`result-text ${won ? 'win' : 'lose'}`}>
             {won ? `+$${profit.toFixed(2)}` : `-$${amount.toFixed(2)}`}
           </div>

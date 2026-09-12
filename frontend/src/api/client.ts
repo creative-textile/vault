@@ -72,7 +72,6 @@ export const duelApi = {
   cancel: (id: number) => api(`/api/duel/cancel/${id}`, { method: 'POST' }),
   history: () => api('/api/duel/history'),
   get: (id: number) => api(`/api/duel/${id}`),
-  pending: () => api('/api/duel/pending'),
   notifications: () => api('/api/duel/notifications'),
   markNotificationAsRead: (id: number) => api(`/api/duel/notifications/${id}/read`, { method: 'POST' }),
   markAllNotificationsAsRead: () => api('/api/duel/notifications/read-all', { method: 'POST' }),

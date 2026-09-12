@@ -22,7 +22,7 @@ const BACKEND = path.resolve(__dirname, '..');
 process.env.NODE_PATH = path.join(BACKEND, 'node_modules') + path.delimiter + (process.env.NODE_PATH || '');
 require('module').Module._initPaths();
 
-const MODES = ['dates', 'chain', 'crack', 'http'];
+const MODES = ['dates', 'chain', 'crack', 'http', 'duel'];
 const ARG = process.argv[2];
 
 // ── Режим «всё подряд»: каждый режим в отдельном процессе (своя БД) ───────
@@ -62,8 +62,8 @@ Module._load = function (request, ...rest) {
   return origLoad.call(this, request, ...rest);
 };
 
-// В http-режиме подменяем middleware/auth заглушкой (пользователь из global)
-if (MODE === 'http') {
+// В http/duel-режимах подменяем middleware/auth заглушкой (пользователь из global)
+if (MODE === 'http' || MODE === 'duel') {
   const origResolve = Module._resolveFilename;
   const AUTH_STUB = path.join(__dirname, 'auth-stub.cjs');
   Module._resolveFilename = function (request, parent, ...rest) {
@@ -98,6 +98,9 @@ const DDL = [
   `CREATE TABLE vault_deposits (id SERIAL PRIMARY KEY, user_id INTEGER, amount DECIMAL NOT NULL, term_days INTEGER NOT NULL,
      locked_at TIMESTAMP DEFAULT NOW(), status VARCHAR(16) DEFAULT 'active', multiplier DECIMAL DEFAULT 1)`,
   `CREATE TABLE vault_pool_daily (id SERIAL PRIMARY KEY, date DATE UNIQUE, pool DECIMAL DEFAULT 0, base_rate DECIMAL DEFAULT 0)`,
+  `CREATE TABLE duels (id SERIAL PRIMARY KEY, creator_id INTEGER, opponent_id INTEGER, amount DECIMAL,
+     status VARCHAR(16) DEFAULT 'waiting', result VARCHAR(8), winner_id INTEGER, coin_trajectory JSONB,
+     created_at TIMESTAMP DEFAULT NOW(), finished_at TIMESTAMP)`,
   `CREATE TABLE user_notifications (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, type VARCHAR(50) NOT NULL,
      title VARCHAR(255) NOT NULL, message TEXT NOT NULL, data JSONB, is_read BOOLEAN DEFAULT FALSE,
      created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, related_entity_type VARCHAR(50), related_entity_id INTEGER)`
@@ -510,6 +513,225 @@ const finish = () => {
       (await getUserFromToken(jwt.sign({ userId: alice.id }, config.jwtSecret)))?.id === alice.id);
     check('мусор вместо токена отклонён', (await getUserFromToken('abc.def.ghi')) === null);
 
+    server.close();
+    return finish();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  if (MODE === 'duel') {
+    console.log('\n[duel] уведомления о результатах дуэлей, очередь реплеев, деньги вызова');
+    await seedSettings();
+
+    const express = require('express');
+    const duelRouter = require(path.join(BACKEND, 'src/api/routes/duel.ts')).default;
+    const duelSvc = require(path.join(BACKEND, 'src/services/duel.ts'));
+
+    const app = express();
+    app.use(express.json());
+    app.use('/api/duel', duelRouter);
+    const server = await new Promise(r => { const srv = app.listen(0, '127.0.0.1', () => r(srv)); });
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const call = async (method, url, body) => {
+      const res = await fetch(base + url, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined
+      });
+      let json = null;
+      try { json = await res.json(); } catch {}
+      return { status: res.status, json };
+    };
+    const as = (id, username) => { global.__STUB_USER__ = { id, role: 'user', username }; };
+    // Монета детерминированная: Math.random() < 0.5 → «орёл» → побеждает создатель.
+    // Без этого проверки денег и i_won плавали бы от запуска к запуску.
+    const origRandom = Math.random;
+    Math.random = () => 0.1;
+    const countFor = async (userId, extra = '') =>
+      (await query(`SELECT COUNT(*)::int AS c FROM user_notifications
+                     WHERE user_id = $1 AND type = 'duel_result' ${extra}`, [userId])).rows[0].c;
+
+    // ── Деньги открытого вызова: заморозка, а не двойное списание ─────────
+    as(1, 'alice');
+    let r = await call('POST', '/api/duel/create', { amount: 25 });
+    const duel1 = r.json?.duel_id;
+    check('вызов создан', r.status === 200 && Number.isFinite(duel1), r.json);
+    const u1 = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 1`)).rows[0];
+    check('открытый вызов: баланс не списан, ставка заморожена',
+      Number(u1.balance) === 1000 && Number(u1.frozen_balance) === 25, u1);
+    const { getAvailableBalance } = require(path.join(BACKEND, 'src/services/balance.ts'));
+    check('доступно ровно 975 (раньше было 950 — ставка блокировалась дважды)',
+      (await getAvailableBalance(1)) === 975, await getAvailableBalance(1));
+
+    // Отмена возвращает заморозку и не плодит транзакций
+    as(1, 'alice');
+    const duelCancel = (await call('POST', '/api/duel/create', { amount: 10 })).json?.duel_id;
+    await call('POST', `/api/duel/cancel/${duelCancel}`);
+    const uCancel = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 1`)).rows[0];
+    check('отмена вызова: разморожено, баланс прежний',
+      Number(uCancel.balance) === 1000 && Number(uCancel.frozen_balance) === 25, uCancel);
+    r = await call('GET', '/api/duel/notifications');
+    check('ожидающая и отменённая дуэли уведомлений не создают',
+      (r.json?.notifications || []).length === 0, r.json);
+
+    // ── Дуэль сыграна: уведомления ОБИМ участникам ───────────────────────
+    as(2, 'bob');
+    r = await call('POST', `/api/duel/accept/${duel1}`);
+    check('дуэль принята и сыграна', r.status === 200 && ['heads', 'tails'].includes(r.json?.result), r.json);
+    const winnerId = r.json?.winner;
+    check('победитель — создатель вызова (монета детерминированная)', winnerId === 1, winnerId);
+
+    const aliceMoney = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 1`)).rows[0];
+    check('после игры у создателя ставка списана, выигрыш начислен, ничего не заморожено',
+      Number(aliceMoney.balance) === 1020 && Number(aliceMoney.frozen_balance) === 0, aliceMoney);
+    const bobMoney = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 2`)).rows[0];
+    check('проигравший соперник: ставка списана, заморозки нет',
+      Number(bobMoney.balance) === 975 && Number(bobMoney.frozen_balance) === 0, bobMoney);
+    check('у обоих участников ровно по одной записи уведомления',
+      (await countFor(1)) === 1 && (await countFor(2)) === 1,
+      [await countFor(1), await countFor(2)]);
+
+    const nAlice = (await query(`SELECT * FROM user_notifications WHERE user_id = 1 AND type = 'duel_result'`)).rows[0];
+    const dAlice = nAlice.data;
+    check('в уведомлении есть всё для модалки: duel_id, ставка, приз, i_won, соперник, траектория',
+      Number(dAlice.duel_id) === duel1 && Number(dAlice.amount) === 25 && Number(dAlice.prize) === 45
+        && typeof dAlice.i_won === 'boolean' && dAlice.opponent_name === '@bob'
+        && !!dAlice.coin_trajectory && dAlice.winner_id === winnerId,
+      dAlice);
+    check('i_won честный: создателю — победа, сопернику — поражение',
+      dAlice.i_won === true, dAlice.i_won);
+    const nBob = (await query(`SELECT data FROM user_notifications WHERE user_id = 2 AND type = 'duel_result'`)).rows[0];
+    check('в уведомлении соперника i_won = false и соперник = @alice',
+      nBob.data.i_won === false && nBob.data.opponent_name === '@alice', nBob.data);
+
+    // ── Список непрочитанных и идемпотентность досоздания ────────────────
+    as(1, 'alice');
+    r = await call('GET', '/api/duel/notifications');
+    check('непрочитанных у создателя ровно одно', (r.json?.notifications || []).length === 1, r.json);
+    check('в списке — данные дуэли (клиент рисует из них модалку)',
+      Number(r.json?.notifications?.[0]?.data?.duel_id) === duel1, r.json?.notifications?.[0]);
+    await call('GET', '/api/duel/notifications');
+    await call('GET', '/api/duel/notifications');
+    check('повторные запросы списка не плодят дубли', (await countFor(1)) === 1, await countFor(1));
+    check('досоздание не трогает второго участника', (await countFor(2)) === 1, await countFor(2));
+
+    // ── Игрок зашёл спустя дни: потерянное уведомление воссоздаётся ──────
+    await query(`DELETE FROM user_notifications WHERE user_id = 1 AND type = 'duel_result'`);
+    r = await call('GET', '/api/duel/notifications');
+    check('потерянное уведомление досоздано при следующем запросе (игрок вернулся позже)',
+      (r.json?.notifications || []).length === 1 && Number(r.json.notifications[0].data?.duel_id) === duel1,
+      r.json);
+
+    // ── Несколько дуэлей подряд → очередь из нескольких уведомлений ──────
+    as(1, 'alice');
+    const duel2 = (await call('POST', '/api/duel/create', { amount: 10 })).json?.duel_id;
+    as(2, 'bob');
+    await call('POST', `/api/duel/accept/${duel2}`);
+    as(1, 'alice');
+    r = await call('GET', '/api/duel/notifications');
+    check('две сыгранные дуэли → два уведомления в очереди',
+      (r.json?.notifications || []).length === 2, (r.json?.notifications || []).length);
+    r = await call('GET', '/api/duel/notifications/count');
+    check('счётчик непрочитанных = 2 (бейдж)', r.json?.count === 2, r.json);
+
+    // «Закрыть» гасит одну дуэль, вторая остаётся ждать
+    await call('POST', `/api/duel/notifications/read-duel/${duel1}`);
+    r = await call('GET', '/api/duel/notifications');
+    check('закрытая дуэль больше не придёт, вторая осталась в очереди',
+      (r.json?.notifications || []).length === 1 && Number(r.json.notifications[0].data?.duel_id) === duel2,
+      (r.json?.notifications || []).map(n => n.data?.duel_id));
+    check('прочитанное не удаляется из БД — модалка не воскреснет',
+      (await countFor(1, 'AND is_read = TRUE')) === 1, await countFor(1, 'AND is_read = TRUE'));
+    r = await call('GET', '/api/duel/notifications');
+    check('досоздание не воскрешает закрытое уведомление',
+      (r.json?.notifications || []).length === 1, (r.json?.notifications || []).length);
+
+    await call('POST', '/api/duel/notifications/read-all');
+    r = await call('GET', '/api/duel/notifications');
+    check('«отметить всё прочитанным» очищает очередь', (r.json?.notifications || []).length === 0, r.json);
+
+    // ── Реплей: всё нужное для повторного броска монеты ──────────────────
+    r = await call('GET', `/api/duel/${duel1}`);
+    check('реплей отдаёт результат, приз, траекторию и i_won',
+      r.json?.id === duel1 && ['heads', 'tails'].includes(r.json?.result) && Number(r.json?.prize) === 45
+        && !!r.json?.coin_trajectory && typeof r.json?.i_won === 'boolean' && r.json?.status === 'finished',
+      r.json);
+    as(2, 'bob');
+    const rBob = await call('GET', `/api/duel/${duel1}`);
+    check('i_won в реплее считается под того, кто смотрит',
+      r.json?.i_won === true && rBob.json?.i_won === false, [r.json?.i_won, rBob.json?.i_won]);
+
+    // ── Деньги дуэли: банк 2×ставка, комиссия 10%, приз 90% ──────────────
+    const totalPaid = (await query(
+      `SELECT COALESCE(SUM(amount),0) AS s FROM transactions WHERE type = 'win' AND game_type = 'duel'`)).rows[0];
+    check('победителю выплачен приз 90% от банка (45 + 18 за вторую дуэль)',
+      Math.round(Number(totalPaid.s)) === 63, totalPaid.s);
+    const revenue = (await query(
+      `SELECT COALESCE(SUM(amount),0) AS s FROM daily_revenue WHERE source = 'duel'`)).rows[0];
+    check('комиссия платформы 10% с обеих дуэлей записана',
+      Math.round(Number(revenue.s) * 100) / 100 === 7, revenue.s);
+    const finalAlice = (await query(`SELECT balance FROM users WHERE id = 1`)).rows[0];
+    const finalBob = (await query(`SELECT balance FROM users WHERE id = 2`)).rows[0];
+    check('итог двух дуэлей: alice 1028, bob 965 (ноль не пропал)',
+      Number(finalAlice.balance) === 1028 && Number(finalBob.balance) === 965,
+      [finalAlice.balance, finalBob.balance]);
+
+    // ── Починка вызовов, созданных прежним кодом (заморозка + списание) ──
+    // Имитируем «старую» дуэль в лобби: ставка и заморожена, и списана.
+    const oldDuel = (await query(
+      `INSERT INTO duels (creator_id, amount, status) VALUES (2, 20, 'waiting') RETURNING id`)).rows[0];
+    await query(`UPDATE users SET frozen_balance = frozen_balance + 20, balance = balance - 20 WHERE id = 2`);
+    const before = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 2`)).rows[0];
+    check('старый вызов блокировал ставку дважды (available 925 вместо 945)',
+      Number(before.balance) === 945 && Number(before.frozen_balance) === 20, before);
+
+    const repaired = await duelSvc.repairDoubleLockedOpenDuels();
+    const after = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 2`)).rows[0];
+    check('починка вернула ставку на баланс, заморозка осталась одна', repaired === 1
+      && Number(after.balance) === 965 && Number(after.frozen_balance) === 20, [repaired, after]);
+    const again = await duelSvc.repairDoubleLockedOpenDuels();
+    const after2 = (await query(`SELECT balance FROM users WHERE id = 2`)).rows[0];
+    check('повторный запуск (рестарт контейнера) деньги второй раз не возвращает',
+      again === 0 && Number(after2.balance) === 965, [again, after2.balance]);
+    const unlockTx = (await query(
+      `SELECT COUNT(*) AS c FROM transactions WHERE type = 'duel_unlock' AND game_id = ${oldDuel.id}`)).rows[0];
+    check('возврат отмечен транзакцией duel_unlock', Number(unlockTx.c) === 1, unlockTx.c);
+    // Отремонтированный старый вызов можно отменить — деньги возвращаются целиком
+    as(2, 'bob');
+    await call('POST', `/api/duel/cancel/${oldDuel.id}`);
+    const cancelled = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 2`)).rows[0];
+    check('отмена старого вызова после починки: 965 на балансе, заморозки нет',
+      Number(cancelled.balance) === 965 && Number(cancelled.frozen_balance) === 0, cancelled);
+
+    // ── Гонка «Принять»: одна дуэль не должна сыграться дважды ───────────
+    // Двойной клик, два устройства или два игрока на одну строку лобби.
+    await query(`INSERT INTO users (id, telegram_id, username, balance, frozen_balance)
+                 VALUES (3, 3003, 'carol', 100, 0)`);
+    as(2, 'bob');
+    const raceId = (await call('POST', '/api/duel/create', { amount: 20 })).json?.duel_id;
+    const race = await Promise.all([
+      duelSvc.acceptDuel(raceId, 1).then(v => ({ ok: true, v })).catch(e => ({ ok: false, msg: e.message })),
+      duelSvc.acceptDuel(raceId, 3).then(v => ({ ok: true, v })).catch(e => ({ ok: false, msg: e.message }))
+    ]);
+    check('два одновременных «Принять»: сыграла только одна дуэль',
+      race.filter(x => x.ok).length === 1, race.map(x => (x.ok ? 'ok' : x.msg)));
+    const paidTx = (await query(
+      `SELECT COUNT(*)::int AS c FROM transactions WHERE type = 'bet' AND game_id = ${raceId}`)).rows[0];
+    check('ставки списаны по одной на игрока (2, а не 4)', Number(paidTx.c) === 2, paidTx.c);
+    const winTx = (await query(
+      `SELECT COUNT(*)::int AS c FROM transactions WHERE type = 'win' AND game_id = ${raceId}`)).rows[0];
+    check('приз выплачен один раз', Number(winTx.c) === 1, winTx.c);
+    const raceDuel = (await query(`SELECT status FROM duels WHERE id = ${raceId}`)).rows[0];
+    check('дуэль одна и завершена', raceDuel.status === 'finished', raceDuel.status);
+    const bobRace = (await query(`SELECT balance, frozen_balance FROM users WHERE id = 2`)).rows[0];
+    check('создатель: ставка 20 списана, приз 36 начислен → 981, заморозки нет',
+      Number(bobRace.balance) === 981 && Number(bobRace.frozen_balance) === 0, bobRace);
+    const aliceRace = Number((await query(`SELECT balance FROM users WHERE id = 1`)).rows[0].balance);
+    const carolRace = Number((await query(`SELECT balance FROM users WHERE id = 3`)).rows[0].balance);
+    const alicePaid = aliceRace === 1008, carolPaid = carolRace === 80;
+    check('заплатил ровно один претендент, второй деньги сохранил (1028 / 100)',
+      (alicePaid && carolRace === 100) || (carolPaid && aliceRace === 1028), [aliceRace, carolRace]);
+
+    Math.random = origRandom;
     server.close();
     return finish();
   }

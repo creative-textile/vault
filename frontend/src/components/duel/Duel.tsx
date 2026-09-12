@@ -35,16 +35,10 @@ export default function Duel() {
       const [lob, hist] = await Promise.all([duelApi.lobby(), duelApi.history()]);
       setLobby(lob.map((l: any) => ({...l, is_mine: l.creator_id === user?.id})));
       setHistory(hist);
-      // Проверить: если есть завершённая дуэль, перейти к результату
-      const pending = await duelApi.pending();
-      if (pending?.pending) {
-        const seenKey = `duel_seen_${pending.pending.id}`;
-        const dismissedKey = `duel_dismissed_${pending.pending.id}`;
-        if (!localStorage.getItem(seenKey) && !localStorage.getItem(dismissedKey)) {
-          localStorage.setItem(seenKey, '1');
-          nav(`/duel/${pending.pending.id}`, { state: { result: pending.pending }, replace: true });
-        }
-      }
+      // Завершённую дуэль лобби больше не открывает сам: результат приходит
+      // модальным окном из очереди уведомлений (DuelResultModal), и игрок сам
+      // решает — смотреть реплей или закрыть. Раньше этот автопереход уводил
+      // из лобби каждые 3 с и спорил с модалкой.
     } catch {}
   }, [user?.id, nav]);
 

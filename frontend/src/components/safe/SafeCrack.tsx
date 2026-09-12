@@ -6,6 +6,7 @@ import { safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
 import { tabStore, crackVisitedKey } from '../../utils/tabStore';
+import { goToSafeResults } from '../../utils/safeNav';
 import { useHasRocketFlight } from '../../utils/rocketFlight';
 
 /**
@@ -235,7 +236,7 @@ export default function SafeCrack() {
     if (!finished) return;
     // Если игрок только что сдал результат — даём увидеть «ВЗЛОМ!», потом к итогам
     const delay = submittedNowRef.current ? 2200 : 0;
-    const t = setTimeout(() => nav('/safe', { replace: true }), delay);
+    const t = setTimeout(() => goToSafeResults(nav), delay);
     return () => clearTimeout(t);
   }, [finished, phase, nav]);
 
@@ -462,7 +463,7 @@ export default function SafeCrack() {
             <div className="text-dim" style={{ fontSize: 12, marginTop: 6 }}>
               Итоги появятся сразу, как только все участники сдадут результат
             </div>
-            <button className="btn mt" onClick={() => nav('/safe', { replace: true })}>К РЕЗУЛЬТАТАМ</button>
+            <button className="btn mt" onClick={() => goToSafeResults(nav)}>К РЕЗУЛЬТАТАМ</button>
           </div>
           <button className="btn btn-secondary" onClick={() => nav('/')}>🏠 НА ГЛАВНУЮ</button>
         </>

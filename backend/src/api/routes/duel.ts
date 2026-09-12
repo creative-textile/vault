@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
-import { createDuel, getLobby, acceptDuel, cancelDuel, getDuelHistory, getDuel } from '../../services/duel';
-import { notifyDuelResult, getUnreadUserNotifications } from '../../services/notifications';
+import {
+  createDuel, getLobby, acceptDuel, cancelDuel, getDuelHistory, getDuel,
+  notifyDuelFinished, ensureDuelResultNotifications
+} from '../../services/duel';
+import { getUnreadUserNotifications } from '../../services/notifications';
 import {
   markNotificationAsRead, markAllNotificationsAsRead,
   markDuelNotificationsAsRead, getUnreadCount
@@ -30,43 +33,6 @@ router.get('/lobby', async (_req, res) => {
   }
 });
 
-// GET /api/duel/pending — есть ли для текущего пользователя не просмотренная дуэль
-router.get('/pending', auth, async (req, res) => {
-  try {
-    const user = (req as any).user;
-    const r = await import('../../db/pool');
-    // Ищет последнюю завершённую дуэль, где пользователь — участник
-    // Убираем ограничение по времени, чтобы показывать все непросмотренные дуэли
-    const res2 = await r.query(
-      `SELECT * FROM duels
-       WHERE status = 'finished'
-       AND (creator_id = $1 OR opponent_id = $1)
-       ORDER BY finished_at DESC LIMIT 1`,
-      [user.id]
-    );
-    if (res2.rows.length === 0) return res.json({ pending: null });
-    const d = res2.rows[0];
-    const amount = parseFloat(d.amount);
-    const prize = Math.round(amount * 2 * 0.9 * 100) / 100;
-    res.json({
-      pending: {
-        id: d.id,
-        amount,
-        result: d.result,
-        winner_id: d.winner_id,
-        prize,
-        coin_trajectory: d.coin_trajectory,
-        creator_id: d.creator_id,
-        opponent_id: d.opponent_id,
-        i_won: d.winner_id === user.id,
-        finished_at: d.finished_at
-      }
-    });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
 // POST /api/duel/accept/:id
 router.post('/accept/:id', auth, async (req, res) => {
   try {
@@ -75,45 +41,14 @@ router.post('/accept/:id', auth, async (req, res) => {
     if (isNaN(id)) throw new Error('Некорректный ID дуэли');
     const duel = await getDuel(id);
     if (!duel) throw new Error('Дуэль не найдена');
-    
+
     const result = await acceptDuel(id, user.id);
-    
-    // Уведомляем создателя дуэли
-    const amount = parseFloat(duel.amount);
-    const prize = Math.round(amount * 2 * 0.9 * 100) / 100;
-    
-    // Уведомление создателю - сохраняем в базе данных
-    await notifyDuelResult(
-      result.creator_id,
-      id,
-      `⚔️ Ваш вызов на $${amount} принят! Посмотрите результат.`,
-      {
-        duel_id: id,
-        amount,
-        prize,
-        result: result.result,
-        winner_id: result.winner,
-        i_won: result.winner === result.creator_id,
-        coin_trajectory: result.coin_trajectory
-      }
-    );
-    
-    // Уведомление оппоненту
-    await notifyDuelResult(
-      user.id,
-      id,
-      `⚔️ Вы приняли вызов. Результат: ${result.result === 'heads' ? 'орёл' : 'решка'}`,
-      {
-        duel_id: id,
-        amount,
-        prize,
-        result: result.result,
-        winner_id: result.winner,
-        i_won: result.winner === user.id,
-        coin_trajectory: result.coin_trajectory
-      }
-    );
-    
+
+    // Оба участника получают уведомление: socket (если онлайн) и запись в БД.
+    // Создатель комнаты в этот момент может быть где угодно — запись в БД
+    // гарантирует, что модальное окно дождётся его даже через несколько дней.
+    await notifyDuelFinished(id);
+
     res.json(result);
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -154,6 +89,9 @@ router.get('/notifications', auth, async (req, res) => {
     if (!user || !user.id) {
       return res.json({ notifications: [] });
     }
+    // Сначала досоздаём то, чего не хватает: игрок мог зайти спустя дни после
+    // дуэли, и результат обязан его дождаться (модалка с очередью реплеев)
+    await ensureDuelResultNotifications(user.id);
     const notifications = await getUnreadUserNotifications(user.id);
     res.json({ notifications });
   } catch (e: any) {
