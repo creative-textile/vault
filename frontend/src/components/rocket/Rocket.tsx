@@ -5,8 +5,9 @@ import { rocketApi, safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { getSocket } from '../../api/socket';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
-import { acquireGameLock } from '../../utils/gameLock';
-import { setFlight, setFlightMultiplier, clearFlight, getFlight } from '../../utils/rocketFlight';
+import {
+  setFlight, setFlightMultiplier, clearFlight, getFlight, setRocketScreenActive
+} from '../../utils/rocketFlight';
 
 type Phase = 'betting' | 'flying' | 'win' | 'lose';
 
@@ -33,8 +34,6 @@ export default function Rocket() {
   const [roundId, setRoundId] = useState<number | null>(null);
   const [profit, setProfit] = useState(0);
   const [showSafePrompt, setShowSafePrompt] = useState(false);
-  // true от нажатия «ЗАПУСТИТЬ» до ухода rocket:launch — см. acquireGameLock ниже
-  const [starting, setStarting] = useState(false);
   const [sceneKey, setSceneKey] = useState(0); // форсируем ремаунт сцены
   const launchTimeRef = useRef(0);
   const userRef = useRef(user);
@@ -128,10 +127,6 @@ export default function Rocket() {
     const b = parseFloat(bet);
     if (!b || b < minBet) return showToast(`Мин. ставка $${minBet}`);
     if (b > (user?.balance || 0) - (user?.frozen_balance || 0)) return showToast('Недостаточно средств');
-    // Критический участок: раунд уже создан на сервере и ставка списана, но
-    // тики стартуют только после нашего rocket:launch. Уведи игрока в этот
-    // момент (например, во взлом сейфа) — раунд зависнет навсегда.
-    setStarting(true);
     try {
       const res = await rocketApi.start(b);
       setRoundId(res.round_id);
@@ -147,21 +142,21 @@ export default function Rocket() {
       const sock = getSocket();
       sock.emit('rocket:join', res.round_id);
       setSceneKey(k => k + 1);
-      setTimeout(() => {
-        sock.emit('rocket:launch', { round_id: res.round_id });
-        setStarting(false);
-      }, 100);
+      // Таймер переживает размонтирование экрана: если игрока в эти 100 мс
+      // выдернут во взлом сейфа, rocket:launch всё равно уйдёт и раунд
+      // стартует на сервере (иначе ставка зависла бы без тиков)
+      setTimeout(() => sock.emit('rocket:launch', { round_id: res.round_id }), 100);
     } catch (e: any) {
-      setStarting(false);
       showToast(e.message);
     }
   };
 
-  // Пока запускаем раунд, игрока нельзя уводить на другой экран
+  // Кто обрабатывает события раунда: пока экран смонтирован — он сам,
+  // после ухода — плавающий бейдж (см. isRocketScreenActive)
   useEffect(() => {
-    if (!starting) return;
-    return acquireGameLock('rocket-start');
-  }, [starting]);
+    setRocketScreenActive(true);
+    return () => setRocketScreenActive(false);
+  }, []);
 
   // Вернулись на экран во время полёта (могли выдернуть во взлом сейфа):
   // сервер продолжает тикать, поэтому восстанавливаем раунд — иначе игрок

@@ -244,25 +244,31 @@ export default function Safe() {
         </span>
       </div>
 
-      {/* ── Взлом: самый срочный блок, показываем первым ─────────────────── */}
+      {/* ── Взлом идёт: короткая строка состояния ────────────────────────────
+          Игрок с вкладом в этом раунде сюда просто не попадает — его уводит в
+          мини-игру SafeCrackRedirector с любого экрана в момент старта взлома.
+          Карточка нужна тем, кто уже сдал результат, кто в этом раунде не
+          участвовал, и как запасной вход для того, кто вышел из игры сам. */}
       {isCracking && (
-        <div className="card" style={{ border: '1px solid #ef4444', background: 'rgba(255,68,68,0.08)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div className="card-title">🔥 СЕЙФ #{safe.id} — ИДЁТ ВЗЛОМ</div>
-            <span className="pill pill-active">взлом</span>
+        <div className="card" style={{ border: '1px solid #ef4444', background: 'rgba(255,68,68,0.08)', padding: '10px 12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>🔥 СЕЙФ #{safe.id} — ИДЁТ ВЗЛОМ</div>
+            <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: 'nowrap', color: crackTime < 15000 ? '#ef4444' : undefined }}>
+              {crackTime > 0 ? `⏱ ${timeToStr(crackTime)}` : '⏳ подводим итоги…'}
+            </div>
           </div>
-          <div className="timer" style={{ color: crackTime < 15000 ? '#ef4444' : undefined }}>
-            {crackTime > 0 ? `⏱ Нужно взломать сейф за: ${timeToStr(crackTime)}` : '⏳ Время вышло — подводим итоги...'}
-          </div>
-          <div className="text-dim" style={{ fontSize: 13, marginTop: 6 }}>
+          <div className="text-dim" style={{ fontSize: 12, marginTop: 4 }}>
             Сдали результат: {Math.max(0, (safe.participants_count ?? 0) - (safe.pending_cracks ?? 0))} из {safe.participants_count}
+            {safeDeposit
+              ? ((safeDeposit.crack_time_ms ?? null) != null
+                ? ` · ✅ ваш результат ${(safeDeposit.crack_time_ms / 1000).toFixed(2)} с засчитан`
+                : ' · мини-игра откроется сама')
+              : ' · вы не вносили вклад в этот раунд'}
           </div>
           {safeDeposit
             ? ((safeDeposit.crack_time_ms ?? null) != null
-              ? <div className="text-green mt" style={{ fontWeight: 700 }}>
-                  ✅ Ваш результат засчитан: {(safeDeposit.crack_time_ms / 1000).toFixed(2)} с
-                </div>
-              : <button className="btn mt" onClick={() => nav('/safe/crack')}>🔓 СОБРАТЬ КОД</button>)
+              ? null
+              : <button className="btn btn-small mt" onClick={() => nav('/safe/crack')}>🔓 СОБРАТЬ КОД</button>)
             : <button className="btn btn-small mt" onClick={() => nav('/safe/crack')}>👀 СМОТРЕТЬ ВЗЛОМ</button>}
         </div>
       )}

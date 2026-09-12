@@ -27,6 +27,9 @@ export default function Home() {
   // Витрина проекта: участники / дни работы / пополнено / выплачено
   const [stats, setStats] = useState<any>(null);
   const [timeToCrack, setTimeToCrack] = useState(0);
+  // Свой вклад в сейф, который взламывают прямо сейчас: по нему видно,
+  // должен ли игрок оказаться в мини-игре (и почему его туда не уводит)
+  const [crackDeposit, setCrackDeposit] = useState<any>(null);
   const [collectTimeToCrack, setCollectTimeToCrack] = useState(0);
   // Дедлайны в ref, тикаем локально — без запросов к серверу каждую секунду
   const collectAtRef = useRef<number | null>(null);
@@ -36,6 +39,7 @@ export default function Home() {
     safeApi.current().then(s => {
       setSafe(s.safe);
       setCollect(s.collecting_safe || s.safe);
+      setCrackDeposit(s.safe?.status === 'cracking' ? (s.my_deposit ?? null) : null);
       // Отсчёт до взлома — всегда по сейфу, который сейчас собирает
       const cms = s.collecting_safe?.time_to_crack_ms
         ?? (s.safe?.status === 'collecting' ? s.safe?.time_to_crack_ms : null);
@@ -164,6 +168,14 @@ export default function Home() {
           <div className="text-red text-center" style={{fontSize:20, fontWeight:900, padding:'10px 0 0'}}>
             🔥 ИДЁТ ВЗЛОМ СЕЙФА #{safe.id}!
             <div className="timer" style={{fontSize:18, marginTop:4}}>⏱ {timeToStr(timeToCrack)}</div>
+            {/* Почему игрока уводит (или не уводит) в мини-игру — видно сразу */}
+            <div className="text-dim" style={{fontSize:12, fontWeight:400, marginTop:2}}>
+              {crackDeposit
+                ? ((crackDeposit.crack_time_ms ?? null) != null
+                  ? `ваш результат ${(crackDeposit.crack_time_ms / 1000).toFixed(2)} с засчитан`
+                  : 'вы участвуете в этом раунде — мини-игра откроется сама')
+                : 'вы не вносили вклад в этот раунд — взлом идёт без вас'}
+            </div>
           </div>
         )}
 

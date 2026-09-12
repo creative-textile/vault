@@ -183,9 +183,11 @@ export default function App() {
           {onboardingDone && <PendingDuelModal />}
           {onboardingDone && <NotificationsModal />}
           {/* Уводит игрока во взлом сейфа с любого экрана и держит летящую
-              ракету доступной для кэшаута, пока он не на /rocket */}
-          {onboardingDone && token && <SafeCrackRedirector />}
-          {onboardingDone && token && <RocketFlightBadge />}
+              ракету доступной для кэшаута, пока он не на /rocket. От онбординга
+              не зависят: у нового игрока просто нет вклада в сейфе, и проверка
+              состояния отрабатывает вхолостую */}
+          {token && <SafeCrackRedirector />}
+          {token && <RocketFlightBadge />}
           <div className="container">
             <Routes>
               {!onboardingDone && <Route path="*" element={<Onboarding />} />}

@@ -117,6 +117,12 @@ export default function Profile() {
       <button className="btn btn-secondary" onClick={() => { logout(); nav('/'); }}>
         🚪 Выйти (сбросить демо)
       </button>
+
+      {/* Метка сборки: если после деплоя здесь старая дата — браузер показывает
+          закешированный бандл, и проверять нужно не код, а обновление страницы */}
+      <div className="text-dim text-center" style={{ fontSize: 11, margin: '10px 0 4px' }}>
+        сборка фронтенда: {typeof __BUILD_INFO__ !== 'undefined' ? __BUILD_INFO__ : 'dev'}
+      </div>
     </>
   );
 }

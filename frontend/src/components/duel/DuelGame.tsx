@@ -6,7 +6,6 @@ import { duelApi, safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
 import { useNotifications } from '../../stores/notifications';
-import { acquireGameLock, releaseGameLock } from '../../utils/gameLock';
 
 type DuelPhase = 'flipping' | 'result';
 
@@ -28,17 +27,6 @@ export default function DuelGame() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
-
-  // Бросок монеты и первые секунды результата — короткий критический участок.
-  // Исход дуэли к этому моменту уже посчитан сервером и деньги переведены, но
-  // выдёргивать игрока во взлом сейфа посреди анимации нельзя: он не увидит,
-  // выиграл или проиграл. Держим замок до результата + 1.5 с на его показ.
-  useEffect(() => acquireGameLock('duel-flip'), []);
-  useEffect(() => {
-    if (phase !== 'result') return;
-    const t = setTimeout(() => releaseGameLock('duel-flip'), 1500);
-    return () => clearTimeout(t);
-  }, [phase]);
 
   useEffect(() => {
     let mounted = true;

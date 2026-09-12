@@ -53,6 +53,18 @@ export function getFlight(): RocketFlight | null {
 }
 
 /**
+ * Сммонтирован ли сейчас экран `/rocket`.
+ *
+ * Определяет, кто обрабатывает `cashout_result` и `crash`: сам экран (со своей
+ * анимацией, попапом вклада в сейф и историей) или плавающий бейдж. Проверять
+ * это по текущему пути нельзя — в момент перехода путь уже новый, а обработчик
+ * события ещё старый, и результат кэшаута потерялся бы между двумя экранами.
+ */
+let rocketScreenActive = false;
+export function setRocketScreenActive(active: boolean) { rocketScreenActive = active; }
+export function isRocketScreenActive(): boolean { return rocketScreenActive; }
+
+/**
  * Только факт полёта, без множителя: перерисовывает компонент лишь в моменты
  * старта и окончания раунда, а не 20 раз в секунду. Нужно экранам, которым
  * достаточно знать, что внизу появится бейдж (например, сделать запас

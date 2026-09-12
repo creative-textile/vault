@@ -4,7 +4,7 @@ import { getSocket } from '../../api/socket';
 import { safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import {
-  useRocketFlight, getFlight, setFlightMultiplier, clearFlight
+  useRocketFlight, getFlight, setFlightMultiplier, clearFlight, isRocketScreenActive
 } from '../../utils/rocketFlight';
 
 /**
@@ -26,8 +26,6 @@ export default function RocketFlightBadge() {
   const { user, refreshUser, showToast } = useAuth();
   const [cashing, setCashing] = useState(false);
 
-  const pathRef = useRef(loc.pathname);
-  useEffect(() => { pathRef.current = loc.pathname; }, [loc.pathname]);
   // `cashout_result` и `crash` приходят друг за другом (сервер шлёт `crash` в
   // комнату раунда и после успешного кэшаута) — не показываем «упала» следом за «забрал»
   const cashedAtRef = useRef(0);
@@ -46,7 +44,7 @@ export default function RocketFlightBadge() {
       clearFlight();
       if (!f) return;
       if (Date.now() - cashedAtRef.current < 2000) return; // это не падение, а конец раунда после кэшаута
-      if (pathRef.current.startsWith('/rocket')) return;   // там свой экран «РАКЕТА УПАЛА»
+      if (isRocketScreenActive()) return; // там свой экран «РАКЕТА УПАЛА»
       showToast(`🚀 Ракета упала на x${(f.multiplier || 1).toFixed(2)} — ставка сгорела`);
     };
 
@@ -54,8 +52,13 @@ export default function RocketFlightBadge() {
       cashedAtRef.current = Date.now();
       const wasHere = !!getFlight();
       clearFlight();
-      if (pathRef.current.startsWith('/rocket')) return; // там результат обрабатывает экран ракеты
-      if (!wasHere || res?.result !== 'win') return;
+      if (isRocketScreenActive()) return; // там результат обрабатывает экран ракеты
+      if (!wasHere) return;
+      if (res?.result !== 'win') {
+        // Сервер ответил too_late: раунд уже упал, забрать не успели
+        if (res?.result === 'too_late') showToast('🚀 Ракета упала — забрать выигрыш не успели');
+        return;
+      }
 
       const profit = Number(res.profit) || 0;
       await refreshUser().catch(() => {});
