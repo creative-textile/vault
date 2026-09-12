@@ -139,7 +139,11 @@ export default function App() {
         ...u,
         balance: Number(data.balance),
         frozen_balance: data.frozen_balance != null ? Number(data.frozen_balance) : u.frozen_balance,
-        available: Number(data.balance) - (data.frozen_balance != null ? Number(data.frozen_balance) : u.frozen_balance)
+        available: Number(data.balance) - (data.frozen_balance != null ? Number(data.frozen_balance) : u.frozen_balance),
+        // «Где деньги» приходит в том же событии, чтобы пояснение к балансу
+        // (вклад в сейф, вклад VAULT) не отставало от цифр
+        safe_locked: data.safe_locked != null ? Number(data.safe_locked) : u.safe_locked,
+        vault_locked: data.vault_locked != null ? Number(data.vault_locked) : u.vault_locked
       } : u);
     };
 

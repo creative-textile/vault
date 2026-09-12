@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import Header from '../layout/Header';
 import RocketScene from '../../three/rocket/RocketScene';
 import { rocketApi, safeApi, publicConfig } from '../../api/client';
@@ -192,9 +193,13 @@ export default function Rocket() {
       <RocketScene key={sceneKey} phase={scenePhase as any} multiplier={multiplier} />
 
       <div style={{padding:'12px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
-        <span className="text-dim">Баланс:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+        {/* Ставка проверяется и списывается из «доступно» (баланс минус
+            заморозка дуэлей), поэтому и показываем его: цифра баланса при
+            висящем вызове обещала больше, чем можно поставить */}
+        <span className="text-dim">Доступно:</span>
+        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
+      <MoneyBreakdown total={false} />
 
       {phase === 'betting' && (
         <>

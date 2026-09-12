@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import { holdBalance, releaseBalance } from '../../utils/balanceHold';
 import { useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
@@ -104,9 +105,12 @@ export default function Duel() {
       <DuelScene phase="idle" />
 
       <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
-        <span className="text-dim">Баланс:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+        {/* Вызов создаётся из «доступно»: баланс при уже висящих вызовах
+            обещал больше, чем можно поставить */}
+        <span className="text-dim">Доступно:</span>
+        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
+      <MoneyBreakdown total={false} />
 
       <div className="card">
         <div className="card-title">Создать вызов</div>

@@ -1,5 +1,5 @@
 import { query } from '../db/pool';
-import { getUser, getUserByTelegramId, modifyBalance } from './balance';
+import { getUser, getUserByTelegramId, modifyBalance, getBalanceSnapshot } from './balance';
 import { generateRefCode } from './referral';
 import { getSetting } from './revenue';
 import { config } from '../config';
@@ -89,6 +89,9 @@ export async function getProfile(userId: number) {
     [userId]
   );
 
+  // Сколько денег «в деле», но не в балансе: вклад в сейф и тело вклада VAULT
+  const locked = await getBalanceSnapshot(userId);
+
   return {
     id: user.id,
     telegram_id: user.telegram_id,
@@ -96,6 +99,8 @@ export async function getProfile(userId: number) {
     balance: user.balance,
     frozen_balance: user.frozen_balance,
     available: user.balance - user.frozen_balance,
+    safe_locked: locked.safe_locked,
+    vault_locked: locked.vault_locked,
     deposit_address: user.deposit_address,
     withdraw_address: user.withdraw_address,
     ref_code: user.ref_code,

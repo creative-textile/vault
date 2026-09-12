@@ -794,6 +794,11 @@ const finish = () => {
       Number(m1.balance) === 500 && Number(m1.frozen_balance) === 0, m1);
     check('доступно 500 (раньше было 0 — сумма блокировалась дважды)',
       (await getAvailableBalance(1)) === 500, await getAvailableBalance(1));
+    const { getBalanceSnapshot } = require(path.join(BACKEND, 'src/services/balance.ts'));
+    const snapVault = await getBalanceSnapshot(1);
+    check('снимок «где деньги»: во вкладе 500, в сейфе 0, заморозки нет',
+      snapVault.vault_locked === 500 && snapVault.safe_locked === 0
+      && snapVault.frozen_balance === 0, snapVault);
     let err = null;
     try { await vaultSvc.lockVaultDeposit(1, 100, 7); } catch (e) { err = e.message; }
     check('второй активный вклад не открывается', err === 'У вас уже есть активный вклад', err);
@@ -806,6 +811,8 @@ const finish = () => {
     const m2 = await money(1);
     check('досрочный возврат: тело вернулось целиком (1000), заморозки нет',
       Number(un.returned) === 500 && Number(m2.balance) === 1000 && Number(m2.frozen_balance) === 0, [un, m2]);
+    check('после досрочного возврата во вкладе ничего не числится',
+      (await getBalanceSnapshot(1)).vault_locked === 0, await getBalanceSnapshot(1));
 
     // ── Выплата в срок ───────────────────────────────────────────────────
     const dep30 = await vaultSvc.lockVaultDeposit(1, 200, 30);
@@ -901,6 +908,10 @@ const finish = () => {
     const safeRow = (await query(`SELECT bank, participants_count FROM safes WHERE id = ${safe.id}`)).rows[0];
     check('банк 100, участник посчитан один раз',
       Number(safeRow.bank) === 100 && Number(safeRow.participants_count) === 1, safeRow);
+    const { getBalanceSnapshot } = require(path.join(BACKEND, 'src/services/balance.ts'));
+    const snapSafe = await getBalanceSnapshot(2);
+    check('снимок «где деньги»: вклад в сейф 100 виден отдельно от баланса',
+      snapSafe.safe_locked === 100, snapSafe);
 
     // ── Сейф: два одновременных возврата вклада ─────────────────────────
     const cancels = await Promise.all([
@@ -914,6 +925,8 @@ const finish = () => {
     const safeRow2 = (await query(`SELECT bank, participants_count FROM safes WHERE id = ${safe.id}`)).rows[0];
     check('банк и число участников вернулись к нулю',
       Number(safeRow2.bank) === 0 && Number(safeRow2.participants_count) === 0, safeRow2);
+    check('после возврата вклада в сейфе ничего не числится',
+      (await getBalanceSnapshot(2)).safe_locked === 0, await getBalanceSnapshot(2));
 
     // ── Отмена раунда, не набравшего минимум ────────────────────────────
     await safeSvc.safeDeposit(2, 10); // банк 10 < 25 и участник 1 < 2 → раунд отменяется
@@ -925,6 +938,8 @@ const finish = () => {
       `SELECT COUNT(*)::int AS c FROM transactions
         WHERE user_id = 2 AND type = 'safe_cancel' AND amount = 10`)).rows[0];
     check('транзакция возврата при отмене одна', Number(refundTx.c) === 1, refundTx.c);
+    check('отменённый раунд не держит деньги: safe_locked 0',
+      (await getBalanceSnapshot(2)).safe_locked === 0, await getBalanceSnapshot(2));
 
     return finish();
   }

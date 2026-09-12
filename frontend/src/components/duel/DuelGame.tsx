@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import { releaseBalance } from '../../utils/balanceHold';
 import { hasFreshDuelResults } from '../../stores/notifications';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -237,6 +238,8 @@ export default function DuelGame() {
               <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
             )}
           </div>
+          {/* Куда делись деньги, если их не видно в балансе: сейф, вклад, другие дуэли */}
+          <MoneyBreakdown total={false} />
 
           <div className="btn-row">
             <button className="btn" onClick={() => rematch(1)}>⚔️ РЕВАНШ ${amount}</button>

@@ -4,6 +4,7 @@ import { query } from '../../db/pool';
 import { getSetting, setSetting } from '../../services/revenue';
 import { getRocketBankroll, updateRocketBankroll } from '../../services/rocket';
 import { addManualPool, getVaultPool } from '../../services/vault-deposit';
+import { getBalanceSnapshot } from '../../services/balance';
 
 const router = Router();
 
@@ -328,6 +329,9 @@ router.get('/users/:id', async (req, res) => {
          JOIN safes s ON s.id = sd.safe_id WHERE sd.user_id = $1 ORDER BY sd.id DESC LIMIT 50`,
       [id]
     );
+    // «Где деньги»: сколько вложено в сейф и во вклад VAULT. Без этого админ
+    // на жалобу «деньги пропали» видел только баланс и заморозку дуэлей
+    const locked = await getBalanceSnapshot(id);
     res.json({
       user: {
         id: u.id,
@@ -335,6 +339,8 @@ router.get('/users/:id', async (req, res) => {
         username: u.username,
         balance: parseFloat(u.balance),
         frozen_balance: parseFloat(u.frozen_balance),
+        safe_locked: locked.safe_locked,
+        vault_locked: locked.vault_locked,
         withdraw_address: u.withdraw_address,
         deposit_address: u.deposit_address,
         auto_safe_percent: u.auto_safe_percent,

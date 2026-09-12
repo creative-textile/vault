@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
@@ -100,9 +101,12 @@ export default function Home() {
         <div className="balance-amount">${fmt(user.balance)}</div>
         <div style={{display:'flex', justifyContent:'center', gap: 16, fontSize: 13}}>
           <span className="text-dim">доступно: <span style={{color:'#fff', fontWeight:700}}>${fmt(available)}</span></span>
-          {user.frozen_balance > 0 && (
-            <span className="text-dim">заморожено: ${fmt(user.frozen_balance)}</span>
-          )}
+        </div>
+        {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT.
+            Без этих строк сумма просто «уменьшалась» после вклада, и игрок не
+            понимал, где она. Пустых строк компонент не рисует. */}
+        <div style={{maxWidth: 320, margin: '0 auto'}}>
+          <MoneyBreakdown />
         </div>
       </div>
 

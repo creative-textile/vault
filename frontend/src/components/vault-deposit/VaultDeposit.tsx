@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import Header from '../layout/Header';
 import { vaultApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -79,6 +80,8 @@ export default function VaultDeposit() {
         <span className="text-dim">Доступно:</span>
         <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
+      {/* Куда делись деньги, которых не хватает для нового вклада */}
+      <MoneyBreakdown total={false} />
 
       {active ? (
         <>

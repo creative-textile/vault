@@ -344,7 +344,15 @@ export default function AdminPanel() {
                 ID: {selectedUser.user.id} · TG: {selectedUser.user.telegram_id} · рег. {new Date(selectedUser.user.created_at).toLocaleDateString('ru-RU', {timeZone:'Europe/Moscow'})}
               </div>
               <div className="history-item"><span>Баланс:</span><b style={{color:'#ffd700'}}>${fmt(selectedUser.user.balance)}</b></div>
-              <div className="history-item"><span>Заморожено:</span><span>${fmt(selectedUser.user.frozen_balance)}</span></div>
+              <div className="history-item"><span>Заморожено (дуэли):</span><span>${fmt(selectedUser.user.frozen_balance)}</span></div>
+              {/* Где ещё деньги игрока: вклад в сейф и тело вклада VAULT */}
+              <div className="history-item"><span>В сейфе:</span><span>${fmt(selectedUser.user.safe_locked || 0)}</span></div>
+              <div className="history-item"><span>Во вкладе VAULT:</span><span>${fmt(selectedUser.user.vault_locked || 0)}</span></div>
+              <div className="history-item"><span>Всего средств:</span><b>${fmt(
+                (selectedUser.user.balance || 0)
+                + (selectedUser.user.safe_locked || 0)
+                + (selectedUser.user.vault_locked || 0)
+              )}</b></div>
               <div className="history-item"><span>Автосейф:</span><span>{selectedUser.user.auto_safe_percent}%</span></div>
               <div className="history-item"><span>Рефовод:</span><span>{selectedUser.user.referred_by || '—'}</span></div>
 

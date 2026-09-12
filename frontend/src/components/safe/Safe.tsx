@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import { useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
@@ -242,11 +243,14 @@ export default function Safe() {
       />
 
       <div style={{ padding: '8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
-        <span className="text-dim">Баланс:</span>
+        {/* Здесь именно ДОСТУПНО (баланс минус заморозка дуэлей): подпись
+            «Баланс» при таком значении врала */}
+        <span className="text-dim">Доступно:</span>
         <span className="text-accent" style={{ fontWeight: 700, fontSize: 18 }}>
           ${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}
         </span>
       </div>
+      <MoneyBreakdown total={false} />
 
       {/* ── Взлом идёт: короткая строка состояния ────────────────────────────
           Игрок с вкладом в этом раунде сюда просто не попадает — его уводит в
