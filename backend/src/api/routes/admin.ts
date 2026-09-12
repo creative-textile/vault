@@ -4,6 +4,7 @@ import { query } from '../../db/pool';
 import { getSetting, setSetting } from '../../services/revenue';
 import { getRocketBankroll, updateRocketBankroll } from '../../services/rocket';
 import { addManualPool, getVaultPool } from '../../services/vault-deposit';
+import { getBalanceSnapshot } from '../../services/balance';
 
 const router = Router();
 
@@ -308,6 +309,7 @@ router.get('/users', async (req, res) => {
 router.get('/users/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     const u = (await query('SELECT * FROM users WHERE id = $1', [id])).rows[0];
     if (!u) return res.status(404).json({ error: 'не найден' });
     const txs = await query(
@@ -327,6 +329,9 @@ router.get('/users/:id', async (req, res) => {
          JOIN safes s ON s.id = sd.safe_id WHERE sd.user_id = $1 ORDER BY sd.id DESC LIMIT 50`,
       [id]
     );
+    // «Где деньги»: сколько вложено в сейф и во вклад VAULT. Без этого админ
+    // на жалобу «деньги пропали» видел только баланс и заморозку дуэлей
+    const locked = await getBalanceSnapshot(id);
     res.json({
       user: {
         id: u.id,
@@ -334,6 +339,8 @@ router.get('/users/:id', async (req, res) => {
         username: u.username,
         balance: parseFloat(u.balance),
         frozen_balance: parseFloat(u.frozen_balance),
+        safe_locked: locked.safe_locked,
+        vault_locked: locked.vault_locked,
         withdraw_address: u.withdraw_address,
         deposit_address: u.deposit_address,
         auto_safe_percent: u.auto_safe_percent,
@@ -363,6 +370,7 @@ router.get('/users/:id', async (req, res) => {
 router.post('/users/:id/ban', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     const { reason } = req.body;
     await query('UPDATE users SET banned = TRUE, ban_reason = $2 WHERE id = $1', [id, reason || '']);
     res.json({ ok: true });
@@ -375,6 +383,7 @@ router.post('/users/:id/ban', async (req, res) => {
 router.post('/users/:id/unban', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     await query('UPDATE users SET banned = FALSE, ban_reason = NULL WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (e: any) {
@@ -386,6 +395,7 @@ router.post('/users/:id/unban', async (req, res) => {
 router.post('/users/:id/adjust', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     const { delta, reason } = req.body;
     const d = parseFloat(delta);
     const { modifyBalance } = await import('../../services/balance');
@@ -403,14 +413,16 @@ router.get('/settings', async (_req, res) => {
     'min_bet', 'rocket_max_bet_percent', 'vault_pool_percent',
     'safe_min_bank', 'safe_min_participants', 'beautiful_flight_chance',
     'vault_min_deposit', 'vault_max_deposit',
-    'safe_crack_hour', 'safe_crack_minute'
+    'safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes',
+    'project_start_date'
   ];
   const defaults: Record<string, string> = {
     commission_percent: '10', withdraw_commission: '1', referral_percent: '3',
     min_bet: '1', rocket_max_bet_percent: '50', vault_pool_percent: '15',
-    safe_min_bank: '5', safe_min_participants: '2', beautiful_flight_chance: '3',
+    safe_min_bank: '25', safe_min_participants: '2', beautiful_flight_chance: '3',
     vault_min_deposit: '10', vault_max_deposit: '100',
-    safe_crack_hour: '21', safe_crack_minute: '0'
+    safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '1',
+    project_start_date: '2026-01-01'
   };
   const out: Record<string, string> = {};
   const labels: Record<string, string> = {
@@ -426,10 +438,20 @@ router.get('/settings', async (_req, res) => {
     vault_min_deposit: 'Мин. вклад ВАУЛЬТ ($)',
     vault_max_deposit: 'Начальный макс. вклад ВАУЛЬТ ($)',
     safe_crack_hour: 'Час взлома сейфа МСК (0-23)',
-    safe_crack_minute: 'Минута взлома сейфа (0-59)'
+    safe_crack_minute: 'Минута взлома сейфа (0-59)',
+    safe_crack_timeout_minutes: 'Нужно взломать сейф за (минуты)',
+    project_start_date: 'Дата старта проекта (ГГГГ-ММ-ДД)'
   };
+  // Группы — чтобы настройки в админке не шли сплошным списком
+  const groups = [
+    { title: '🔒 Сейф', keys: ['safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes', 'safe_min_bank', 'safe_min_participants'] },
+    { title: '🚀 Ракета', keys: ['rocket_max_bet_percent', 'beautiful_flight_chance', 'min_bet'] },
+    { title: '💎 Вклад (VAULT)', keys: ['vault_pool_percent', 'vault_min_deposit', 'vault_max_deposit'] },
+    { title: '💰 Комиссии и рефералы', keys: ['commission_percent', 'withdraw_commission', 'referral_percent'] },
+    { title: '📊 Проект', keys: ['project_start_date'] }
+  ];
   for (const k of keys) out[k] = (await getSetting(k)) || defaults[k] || '';
-  res.json({ values: out, labels });
+  res.json({ values: out, labels, groups });
 });
 
 // POST /api/admin/settings

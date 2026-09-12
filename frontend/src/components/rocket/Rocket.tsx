@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import Header from '../layout/Header';
 import RocketScene from '../../three/rocket/RocketScene';
 import { rocketApi, safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { getSocket } from '../../api/socket';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
+import {
+  setFlight, setFlightMultiplier, clearFlight, getFlight, setRocketScreenActive
+} from '../../utils/rocketFlight';
 
 type Phase = 'betting' | 'flying' | 'win' | 'lose';
 
@@ -60,9 +64,16 @@ export default function Rocket() {
   useEffect(() => {
     const sock = getSocket();
 
-    const onTick = (data: any) => setMultiplier(data.multiplier);
+    const onTick = (data: any) => {
+      setMultiplier(data.multiplier);
+      // Дублируем в общий стор: бейдж «ЗАБРАТЬ» рисует этот же множитель,
+      // если игрока увели с экрана ракеты во время полёта
+      setFlightMultiplier(data.multiplier);
+    };
 
     const onCrashEvt = (_data: any) => {
+      // Раунд закончился — общий стор полёта гасим (бейдж больше не нужен)
+      clearFlight();
       // Если во время полёта не было кэшаута — проигрыш
       setPhase(p => {
         if (p === 'flying') {
@@ -75,6 +86,7 @@ export default function Rocket() {
     };
 
     const onCashoutResult = async (res: any) => {
+      clearFlight();
       if (res?.result === 'win') {
         setCashoutMult(res.cashout_at);
         setCrashAt(res.crash_at);
@@ -91,7 +103,9 @@ export default function Rocket() {
               await safeApi.deposit(amt);
               showToast(`🔒 $${amt.toFixed(2)} автоматически в Сейф`);
               refreshUser();
-            } catch {}
+            } catch (e: any) {
+              console.warn('[safe] автовклад не прошёл:', e?.message || e);
+            }
           }
         } else {
           setShowSafePrompt(true);
@@ -122,14 +136,41 @@ export default function Rocket() {
       setMultiplier(1.0);
       setPhase('flying');
       launchTimeRef.current = Date.now();
+      // Полёт принадлежит серверу (тики и падение идут без клиента), поэтому
+      // состояние раунда отдаём в общий стор — кнопка «ЗАБРАТЬ» сможет
+      // появиться на любом экране, куда игрока выдернут
+      setFlight(res.round_id, res.crash_at);
       const sock = getSocket();
       sock.emit('rocket:join', res.round_id);
       setSceneKey(k => k + 1);
+      // Таймер переживает размонтирование экрана: если игрока в эти 100 мс
+      // выдернут во взлом сейфа, rocket:launch всё равно уйдёт и раунд
+      // стартует на сервере (иначе ставка зависла бы без тиков)
       setTimeout(() => sock.emit('rocket:launch', { round_id: res.round_id }), 100);
     } catch (e: any) {
       showToast(e.message);
     }
   };
+
+  // Кто обрабатывает события раунда: пока экран смонтирован — он сам,
+  // после ухода — плавающий бейдж (см. isRocketScreenActive)
+  useEffect(() => {
+    setRocketScreenActive(true);
+    return () => setRocketScreenActive(false);
+  }, []);
+
+  // Вернулись на экран во время полёта (могли выдернуть во взлом сейфа):
+  // сервер продолжает тикать, поэтому восстанавливаем раунд — иначе игрок
+  // увидел бы форму ставки и не смог забрать выигрыш
+  useEffect(() => {
+    const f = getFlight();
+    if (!f) return;
+    setRoundId(f.roundId);
+    setCrashAt(f.crashAt);
+    setMultiplier(f.multiplier || 1.0);
+    setPhase('flying');
+    getSocket().emit('rocket:join', f.roundId);
+  }, []);
 
   const cashout = () => {
     if (phase !== 'flying' || !roundId) return;
@@ -152,9 +193,13 @@ export default function Rocket() {
       <RocketScene key={sceneKey} phase={scenePhase as any} multiplier={multiplier} />
 
       <div style={{padding:'12px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
-        <span className="text-dim">Баланс:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+        {/* Ставка проверяется и списывается из «доступно» (баланс минус
+            заморозка дуэлей), поэтому и показываем его: цифра баланса при
+            висящем вызове обещала больше, чем можно поставить */}
+        <span className="text-dim">Доступно:</span>
+        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
+      <MoneyBreakdown total={false} />
 
       {phase === 'betting' && (
         <>

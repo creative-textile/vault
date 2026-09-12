@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
+import { holdBalance, releaseBalance } from '../../utils/balanceHold';
 import { useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
@@ -35,16 +37,10 @@ export default function Duel() {
       const [lob, hist] = await Promise.all([duelApi.lobby(), duelApi.history()]);
       setLobby(lob.map((l: any) => ({...l, is_mine: l.creator_id === user?.id})));
       setHistory(hist);
-      // Проверить: если есть завершённая дуэль, перейти к результату
-      const pending = await duelApi.pending();
-      if (pending?.pending) {
-        const seenKey = `duel_seen_${pending.pending.id}`;
-        const dismissedKey = `duel_dismissed_${pending.pending.id}`;
-        if (!localStorage.getItem(seenKey) && !localStorage.getItem(dismissedKey)) {
-          localStorage.setItem(seenKey, '1');
-          nav(`/duel/${pending.pending.id}`, { state: { result: pending.pending }, replace: true });
-        }
-      }
+      // Завершённую дуэль лобби больше не открывает сам: результат приходит
+      // модальным окном из очереди уведомлений (DuelResultModal), и игрок сам
+      // решает — смотреть реплей или закрыть. Раньше этот автопереход уводил
+      // из лобби каждые 3 с и спорил с модалкой.
     } catch {}
   }, [user?.id, nav]);
 
@@ -70,11 +66,17 @@ export default function Duel() {
   };
 
   const accept = async (id: number) => {
+    // Сервер списывает ставку и резервирует приз в момент принятия вызова —
+    // до броска монеты. Без удержания баланс в лобби и в шапке успевал
+    // измениться на глазах: цифра выдавала исход раньше анимации.
+    holdBalance();
     try {
       const result = await duelApi.accept(id);
       await refreshUser();
       nav(`/duel/${id}`, { state: { result: { ...result, id } }, replace: true });
     } catch (e: any) {
+      releaseBalance();
+      await refreshUser();
       showToast(e.message);
     }
   };
@@ -103,9 +105,12 @@ export default function Duel() {
       <DuelScene phase="idle" />
 
       <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
-        <span className="text-dim">Баланс:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+        {/* Вызов создаётся из «доступно»: баланс при уже висящих вызовах
+            обещал больше, чем можно поставить */}
+        <span className="text-dim">Доступно:</span>
+        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
+      <MoneyBreakdown total={false} />
 
       <div className="card">
         <div className="card-title">Создать вызов</div>

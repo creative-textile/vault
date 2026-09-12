@@ -9,6 +9,13 @@ export const pool = new Pool({
   max: 20
 });
 
+// Без обработчика 'error' любая ошибка свободного соединения пула
+// (например, "terminating connection due to unexpected postmaster exit"
+// при остановке Postgres) приводит к падению всего процесса.
+pool.on('error', (err: any) => {
+  console.error(`[DB] Ошибка соединения в пуле (игнорируем, процесс жив): ${err.message}`);
+});
+
 export async function waitForDb(maxRetries = 30, delayMs = 2000): Promise<void> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {

@@ -4,8 +4,10 @@
 // и отправляет их на localhost:8000 (см. vite.config.ts).
 const API_URL = '';
 
+import { getStoredToken } from '../utils/tokenStorage';
+
 function getToken(): string | null {
-  return localStorage.getItem('vault_token');
+  return getStoredToken();
 }
 
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
@@ -38,6 +40,11 @@ export const authApi = {
     api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData: `demo:${telegramId}:${username || 'user' + telegramId}`, refCode }) })
 };
 
+// Публичная статистика проекта (главный экран): участники, дни, пополнения, выплаты
+export const statsApi = {
+  summary: () => api('/api/stats/summary')
+};
+
 export const profileApi = {
   get: () => api('/api/profile'),
   update: (data: any) => api('/api/profile', { method: 'PATCH', body: JSON.stringify(data) }),
@@ -67,14 +74,26 @@ export const duelApi = {
   cancel: (id: number) => api(`/api/duel/cancel/${id}`, { method: 'POST' }),
   history: () => api('/api/duel/history'),
   get: (id: number) => api(`/api/duel/${id}`),
-  pending: () => api('/api/duel/pending')
+  notifications: () => api('/api/duel/notifications'),
+  markNotificationAsRead: (id: number) => api(`/api/duel/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsAsRead: () => api('/api/duel/notifications/read-all', { method: 'POST' }),
+  markDuelNotificationsAsRead: (duelId: number) =>
+    api(`/api/duel/notifications/read-duel/${duelId}`, { method: 'POST' }),
+  getUnreadCount: () => api('/api/duel/notifications/count')
 };
 
 export const safeApi = {
   current: () => api('/api/safe/current'),
   deposit: (amount: number) => api('/api/safe/deposit', { method: 'POST', body: JSON.stringify({ amount }) }),
   cancel: () => api('/api/safe/cancel', { method: 'POST' }),
-  crack: (time_ms: number) => api('/api/safe/crack', { method: 'POST', body: JSON.stringify({ time_ms }) }),
+  /**
+   * Сдать результат взлома. Кроме времени отправляем моменты тапов (мс от старта
+   * вращения) и число промахов: сервер сам сверяет цифры с кодом сейфа и
+   * пересчитывает время — подставить произвольные числа не получится.
+   */
+  // taps — моменты остановки барабанов: по ним сервер сверяет цифры с кодом сейфа
+  crack: (time_ms: number, taps?: number[]) =>
+    api('/api/safe/crack', { method: 'POST', body: JSON.stringify({ time_ms, taps }) }),
   results: (id: number) => api(`/api/safe/results/${id}`),
   get: (id: number) => api(`/api/safe/${id}`)
 };

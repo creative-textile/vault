@@ -7,6 +7,10 @@ export interface User {
   balance: number;
   frozen_balance: number;
   available: number;
+  /** Деньги вне баланса: вклад в сейф, который ещё собирается или взламывается. */
+  safe_locked?: number;
+  /** Деньги вне баланса: тело активного вклада VAULT. */
+  vault_locked?: number;
   ref_code: string;
   deposit_address?: string;
   withdraw_address?: string;

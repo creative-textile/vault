@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../stores/auth';
-import { vaultApi, safeApi } from '../../api/client';
+import { onSafeEvent } from '../../utils/socketEvents';
+import { vaultApi, safeApi, statsApi } from '../../api/client';
 
 function fmt(n: number) {
   return n.toFixed(2);
@@ -21,25 +23,64 @@ export default function Home() {
   const nav = useNavigate();
   const [vaultStatus, setVaultStatus] = useState<any>(null);
   const [safe, setSafe] = useState<any>(null);
+  // Сейф, который принимает вклады (во время взлома и после розыгрыша — следующий)
+  const [collect, setCollect] = useState<any>(null);
+  // Витрина проекта: участники / дни работы / пополнено / выплачено
+  const [stats, setStats] = useState<any>(null);
   const [timeToCrack, setTimeToCrack] = useState(0);
+  // Свой вклад в сейф, который взламывают прямо сейчас: по нему видно,
+  // должен ли игрок оказаться в мини-игре (и почему его туда не уводит)
+  const [crackDeposit, setCrackDeposit] = useState<any>(null);
+  const [collectTimeToCrack, setCollectTimeToCrack] = useState(0);
+  // Дедлайны в ref, тикаем локально — без запросов к серверу каждую секунду
+  const collectAtRef = useRef<number | null>(null);
+  const crackAtRef = useRef<number | null>(null);
+
+  const loadSafe = useCallback(() => {
+    safeApi.current().then(s => {
+      setSafe(s.safe);
+      setCollect(s.collecting_safe || s.safe);
+      setCrackDeposit(s.safe?.status === 'cracking' ? (s.my_deposit ?? null) : null);
+      // Отсчёт до взлома — всегда по сейфу, который сейчас собирает
+      const cms = s.collecting_safe?.time_to_crack_ms
+        ?? (s.safe?.status === 'collecting' ? s.safe?.time_to_crack_ms : null);
+      if (cms != null) {
+        setCollectTimeToCrack(Math.max(0, cms));
+        collectAtRef.current = Date.now() + Math.max(0, cms);
+      } else if (s.collecting_safe?.crack_at) {
+        const d = Math.max(0, new Date(s.collecting_safe.crack_at).getTime() - Date.now());
+        setCollectTimeToCrack(d);
+        collectAtRef.current = Date.now() + d;
+      }
+      // Остаток окна взлома — только когда взлом идёт
+      if (s.safe?.status === 'cracking' && s.safe?.crack_remaining_ms != null) {
+        setTimeToCrack(Math.max(0, s.safe.crack_remaining_ms));
+        crackAtRef.current = Date.now() + s.safe.crack_remaining_ms;
+      } else {
+        crackAtRef.current = null;
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     vaultApi.status().then(setVaultStatus).catch(() => {});
-    safeApi.current().then(s => {
-      setSafe(s.safe);
-      if (s.safe?.crack_at) {
-        const d = new Date(s.safe.crack_at).getTime();
-        setTimeToCrack(Math.max(0, d - Date.now()));
-      } else {
-        setTimeToCrack(s.safe?.time_to_crack_ms || 0);
-      }
-    }).catch(() => {});
+    loadSafe();
+    const loadStats = () => statsApi.summary().then(setStats).catch(() => {});
+    loadStats();
+    // Цифры проекта меняются медленно — обновляем раз в минуту
+    const statsPoll = setInterval(loadStats, 60000);
+    // Карточка сейфа обновляется по socket-событиям: старт взлома, итоги, отмена
+    const off = onSafeEvent(loadSafe);
     const iv = setInterval(() => {
-      setTimeToCrack(t => Math.max(0, t - 1000));
+      if (collectAtRef.current) setCollectTimeToCrack(Math.max(0, collectAtRef.current - Date.now()));
+      else setCollectTimeToCrack(t => Math.max(0, t - 1000));
+      if (crackAtRef.current) setTimeToCrack(Math.max(0, crackAtRef.current - Date.now()));
     }, 1000);
+    // Страховка на случай потерянного socket: банк не должен «застывать»
+    const poll = setInterval(loadSafe, 20000);
     const refresh = setInterval(refreshUser, 5000);
-    return () => { clearInterval(iv); clearInterval(refresh); };
-  }, [refreshUser]);
+    return () => { off(); clearInterval(iv); clearInterval(poll); clearInterval(refresh); clearInterval(statsPoll); };
+  }, [refreshUser, loadSafe]);
 
   if (!user) return null;
 
@@ -60,9 +101,12 @@ export default function Home() {
         <div className="balance-amount">${fmt(user.balance)}</div>
         <div style={{display:'flex', justifyContent:'center', gap: 16, fontSize: 13}}>
           <span className="text-dim">доступно: <span style={{color:'#fff', fontWeight:700}}>${fmt(available)}</span></span>
-          {user.frozen_balance > 0 && (
-            <span className="text-dim">заморожено: ${fmt(user.frozen_balance)}</span>
-          )}
+        </div>
+        {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT.
+            Без этих строк сумма просто «уменьшалась» после вклада, и игрок не
+            понимал, где она. Пустых строк компонент не рисует. */}
+        <div style={{maxWidth: 320, margin: '0 auto'}}>
+          <MoneyBreakdown />
         </div>
       </div>
 
@@ -119,33 +163,71 @@ export default function Home() {
       <div className="card" onClick={() => nav('/safe')} style={{cursor:'pointer'}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
           <div className="card-title">🔒 Сейф</div>
-          <span className={`pill ${safe?.status === 'cracking' ? 'pill-active' : safe?.status === 'collecting' ? 'pill-active' : ''}`}>
-            {safe?.status === 'collecting' ? 'открыт' : safe?.status === 'cracking' ? '🔥 ВЗЛОМ' : safe?.status === 'finished' ? 'взломан' : '—'}
+          <span className={`pill ${safe?.status === 'cracking' || collect?.status === 'collecting' ? 'pill-active' : ''}`}>
+            {safe?.status === 'cracking' ? '🔥 ВЗЛОМ' : collect?.status === 'collecting' ? 'открыт' : '—'}
           </span>
         </div>
 
-        {safe?.status === 'cracking' ? (
-          <div className="text-red text-center" style={{fontSize:22, fontWeight:900, padding:'12px 0'}}>🔥 ИДЁТ ВЗЛОМ!</div>
-        ) : safe?.status === 'collecting' ? (
-          <>
-            <div style={{display:'flex', gap:16, justifyContent:'space-between', alignItems:'center', fontSize:16, margin:'8px 0'}}>
-              <div>💰 <span className="text-accent" style={{fontWeight:900}}>${fmt(safe.bank)}</span></div>
-              <div>👥 {safe.participants_count}</div>
-              <div className="timer" style={{fontSize:18}}>⏰ {timeToStr(timeToCrack)}</div>
+        {safe?.status === 'cracking' && (
+          <div className="text-red text-center" style={{fontSize:20, fontWeight:900, padding:'10px 0 0'}}>
+            🔥 ИДЁТ ВЗЛОМ СЕЙФА #{safe.id}!
+            <div className="timer" style={{fontSize:18, marginTop:4}}>⏱ {timeToStr(timeToCrack)}</div>
+            {/* Почему игрока уводит (или не уводит) в мини-игру — видно сразу */}
+            <div className="text-dim" style={{fontSize:12, fontWeight:400, marginTop:2}}>
+              {crackDeposit
+                ? ((crackDeposit.crack_time_ms ?? null) != null
+                  ? `ваш результат ${(crackDeposit.crack_time_ms / 1000).toFixed(2)} с засчитан`
+                  : 'вы участвуете в этом раунде — мини-игра откроется сама')
+                : 'вы не вносили вклад в этот раунд — взлом идёт без вас'}
             </div>
-            <div className="text-dim" style={{marginTop:8, fontSize:13}}>Приз: ×1.5 · мин. $1</div>
-          </>
-        ) : safe?.status === 'finished' ? (
+          </div>
+        )}
+
+        {/* Банк и отсчёт — по сейфу, который принимает вклады прямо сейчас */}
+        {collect?.status === 'collecting' ? (
           <>
-            <div className="text-green text-center" style={{fontSize:18, fontWeight:900, padding:'8px 0'}}>✅ ВЗЛОМАН</div>
-            <div className="text-dim text-center" style={{fontSize:13}}>Банк: ${fmt(safe.bank)} · Победителей: {safe.winners_count}</div>
+            <div className="timer" style={{marginTop:8}}>⏰ {timeToStr(collectTimeToCrack)}</div>
+            <div className="text-center text-dim" style={{fontSize:12, marginTop:-4}}>
+              СЕЙФ #{collect.id}{collect.crack_at_msk ? ` · взлом в ${collect.crack_at_msk} МСК` : ' · до взлома'}
+            </div>
+            <div style={{display:'flex', gap:16, justifyContent:'space-between', alignItems:'center', fontSize:16, margin:'8px 0'}}>
+              <div>💰 <span className="text-accent" style={{fontWeight:900}}>${fmt(collect.bank)}</span></div>
+              <div>👥 {collect.participants_count}</div>
+              <div className="text-dim" style={{fontSize:12}}>призовой ${fmt(collect.prize_pool)}</div>
+            </div>
+            <div className="text-dim" style={{marginTop:4, fontSize:13}}>Приз: ×1.5 · мин. $1</div>
           </>
         ) : (
           <div className="text-dim" style={{fontSize:13}}>Создаём сейф...</div>
         )}
         <button className="btn mt" style={{padding:'14px', fontSize:16}}>
-          {safe?.status === 'cracking' ? '🔥 УЧАСТВОВАТЬ' : '💰 ВНЕСТИ'}
+          {collect?.status === 'collecting'
+            ? (safe?.status === 'cracking' ? `💰 ВНЕСТИ В СЕЙФ #${collect.id}` : '💰 ВНЕСТИ')
+            : '🔥 УЧАСТВОВАТЬ'}
         </button>
+      </div>
+
+      {/* Статистика VAULT */}
+      <div className="card" style={{padding:'12px 14px'}}>
+        <div className="card-title" style={{fontSize:13, marginBottom:10}}>📊 СТАТИСТИКА VAULT</div>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 8px'}}>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>УЧАСТНИКОВ</div>
+            <div style={{fontWeight:900, fontSize:19}}>{stats ? stats.users_count : '…'}</div>
+          </div>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ДНЕЙ РАБОТАЕМ</div>
+            <div style={{fontWeight:900, fontSize:19}}>{stats ? stats.days_working : '…'}</div>
+          </div>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ПОПОЛНЕНО ВСЕГО</div>
+            <div style={{fontWeight:900, fontSize:19, color:'#22c55e'}}>${stats ? fmt(stats.total_deposited) : '…'}</div>
+          </div>
+          <div>
+            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ВЫПЛАЧЕНО ВСЕГО</div>
+            <div style={{fontWeight:900, fontSize:19, color:'#ffd700'}}>${stats ? fmt(stats.total_withdrawn) : '…'}</div>
+          </div>
+        </div>
       </div>
 
       {/* Нижнее меню */}

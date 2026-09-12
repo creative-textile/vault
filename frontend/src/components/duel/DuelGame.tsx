@@ -1,10 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
+import { releaseBalance } from '../../utils/balanceHold';
+import { hasFreshDuelResults } from '../../stores/notifications';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
+import { useNotifications } from '../../stores/notifications';
+import { tabStore, duelSeenKey } from '../../utils/tabStore';
 
 type DuelPhase = 'flipping' | 'result';
 
@@ -13,6 +18,12 @@ export default function DuelGame() {
   const loc = useLocation();
   const nav = useNavigate();
   const { user, refreshUser, showToast } = useAuth();
+  const { markDuelAsRead } = useNotifications();
+  // Остались ли непросмотренные свежие результаты других дуэлей. Баланс —
+  // цифра суммарная: показав её сейчас, выдали бы исход тех дуэлей, которые
+  // ещё ждут своей очереди в модальном окне. Подписка на стор уведомлений
+  // выше даёт пересчёт при каждом изменении списка.
+  const otherPending = hasFreshDuelResults(Number(id));
 
   const [phase, setPhase] = useState<DuelPhase>('flipping');
   const [result, setResult] = useState<'heads' | 'tails' | null>(null);
@@ -23,6 +34,8 @@ export default function DuelGame() {
   const [showSafe, setShowSafe] = useState(false);
   const [autoDeposited, setAutoDeposited] = useState(0);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  /** Если это повтор сыгранной дуэли — подпись с датой, чтобы игрок понимал контекст. */
+  const [replayOf, setReplayOf] = useState<string | null>(null);
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
 
@@ -35,9 +48,19 @@ export default function DuelGame() {
         if (!mounted) return () => {};
         if (!duelId) {
           setLoadErr('Дуэль не найдена');
-          setTimeout(() => nav('/duel'), 1500);
+          setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
+        
+        // Флаг «анимацию уже смотрели» ставит ТОЛЬКО этот экран (ниже).
+        // Вызывающая сторона его не проставляет: иначе повтор дуэли открывался
+        // бы сразу на результате, без броска монеты, — а смысл реплея в броске.
+        // Флаг свой для вкладки (tabStore → sessionStorage). В localStorage его
+        // видел соседний аккаунт в другой вкладке того же браузера — и повтор
+        // дуэли открывался у него сразу на результате, без броска монеты.
+        const seenKey = duelSeenKey(duelId);
+        const alreadySeen = tabStore.get(seenKey) === '1';
+        
         // ВСЕГДА подтягиваем актуальные данные дуэли с сервера, чтобы не было -$0.00
         try {
           const d = await duelApi.get(duelId);
@@ -46,9 +69,26 @@ export default function DuelGame() {
         if (!mounted) return;
         if (!res || !res.id) {
           setLoadErr('Дуэль не найдена');
-          setTimeout(() => nav('/duel'), 1500);
+          setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
+
+        // Несыгранная дуэль: результата нет, и выдумывать «орёл/решка» нельзя
+        if (res.status && res.status !== 'finished') {
+          setLoadErr(res.status === 'waiting'
+            ? 'Дуэль ещё не состоялась — ждём соперника'
+            : 'Дуэль отменена');
+          setTimeout(() => nav('/duel', { replace: true }), 1500);
+          return;
+        }
+        
+        // Если уже просмотрено, сразу показываем результат без анимации
+        if (alreadySeen) {
+          setPhase('result');
+        } else {
+          setPhase('flipping');
+        }
+        
         setResult(res.result || 'heads');
         const defaultTraj = { rotation_speed: 8, height: 2.5, bounces: 2, final_angle: res.i_won ? 0 : 180 };
         setTraj(res.coin_trajectory && typeof res.coin_trajectory === 'object'
@@ -61,38 +101,72 @@ export default function DuelGame() {
         const iWon = !!res.i_won;
         setWon(iWon);
 
-        const seenId = res.id || duelId;
-        const duelKey = `duel_seen_${seenId}`;
-        localStorage.setItem(duelKey, '1');
-        localStorage.removeItem(`duel_dismissed_${seenId}`);
-        sessionStorage.removeItem(`duel_pending_${seenId}`);
+        // Повтор: либо анимацию уже смотрели в этом браузере, либо дуэль
+        // сыграна давно (игрок пришёл из уведомления спустя часы или дни)
+        const finishedAt = res.finished_at ? new Date(res.finished_at) : null;
+        if (alreadySeen || (finishedAt && Date.now() - finishedAt.getTime() > 60_000)) {
+          if (finishedAt) {
+            setReplayOf(finishedAt.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }));
+          }
+        }
 
-        setTimeout(async () => {
-          if (!mounted) return;
-          setPhase('result');
-          await refreshUser().catch(() => {});
-          if (iWon && prz - amt >= 1) {
-            const autoPct = userRef.current?.auto_safe_percent || 0;
-            if (autoPct > 0) {
-              const toDeposit = Math.round((prz - amt) * (autoPct / 100) * 100) / 100;
-              if (toDeposit >= 1) {
-                try {
-                  await safeApi.deposit(toDeposit);
-                  if (mounted) setAutoDeposited(toDeposit);
-                  await refreshUser();
-                } catch {}
+        const seenId = res.id || duelId;
+        tabStore.set(seenKey, '1');
+
+        // Результат просмотрен — гасим уведомления по этой дуэли,
+        // иначе бейдж непрочитанных висит, даже когда игрок всё увидел
+        markDuelAsRead(Number(seenId));
+
+        // Если анимация не была просмотрена, запускаем её
+        if (!alreadySeen) {
+          setTimeout(async () => {
+            if (!mounted) return;
+            setPhase('result');
+            // Исход этой дуэли показан — баланс можно обновить, но только если
+            // непросмотренных свежих результатов больше нет: цифра суммарная, и
+            // по ней игрок понял бы исход остальных дуэлей из списка
+            if (!hasFreshDuelResults(Number(seenId))) releaseBalance();
+            await refreshUser().catch(() => {});
+            if (iWon && prz - amt >= 1) {
+              const autoPct = userRef.current?.auto_safe_percent || 0;
+              if (autoPct > 0) {
+                const toDeposit = Math.round((prz - amt) * (autoPct / 100) * 100) / 100;
+                if (toDeposit >= 1) {
+                  try {
+                    await safeApi.deposit(toDeposit);
+                    if (mounted) setAutoDeposited(toDeposit);
+                    await refreshUser();
+                  } catch (e: any) {
+                    // Автовклад больше не блокируется фазой взлома (деньги уходят
+                    // в собирающий сейф), но молча терять ошибку тоже не стоит
+                    console.warn('[safe] автовклад не прошёл:', e?.message || e);
+                  }
+                }
               }
             }
-          }
-        }, 2800);
+          }, 2800);
+        } else {
+          // Если уже просмотрено, просто обновляем баланс (опять же — только
+          // когда других непросмотренных результатов не осталось)
+          if (!hasFreshDuelResults(Number(seenId))) releaseBalance();
+          await refreshUser().catch(() => {});
+        }
       } catch (e: any) {
+        // Анимации не будет — цифры не держим (кроме случая, когда в списке
+        // остались другие непросмотренные результаты)
+        if (!hasFreshDuelResults(Number(id))) releaseBalance();
         if (!mounted) return;
         setLoadErr(e?.message || 'Ошибка загрузки дуэли');
-        setTimeout(() => nav('/duel'), 1500);
+        setTimeout(() => nav('/duel', { replace: true }), 1500);
       }
     })();
-    return () => { mounted = false; };
-  }, [id, loc.state, nav, refreshUser]);
+    return () => {
+      mounted = false;
+      // Ушли с экрана: баланс не должен остаться замороженным навсегда, но и
+      // выдавать исход других непросмотренных дуэлей он не обязан
+      if (!hasFreshDuelResults(Number(id))) releaseBalance();
+    };
+  }, [id, loc.state, nav, refreshUser, markDuelAsRead]);
 
   const rematch = async (mult = 1) => {
     if (!id) return;
@@ -106,11 +180,11 @@ export default function DuelGame() {
   };
 
   const goHome = () => {
-    if (id) localStorage.setItem(`duel_seen_${id}`, '1');
+    if (id) tabStore.set(duelSeenKey(id), '1');
     nav('/');
   };
   const goBack = () => {
-    if (id) localStorage.setItem(`duel_seen_${id}`, '1');
+    if (id) tabStore.set(duelSeenKey(id), '1');
     nav('/duel');
   };
 
@@ -131,17 +205,17 @@ export default function DuelGame() {
       <Header title="⚔️ Дуэль" />
       <DuelScene phase={phase as any} result={result} trajectory={traj} />
 
-      <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
-        <span className="text-dim">Баланс:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
-      </div>
-
       {phase === 'result' && (
         <>
           <div className={`result-text ${won ? 'win' : 'lose'}`}>
             {won ? '🏆 ВЫ ПОБЕДИЛИ!' : '❌ ВЫ ПРОИГРАЛИ'}
           </div>
           <div className="text-center" style={{fontSize:22}}>🪙 {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}</div>
+          {replayOf && (
+            <div className="text-dim text-center" style={{fontSize:12, marginBottom:6}}>
+              📼 Повтор дуэли от {replayOf} МСК
+            </div>
+          )}
           <div className={`result-text ${won ? 'win' : 'lose'}`}>
             {won ? `+$${profit.toFixed(2)}` : `-$${amount.toFixed(2)}`}
           </div>
@@ -150,6 +224,22 @@ export default function DuelGame() {
               🔒 ${autoDeposited.toFixed(2)} автоматически переведено в Сейф
             </div>
           )}
+
+          {/* Баланс — только вместе с итогом. Деньги сервер двигает в момент
+              принятия вызова, поэтому во время броска монеты цифра уже новая:
+              она появлялась раньше надписи «ВЫ ПОБЕДИЛИ» и путала игрока. */}
+          <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
+            <span className="text-dim">Баланс:</span>
+            {otherPending ? (
+              <span className="text-dim" style={{fontSize:12, textAlign:'right', maxWidth:'62%'}}>
+                обновится после остальных дуэлей
+              </span>
+            ) : (
+              <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
+            )}
+          </div>
+          {/* Куда делись деньги, если их не видно в балансе: сейф, вклад, другие дуэли */}
+          <MoneyBreakdown total={false} />
 
           <div className="btn-row">
             <button className="btn" onClick={() => rematch(1)}>⚔️ РЕВАНШ ${amount}</button>

@@ -77,7 +77,12 @@ CREATE TABLE IF NOT EXISTS safes (
     participants_count INTEGER DEFAULT 0,
     winners_count      INTEGER DEFAULT 0,
     date               DATE UNIQUE DEFAULT CURRENT_DATE,
-    cracked_at         TIMESTAMP
+    cracked_at         TIMESTAMP,
+    -- Момент старта фазы взлома: по нему считается окно взлома и время игрока
+    crack_started_at   TIMESTAMPTZ,
+    -- Момент начала сбора: сбор следующего сейфа стартует в момент взлома
+    -- предыдущего, и по нему планировщик определяет слот взлома
+    collect_started_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS safe_deposits (
@@ -131,6 +136,23 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS user_notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    data JSONB,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    related_entity_type VARCHAR(50),
+    related_entity_id INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_notifications_user_unread
+    ON user_notifications(user_id, is_read);
+
 -- Seed rocket bankroll ($1500 seed)
 INSERT INTO rocket_bankroll (amount) VALUES (1500) ON CONFLICT DO NOTHING;
 
@@ -141,7 +163,7 @@ INSERT INTO settings (key, value) VALUES
     ('referral_percent', '3'),
     ('rocket_max_bet_percent', '50'),
     ('safe_min_bank', '25'),
-    ('safe_min_participants', '3'),
+    ('safe_min_participants', '2'),
     ('beautiful_flight_chance', '3'),
     ('vault_pool_percent', '15'),
     ('vault_max_deposit', '100'),

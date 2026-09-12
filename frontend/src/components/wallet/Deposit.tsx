@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import Header from '../layout/Header';
 import { useAuth } from '../../stores/auth';
 import { walletApi } from '../../api/client';
@@ -32,6 +33,8 @@ export default function Deposit() {
         <span className="text-dim">Текущий баланс:</span>
         <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
       </div>
+      {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT */}
+      <MoneyBreakdown total={false} />
       <div className="card">
         <div className="card-title text-center">Отправьте USDT (сеть TON):</div>
         <div style={{

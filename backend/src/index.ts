@@ -3,8 +3,9 @@ import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import { config } from './config';
-import { initCrons } from './cron';
+import { initCrons, stopCrons } from './cron';
 import { initNotifications } from './services/notifications';
+import { initNotificationsTable } from './services/user-notifications';
 import { startDepositListener } from './services/ton';
 
 import userRoutes from './api/routes/user';
@@ -45,10 +46,15 @@ io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next();
   try {
-    const jwt = await import('jsonwebtoken');
-    const decoded = jwt.verify(token, config.jwtSecret) as any;
-    socket.data.userId = decoded.userId;
-    socket.join(`user:${decoded.userId}`);
+    // Та же проверка, что и в HTTP-auth: токен должен принадлежать ЭТОМУ
+    // пользователю (telegram_id совпал). Иначе сокет с устаревшим токеном
+    // попадает в чужую комнату user:<id> и получает чужие уведомления и баланс.
+    const { getUserFromToken } = await import('./services/user');
+    const user = await getUserFromToken(token);
+    if (user) {
+      socket.data.userId = user.id;
+      socket.join(`user:${user.id}`);
+    }
   } catch {}
   next();
 });
@@ -88,6 +94,19 @@ server.listen(config.port, async () => {
   try {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`);
+    // Отметка старта фазы взлома сейфа (нужна существующим БД: окно взлома считается от неё)
+    try {
+      await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS crack_started_at TIMESTAMPTZ`);
+      // Момент начала сбора: по нему планировщик понимает, не отыгран ли
+      // сегодняшний слот взлома предыдущим сейфом (важно при переносе времени в админке)
+      await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS collect_started_at TIMESTAMPTZ`);
+      await query(`UPDATE safes s
+                      SET collect_started_at = COALESCE(
+                        (SELECT MAX(p.crack_started_at) FROM safes p WHERE p.id < s.id), NOW())
+                    WHERE s.collect_started_at IS NULL`);
+    } catch (e: any) {
+      console.error('[DB] Migration safes.crack_started_at:', e.message);
+    }
     await query(`CREATE TABLE IF NOT EXISTS platform_cashbox (
         id SERIAL PRIMARY KEY, amount DECIMAL(14,2) DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW()
     )`);
@@ -102,13 +121,83 @@ server.listen(config.port, async () => {
       min_bet:'1', rocket_max_bet_percent:'50', vault_pool_percent:'15',
       safe_min_bank:'25', safe_min_participants:'2', beautiful_flight_chance:'3',
       vault_min_deposit:'10', vault_max_deposit:'100',
-      safe_crack_hour:'21', safe_crack_minute:'0'
+      safe_crack_hour:'21', safe_crack_minute:'0',
+      safe_crack_timeout_minutes: '1',
+      project_start_date: '2026-01-01'
     };
     // Принудительно обновим min_bank/safe_min_bank на корректные (на случай если в БД остались старые значения $2/$5)
     await query(`UPDATE settings SET value='25' WHERE key='safe_min_bank'`);
     await query(`UPDATE settings SET value='2' WHERE key='safe_min_participants'`);
+    // Окно взлома по умолчанию сокращено с 2 минут до 1. Обновляем только те БД,
+    // где осталось прежнее значение по умолчанию — осознанный выбор админа не трогаем.
+    await query(`UPDATE settings SET value='1' WHERE key='safe_crack_timeout_minutes' AND value='2'`);
     for (const [k,v] of Object.entries(defaults)) {
       await query(`INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING`, [k,v]);
+    }
+    
+    // Инициализируем таблицу уведомлений
+    await initNotificationsTable();
+    
+    // Очищаем уведомления с невалидными duel_id (NaN)
+    try {
+      await query(`
+        DELETE FROM user_notifications 
+        WHERE type = 'duel_result' 
+          AND (data->>'duel_id' IS NULL 
+               OR data->>'duel_id' = 'NaN' 
+               OR data->>'duel_id' ~ '^[^0-9]+$')
+      `);
+      console.log('[DB] Cleaned up notifications with invalid duel_id');
+    } catch (e: any) {
+      console.error('[DB] Error cleaning notifications:', e.message);
+    }
+
+    // ── Одноразовые починки двойной блокировки денег ────────────────────
+    // И вызов дуэли, и вклад раньше и ЗАМАРАЖИВАЛИ сумму, и СПИСЫВАЛИ её, а
+    // available = balance − frozen_balance, поэтому деньги блокировались
+    // дважды. Теперь одно движение денег = одна операция. Починки выполняются
+    // ОДИН раз (флаг в settings): вызовы и вклады, созданные уже по новой
+    // схеме, не заморожены, и повторный прогон испортил бы баланс.
+    try {
+      const { getSetting, setSetting } = await import('./services/revenue');
+
+      if ((await getSetting('duel_double_lock_fixed')) !== '1') {
+        const { repairDoubleLockedOpenDuels } = await import('./services/duel');
+        const n = await repairDoubleLockedOpenDuels();
+        await setSetting('duel_double_lock_fixed', '1');
+        console.log(`[DB] Дуэли: возвращены на баланс ставки ${n} зависших вызовов, созданных прежним кодом`);
+      }
+
+      if ((await getSetting('vault_freeze_fix_applied')) !== '1') {
+        const { repairVaultFreeze } = await import('./services/vault-deposit');
+        const n = await repairVaultFreeze();
+        await setSetting('vault_freeze_fix_applied', '1');
+        console.log(`[DB] Вклады: снята лишняя заморозка с ${n} активных вкладов`);
+      }
+
+      // Отрицательная заморозка завышала доступный баланс (можно было ставить
+      // больше, чем есть). Возникала, например, при гонке двух «Принять» в
+      // дуэли. Починка идемпотентна — можно на каждом старте.
+      const neg = await query(`UPDATE users SET frozen_balance = 0 WHERE frozen_balance < 0`);
+      if (neg.rowCount) console.log(`[DB] Сброшена отрицательная заморозка у ${neg.rowCount} пользователей`);
+    } catch (e: any) {
+      console.error('[DB] Repair double-locked money:', e.message);
+    }
+
+    // Дубли уведомлений о дуэлях (плодились, когда сокет-событие уходило
+    // раньше записи в БД): оставляем по одному на пару (игрок, дуэль).
+    try {
+      const dup = await query(`
+        DELETE FROM user_notifications a
+         USING user_notifications b
+         WHERE a.type = 'duel_result' AND b.type = 'duel_result'
+           AND a.user_id = b.user_id
+           AND a.data->>'duel_id' IS NOT NULL
+           AND a.data->>'duel_id' = b.data->>'duel_id'
+           AND a.id > b.id`);
+      if (dup.rowCount) console.log(`[DB] Удалено дублей уведомлений о дуэлях: ${dup.rowCount}`);
+    } catch (e: any) {
+      console.error('[DB] Dedupe duel notifications:', e.message);
     }
   } catch (e: any) {
     console.error('[DB] Migration warning:', e.message);
@@ -116,4 +205,45 @@ server.listen(config.port, async () => {
 
   initCrons();
   await startDepositListener();
+});
+
+// ── Корректное завершение работы ──────────────────────────────────────────
+// docker stop / restart / down шлют SIGTERM. Раньше процесс в этот момент
+// падал с «terminating connection due to unexpected postmaster exit»:
+// Postgres закрывался первым, и необработанная ошибка соединения валила Node.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[VAULT] ${signal}: останавливаюсь...`);
+
+  // Жёсткий выход, если закрытие чего-то зависнет
+  const force = setTimeout(() => process.exit(1), 8000);
+  force.unref();
+
+  try { stopCrons(); } catch { /* планировщики уже остановлены */ }
+
+  await new Promise<void>(resolve => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; resolve(); } };
+    try { io.close(() => fin()); } catch { fin(); }
+    setTimeout(fin, 3000); // страховка, если колбэк не придёт
+  });
+
+  try {
+    const { pool } = await import('./db/pool');
+    await pool.end();
+  } catch (e: any) {
+    console.error('[DB] pool.end:', e.message);
+  }
+
+  console.log('[VAULT] Остановлен корректно');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+// Незакрытое обещание не должно ронять контейнер (например, ошибка сокета в игре)
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[VAULT] unhandledRejection:', reason?.message || reason);
 });

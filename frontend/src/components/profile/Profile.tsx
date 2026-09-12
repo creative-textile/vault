@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import { Link, useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import { profileApi } from '../../api/client';
@@ -39,9 +40,13 @@ export default function Profile() {
       <div className="card">
         <div className="card-title">💰 Баланс</div>
         <div style={{fontSize:28, fontWeight:900, color:'#ffd700'}}>${user?.balance.toFixed(2)}</div>
-        {user && user.frozen_balance > 0 && (
-          <div className="text-dim">Заморожено: ${user.frozen_balance.toFixed(2)}</div>
-        )}
+        <div className="text-dim" style={{fontSize:13}}>
+          доступно: <span style={{color:'#fff', fontWeight:700}}>
+            ${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}
+          </span>
+        </div>
+        {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT */}
+        <MoneyBreakdown />
         <div className="btn-row">
           <Link to="/deposit" className="btn btn-secondary">📥 Пополнить</Link>
           <Link to="/withdraw" className="btn btn-secondary">📤 Вывести</Link>
@@ -117,6 +122,12 @@ export default function Profile() {
       <button className="btn btn-secondary" onClick={() => { logout(); nav('/'); }}>
         🚪 Выйти (сбросить демо)
       </button>
+
+      {/* Метка сборки: если после деплоя здесь старая дата — браузер показывает
+          закешированный бандл, и проверять нужно не код, а обновление страницы */}
+      <div className="text-dim text-center" style={{ fontSize: 11, margin: '10px 0 4px' }}>
+        сборка фронтенда: {typeof __BUILD_INFO__ !== 'undefined' ? __BUILD_INFO__ : 'dev'}
+      </div>
     </>
   );
 }

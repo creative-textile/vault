@@ -4,6 +4,14 @@ import WebApp from '@twa-dev/sdk';
 import { AuthContext, User } from './stores/auth';
 import { authApi, profileApi } from './api/client';
 import { getSocket, disconnectSocket } from './api/socket';
+import {
+  getStoredToken, setStoredToken, clearStoredToken,
+  getOnboardingDone, setOnboardingDone as persistOnboardingDone,
+  getDemoId, setDemoId
+} from './utils/tokenStorage';
+import { useNotifications } from './stores/notifications';
+import { emitSafeEvent, emitNotificationEvent } from './utils/socketEvents';
+import { holdBalance, releaseBalance, isBalanceHeld, onBalanceReleased } from './utils/balanceHold';
 
 import Onboarding from './components/onboarding/Onboarding';
 import Home from './components/layout/Home';
@@ -19,16 +27,24 @@ import Referral from './components/profile/Referral';
 import Profile from './components/profile/Profile';
 import AdminPanel from './components/profile/AdminPanel';
 import SetPin from './components/wallet/SetPin';
-import PendingDuelModal from './components/common/PendingDuelModal';
+import DuelResultModal from './components/common/DuelResultModal';
+import NotificationsModal from './components/common/NotificationsModal';
+import SafeCrackRedirector from './components/safe/SafeCrackRedirector';
+import RocketFlightBadge from './components/common/RocketFlightBadge';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('vault_token'));
+  // Токен и онбординг — в sessionStorage (свой для вкладки): два аккаунта в
+  // двух вкладках браузера не перезаписывают друг друга
+  const [token, setToken] = useState<string | null>(getStoredToken());
   const [loading, setLoading] = useState(true);
-  const [onboardingDone, setOnboardingDoneState] = useState(
-    localStorage.getItem('onboarding_done') === '1'
-  );
+  const [onboardingDone, setOnboardingDoneState] = useState(getOnboardingDone());
+  /** Показывать ли приветственные экраны: да только для аккаунта, созданного в
+      этом входе (`isNew`). Возврат в игру с действующим токеном в приветствие
+      не выбрасывает — игрок мог быть посреди полёта ракеты или взлома сейфа. */
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const { fetchNotifications, clear: clearNotifications } = useNotifications();
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -38,29 +54,134 @@ export default function App() {
   const refreshUser = useCallback(async () => {
     try {
       const p = await profileApi.get();
-      setUser(p);
+      // Пока баланс «на удержании» (крутится монета в дуэли) цифры не меняем:
+      // сервер двигает деньги до броска, и обновлённый баланс выдавал исход.
+      // Всё остальное (ник, настройки, лимиты) берём свежее.
+      setUser(prev => (prev && isBalanceHeld())
+        ? { ...p, balance: prev.balance, frozen_balance: prev.frozen_balance, available: prev.available }
+        : p);
     } catch {
       setUser(null);
       setToken(null);
-      localStorage.removeItem('vault_token');
+      clearStoredToken();
+    }
+  }, []);
+
+  // Баланс отпущен (досмотрели дуэль или сработала страховка по времени) —
+  // подтягиваем профиль: пока цифры держались, сокет-события пропускались.
+  useEffect(() => onBalanceReleased(() => { refreshUser(); }), [refreshUser]);
+
+  // Возврат в приложение с действующим токеном: приветствие уже не показываем.
+  // Прежняя версия его и не показывала — экран висел роутом-«звёздочкой», а в
+  // React Router конкретный путь (`/`) всегда выше рангом, чем `*`.
+  useEffect(() => {
+    if (getStoredToken() && !getOnboardingDone()) {
+      persistOnboardingDone(true);
+      setOnboardingDoneState(true);
     }
   }, []);
 
   useEffect(() => {
-    (async () => {
-      if (token) {
-        await refreshUser();
-        // Init socket
-        const sock = getSocket(token);
-        sock.on('notification', (data: any) => {
-          showToast(data.message);
-          refreshUser();
-        });
-      }
+    if (!token) {
+      // Выход (или токен ещё не получен): рвём соединение, иначе сокет остаётся
+      // в комнате прежнего пользователя, и события чужого аккаунта приходят в
+      // эту вкладку.
+      disconnectSocket();
       setLoading(false);
+      return;
+    }
+
+    let alive = true;
+    // Сокет создаём сразу, до refreshUser: подписки начинают работать раньше,
+    // а getSocket сам переподключится с новым токеном, если токен изменился.
+    const sock = getSocket(token);
+
+    const onNotification = (data: any) => {
+      // Результат дуэли показывает DuelResultModal (очередь с кнопками
+      // «реплей» / «закрыть»). Тост поверх него жил 3.5 с и терялся —
+      // именно так уведомление о дуэли и проглядели.
+      // Подделывать уведомление на клиенте (id: Date.now()) нельзя: такой id
+      // не существует в БД, и «отметить прочитанным» по нему не сработает.
+      if (data?.type !== 'duel_result') {
+        showToast(data.message);
+      } else {
+        // Соперник принял вызов: деньги сервер уже двинул, а броска ещё не было.
+        // Держим баланс до показа результата — иначе исход виден на главной.
+        holdBalance();
+      }
+      refreshUser();
+      fetchNotifications();
+      emitNotificationEvent(data || {});
+    };
+
+    // События сейфа пересылаем подписчикам (Safe/SafeCrack) без перезагрузки
+    // страницы: reload обрывал мини-игру взлома и ронял socket-соединение.
+    const onSafeCrackStarted = (data: any) => {
+      showToast('🔓 Начался взлом сейфа!');
+      emitSafeEvent('safe_crack_started', data);
+    };
+    const onSafeFinished = (data: any) => {
+      showToast('🏆 Сейф разыгран — итоги готовы');
+      emitSafeEvent('safe_finished', data);
+    };
+    const onSafeCancelled = (data: any) => emitSafeEvent('safe_cancelled', data);
+    const onSafeCreated = (data: any) => emitSafeEvent('safe_created', data);
+    const onSafeDeposit = (data: any) => emitSafeEvent('safe_deposit', data);
+
+    // Новый баланс приходит сразу после любой операции с деньгами —
+    // цифра на экране перестаёт «отставать» от сервера
+    const onBalanceUpdated = (data: any) => {
+      // Баланс на удержании (идёт анимация дуэли) — цифры не трогаем: после
+      // показа результата отпускание само подтянет свежий профиль
+      if (isBalanceHeld()) return;
+      if (data?.balance == null) return;
+      setUser(u => u ? {
+        ...u,
+        balance: Number(data.balance),
+        frozen_balance: data.frozen_balance != null ? Number(data.frozen_balance) : u.frozen_balance,
+        available: Number(data.balance) - (data.frozen_balance != null ? Number(data.frozen_balance) : u.frozen_balance),
+        // «Где деньги» приходит в том же событии, чтобы пояснение к балансу
+        // (вклад в сейф, вклад VAULT) не отставало от цифр
+        safe_locked: data.safe_locked != null ? Number(data.safe_locked) : u.safe_locked,
+        vault_locked: data.vault_locked != null ? Number(data.vault_locked) : u.vault_locked
+      } : u);
+    };
+
+    sock.on('notification', onNotification);
+    sock.on('safe_crack_started', onSafeCrackStarted);
+    sock.on('safe_finished', onSafeFinished);
+    sock.on('safe_cancelled', onSafeCancelled);
+    sock.on('safe_created', onSafeCreated);
+    sock.on('safe_deposit', onSafeDeposit);
+    sock.on('balance_updated', onBalanceUpdated);
+
+    (async () => {
+      try {
+        await refreshUser();
+      } finally {
+        if (alive) setLoading(false);
+      }
     })();
-    return () => { disconnectSocket(); };
-  }, [token, refreshUser, showToast]);
+
+    // Опрос уведомлений здесь не нужен: NotificationsModal обновляет список сам.
+    // Сокет общий на всё приложение (бейдж летящей ракеты, экран ракеты,
+    // редиректор взлома подписаны на тот же объект) — снимаем ТОЛЬКО свои
+    // слушатели. Разрыв соединения бывает при выходе (выше) и при
+    // размонтировании App (отдельный эффект).
+    return () => {
+      alive = false;
+      sock.off('notification', onNotification);
+      sock.off('safe_crack_started', onSafeCrackStarted);
+      sock.off('safe_finished', onSafeFinished);
+      sock.off('safe_cancelled', onSafeCancelled);
+      sock.off('safe_created', onSafeCreated);
+      sock.off('safe_deposit', onSafeDeposit);
+      sock.off('balance_updated', onBalanceUpdated);
+    };
+  }, [token, refreshUser, showToast, fetchNotifications]);
+
+  // Размонтирование приложения — рвём соединение один раз
+  useEffect(() => () => disconnectSocket(), []);
 
   useEffect(() => {
     // Telegram WebApp init
@@ -87,16 +208,23 @@ export default function App() {
           res = await authApi.telegram(initData, ref);
         } else {
           // Демо-логин для браузера
-          const demoId = parseInt(localStorage.getItem('demo_id') || String(Math.floor(Math.random() * 100000) + 1));
-          localStorage.setItem('demo_id', String(demoId));
+          const demoId = parseInt(getDemoId() || String(Math.floor(Math.random() * 100000) + 1));
+          setDemoId(String(demoId));
           res = await authApi.demoLogin(demoId, 'demo' + demoId, ref);
         }
-        localStorage.setItem('vault_token', res.token);
+        setStoredToken(res.token);
         setToken(res.token);
         setUser(res.user);
         if (res.isNew) {
-          localStorage.removeItem('onboarding_done');
+          persistOnboardingDone(false);
           setOnboardingDoneState(false);
+          setShowOnboarding(true);
+        } else {
+          // Существующий аккаунт: онбординг либо пройден, либо не показывался
+          // прежней версией — не выбрасываем игрока в приветствие
+          persistOnboardingDone(true);
+          setOnboardingDoneState(true);
+          setShowOnboarding(false);
         }
       } catch (e: any) {
         showToast('Ошибка входа: ' + e.message);
@@ -105,15 +233,19 @@ export default function App() {
   }, [token, loading, showToast]);
 
   const logout = () => {
-    localStorage.removeItem('vault_token');
+    clearStoredToken();
     setToken(null);
     setUser(null);
+    clearNotifications();
+    releaseBalance();
+    setShowOnboarding(false);
     disconnectSocket();
   };
 
   const setOnboardingDone = () => {
-    localStorage.setItem('onboarding_done', '1');
+    persistOnboardingDone(true);
     setOnboardingDoneState(true);
+    setShowOnboarding(false);
   };
 
   if (loading) {
@@ -131,10 +263,26 @@ export default function App() {
       <BrowserRouter>
         <div className="app">
           {toast && <div className="toast">{toast}</div>}
-          {onboardingDone && <PendingDuelModal />}
+          {/* Очередь результатов дуэлей: модальное окно из непрочитанных
+              уведомлений в БД, переживает перезапуск приложения. От онбординга
+              не зависит: флаг приветствия прежняя версия не выставляла никогда,
+              а результат дуэли обязан доходить до игрока всегда. */}
+          {token && <DuelResultModal />}
+          {token && <NotificationsModal />}
+          {/* Приветственные экраны — оверлеем поверх всего приложения */}
+          {showOnboarding && !onboardingDone && (
+            <div style={{position:'fixed', inset:0, zIndex:3000, background:'#0a0a1a', overflowY:'auto'}}>
+              <div className="container"><Onboarding /></div>
+            </div>
+          )}
+          {/* Уводит игрока во взлом сейфа с любого экрана и держит летящую
+              ракету доступной для кэшаута, пока он не на /rocket. От онбординга
+              не зависят: у нового игрока просто нет вклада в сейфе, и проверка
+              состояния отрабатывает вхолостую */}
+          {token && <SafeCrackRedirector />}
+          {token && <RocketFlightBadge />}
           <div className="container">
             <Routes>
-              {!onboardingDone && <Route path="*" element={<Onboarding />} />}
               <Route path="/" element={<Home />} />
               <Route path="/deposit" element={<Deposit />} />
               <Route path="/withdraw" element={<Withdraw />} />

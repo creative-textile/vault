@@ -38,7 +38,9 @@ router.post('/early-unlock', auth, async (req, res) => {
   try {
     const user = (req as any).user;
     const { deposit_id } = req.body;
-    res.json(await earlyUnlock(user.id, parseInt(deposit_id)));
+    const id = parseInt(deposit_id);
+    if (isNaN(id)) throw new Error('Некорректный ID депозита');
+    res.json(await earlyUnlock(user.id, id));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

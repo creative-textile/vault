@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import { authenticateTelegram, getProfile, getTransactionHistory, updateSettings } from '../../services/user';
 import { getSetting } from '../../services/revenue';
+import { query } from '../../db/pool';
 
 const router = Router();
 
@@ -17,12 +18,45 @@ router.get('/config', async (_req, res) => {
   ]);
   res.json({
     min_bet: parseFloat(minBet || '1'),
-    safe_min_bank: parseFloat(safeMinBank || '5'),
+    safe_min_bank: parseFloat(safeMinBank || '25'),
     safe_min_participants: parseInt(safeMinPart || '2'),
     rocket_max_bet_percent: parseInt(rocketMaxPct || '50'),
     vault_min_deposit_base: parseFloat(vaultMin || '10'),
     vault_max_deposit_base: parseFloat(vaultMaxBase || '100')
   });
+});
+
+/**
+ * GET /api/stats/summary — витрина проекта для главного экрана:
+ * сколько участников, сколько дней работаем, сколько пополнено и выплачено.
+ * Дата старта задаётся в админке (project_start_date), по умолчанию 2026-01-01.
+ */
+router.get('/stats/summary', async (_req, res) => {
+  try {
+    const startRaw = (await getSetting('project_start_date')) || '2026-01-01';
+    const start = new Date(`${startRaw}T00:00:00Z`);
+    const days = Number.isFinite(start.getTime())
+      ? Math.max(1, Math.floor((Date.now() - start.getTime()) / 86400000) + 1)
+      : 1;
+
+    const [users, deposited, withdrawn] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS c FROM users`),
+      query(`SELECT COALESCE(SUM(amount), 0) AS s FROM transactions WHERE type IN ('deposit', 'demo_deposit')`),
+      // Выводы хранятся отрицательными; CASE вместо ABS() — переносимее
+      query(`SELECT COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE amount END), 0) AS s
+               FROM transactions WHERE type = 'withdraw'`)
+    ]);
+
+    res.json({
+      users_count: users.rows[0]?.c || 0,
+      days_working: days,
+      project_start: startRaw,
+      total_deposited: Math.round(parseFloat(deposited.rows[0]?.s || '0') * 100) / 100,
+      total_withdrawn: Math.round(parseFloat(withdrawn.rows[0]?.s || '0') * 100) / 100
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/auth/telegram — авторизация

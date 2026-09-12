@@ -19,9 +19,12 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
 
   useEffect(() => {
     safeApi.current().then((s: any) => {
-      if (s?.safe?.crack_at) {
+      // Время взлома берём у сейфа, в который реально идёт вклад:
+      // во время взлома/после розыгрыша это уже сейф следующего дня
+      const target = s?.collecting_safe || s?.safe;
+      if (target?.crack_at) {
         try {
-          const d = new Date(s.safe.crack_at);
+          const d = new Date(target.crack_at);
           if (!isNaN(d.getTime())) {
             setSafeTime(d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}));
           }
@@ -70,8 +73,8 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
           В СЕЙФ?
         </div>
         <div style={{fontSize:13, textAlign:'center', color:'#8888aa', marginBottom:16}}>
-          Сегодня взлом в <b style={{color:'#fff'}}>{safeTime}</b>. Вложите часть выигрыша —
-          получите <span style={{color:'#22c55e', fontWeight:700}}>×1.5</span>, если угадаете код раньше других!
+          Взлом в <b style={{color:'#fff'}}>{safeTime}</b> МСК. Вложите часть выигрыша —
+          получите <span style={{color:'#22c55e', fontWeight:700}}>×1.5</span>, если соберёте код раньше других!
         </div>
 
         <div style={{textAlign:'center', fontSize:32, fontWeight:900, color:'#ffd700', marginBottom:4}}>

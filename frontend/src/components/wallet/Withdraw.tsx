@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import MoneyBreakdown from '../common/MoneyBreakdown';
 import Header from '../layout/Header';
 import { useAuth } from '../../stores/auth';
 import { walletApi } from '../../api/client';
@@ -52,9 +53,8 @@ export default function Withdraw() {
       <div className="card text-center">
         <div className="balance-label">Доступно</div>
         <div style={{fontSize:32, fontWeight:900, color:'#ffd700'}}>${available.toFixed(2)}</div>
-        {user && user.frozen_balance > 0 && (
-          <div className="text-dim">заморожено: ${user.frozen_balance.toFixed(2)}</div>
-        )}
+        {/* Почему доступно меньше, чем на балансе */}
+        <MoneyBreakdown total={false} />
       </div>
 
       <div className="card">
