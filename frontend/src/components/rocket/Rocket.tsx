@@ -290,7 +290,7 @@ export default function Rocket() {
               <span>
                 ${h.bet.toFixed(0)}
                 {h.cashout_at
-                  ? <> → <span className="text-green">забрал x{h.cashout_at.toFixed(2)}</span> · <span className="text-dim">финал в реплее</span></>
+                  ? <> → <span className="text-green">забрал x{h.cashout_at.toFixed(2)}</span>{h.round_id===roundId&&phase==='win'&&!ghostDone?<> · <span className="text-dim">👻 призрак летит…</span></>:<> 💥<span className="text-red">x{h.crash_at.toFixed(2)}</span></>}</>
                   : <> 💥<span className="text-red">x{h.crash_at.toFixed(2)}</span></>
                 }
               </span>
