@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import { moneyBody } from '../middleware/security';
+import { query } from '../../db/pool';
 import {
   lockVaultDeposit, getActiveDeposit, earlyUnlock,
   getVaultHistory, getPoolInfo, addManualPool
@@ -21,6 +22,18 @@ router.get('/status', auth, async (req, res) => {
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// GET /api/vault/accruals — фактические календарные начисления текущего игрока
+router.get('/accruals', auth, async (req, res) => {
+  try {
+    const user=(req as any).user;
+    const rows=await query(`SELECT a.id,a.deposit_id,a.date,a.pool_amount,a.profit,a.created_at,
+      d.amount,d.term_days,d.multiplier FROM vault_deposit_accruals a
+      JOIN vault_deposits d ON d.id=a.deposit_id WHERE a.user_id=$1
+      ORDER BY a.date DESC,a.id DESC LIMIT 90`,[user.id]);
+    res.json(rows.rows.map((x:any)=>({...x,pool_amount:Number(x.pool_amount),profit:Number(x.profit),amount:Number(x.amount),multiplier:Number(x.multiplier)})));
+  } catch(e:any) { res.status(400).json({error:e.message}); }
 });
 
 // POST /api/vault/lock

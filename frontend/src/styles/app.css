@@ -429,3 +429,20 @@
 /* Admin */
 .admin-section { margin-bottom: 20px; }
 .admin-section h3 { color: var(--accent); margin-bottom: 8px; }
+
+/* Stage 5: Telegram compact viewports (iPhone SE width and similar). */
+@media (max-width: 380px), (max-height: 680px) {
+  .container { padding: 10px; }
+  .topbar { padding: 6px 8px; }
+  .topbar .logo { font-size: 20px; }
+  .balance-block { padding: 10px 0; }
+  .balance-amount { font-size: 34px; margin: 2px 0; }
+  .card { padding: 12px; margin-bottom: 8px; border-radius: 12px; }
+  .btn { padding: 11px 12px; font-size: 15px; border-radius: 12px; }
+  .btn-row { margin: 8px 0; gap: 8px; }
+  .game-tile { padding: 10px; }
+  .game-icon { font-size: 30px; }
+  .three-container { height: 260px; }
+  .result-text { font-size: 32px; margin: 10px 0; }
+  .history-item { gap: 8px; }
+}

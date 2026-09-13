@@ -19,6 +19,7 @@ export default function VaultDeposit() {
   const [amount, setAmount] = useState('10');
   const [selectedTerm, setSelectedTerm] = useState(30);
   const [history, setHistory] = useState<any[]>([]);
+  const [accruals, setAccruals] = useState<any[]>([]);
 
   const load = () => vaultApi.status().then(s => {
     setStatus(s);
@@ -31,7 +32,7 @@ export default function VaultDeposit() {
     });
   });
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); vaultApi.accruals().then(setAccruals).catch(()=>{}); }, []);
 
   const active = status?.active_deposit;
   const maxDeposit = status?.pool_info?.max_deposit || 100;
@@ -102,17 +103,10 @@ export default function VaultDeposit() {
             <div className="text-dim">{Math.round((active.days_elapsed / active.term_days) * 100)}%</div>
           </div>
 
-          {history.length > 1 && (
-            <div className="card">
-              <div className="card-title">📋 По дням</div>
-              {history.slice(0, 5).map((h: any) => (
-                <div key={h.id} className="history-item">
-                  <span>День {h.days_elapsed}</span>
-                  <span className="text-green">+${fmt(h.accumulated_profit)}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="card">
+            <div className="card-title">📅 Ежедневные начисления</div>
+            {accruals.length===0?<div className="text-dim">Первое начисление появится после расчёта в 00:00 МСК.</div>:accruals.slice(0,30).map((a:any)=><div key={a.id} className="history-item"><span>{new Date(`${a.date}T00:00:00`).toLocaleDateString('ru-RU')}<small className="text-dim" style={{display:'block'}}>Доля ×{a.multiplier}</small></span><b className="text-green">+${fmt(a.profit)}</b></div>)}
+          </div>
 
           <div className="card text-center">
             <div className="text-dim">Разблокировка:</div>

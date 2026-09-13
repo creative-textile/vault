@@ -15,6 +15,7 @@ import { holdBalance, releaseBalance, isBalanceHeld, onBalanceReleased } from '.
 
 import Onboarding from './components/onboarding/Onboarding';
 import Home from './components/layout/Home';
+import ProjectStats from './components/layout/ProjectStats';
 import Deposit from './components/wallet/Deposit';
 import Withdraw from './components/wallet/Withdraw';
 import Rocket from './components/rocket/Rocket';
@@ -77,6 +78,20 @@ export default function App() {
       }
     }
   }, []);
+
+  // Централизованно восстанавливаем истёкшую/сброшенную сессию. Это важно для
+  // Deposit: после 401 адрес загрузится повторно без ручного reload.
+  useEffect(() => {
+    const unauthorized=(event:Event)=>{
+      const failed=(event as CustomEvent).detail?.token;
+      if(!failed || getStoredToken()!==failed) return;
+      clearStoredToken();
+      authInFlight.current=false;
+      setUser(null); setToken(null); setLoading(false);
+    };
+    window.addEventListener('vault:unauthorized',unauthorized);
+    return()=>window.removeEventListener('vault:unauthorized',unauthorized);
+  },[]);
 
   // Баланс отпущен (досмотрели дуэль или сработала страховка по времени) —
   // подтягиваем профиль: пока цифры держались, сокет-события пропускались.
@@ -312,6 +327,7 @@ export default function App() {
               <Route path="/vault" element={<VaultDeposit />} />
               <Route path="/referral" element={<Referral />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/stats" element={<ProjectStats />} />
               <Route path="/admin" element={<AdminPanel />} />
               <Route path="/set-pin" element={<SetPin />} />
               <Route path="/replay/:game/:id" element={<Replay />} />

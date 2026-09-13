@@ -200,6 +200,12 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Повторный guard делает свежий Docker bootstrap самодостаточным даже если
+-- ранний DDL был прерван старой/частично применённой схемой.
+CREATE TABLE IF NOT EXISTS platform_cashbox (
+  id SERIAL PRIMARY KEY, amount DECIMAL(14,2) DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW()
+);
+INSERT INTO platform_cashbox (id,amount) VALUES (1,500) ON CONFLICT (id) DO NOTHING;
 DO $$ BEGIN
   ALTER TABLE platform_cashbox ADD CONSTRAINT platform_cashbox_nonnegative CHECK (amount >= 0);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;

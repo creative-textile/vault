@@ -120,7 +120,10 @@ export default function AdminPanel() {
           {reconciliation && <div className="card" style={{border:`1px solid ${reconciliation.ok?'#22c55e':'#ef4444'}`}}>
             <div className="card-title">{reconciliation.ok?'✅':'🚨'} Финансовая сверка</div>
             <div className="text-dim">{reconciliation.ok?'Все инварианты соблюдены':'Обнаружены расхождения'}</div>
-            <div style={{fontSize:12}}>Пользователи ${fmt(reconciliation.user_accounts?.balance)} · Сейф ${fmt(reconciliation.obligations?.safe)} · Vault ${fmt(reconciliation.obligations?.vault_principal)}</div>
+            <div style={{fontSize:12,marginTop:6}}>Пользователи ${fmt(reconciliation.user_accounts?.balance)} · Сейф ${fmt(reconciliation.obligations?.safe)} · Vault ${fmt(reconciliation.obligations?.vault_principal)}</div>
+            <div style={{fontSize:12,marginTop:6}}>Нарушения: баланс {reconciliation.violations?.negative_or_over_reserved||0} · резервы дуэлей {reconciliation.violations?.duel_reserve_mismatch||0} · журнал {reconciliation.violations?.transaction_tail_mismatch||0}</div>
+            <div className="text-dim" style={{fontSize:11,marginTop:6}}>Проверено {new Date(reconciliation.checked_at).toLocaleString('ru-RU')}</div>
+            <button className="btn btn-small btn-secondary mt" onClick={()=>adminApi.reconciliation().then(setReconciliation).catch((e:any)=>showToast(e.message))}>↻ Проверить снова</button>
           </div>}
           <div className="card">
             <div className="card-title">📅 Период: {rangeFrom} — {rangeTo}</div>

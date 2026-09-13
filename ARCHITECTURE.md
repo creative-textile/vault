@@ -751,3 +751,7 @@ Cashout clears the authoritative active-round interval immediately and settles m
 Replay navigation origin is carried in React Router location state by internal hall links and deliberately falls back to `/` for direct public URLs. RocketScene derives the post-cashout ghost multiplier from persisted endpoints, follows it with the camera, and exposes the live ghost/final multiplier in a DOM overlay; settlement remains represented separately by the fixed cashout multiplier.
 
 Rocket history applies spoiler protection only when a row matches the locally held current `roundId`, the screen is in its `win` phase, and that round's ghost has not finished. All remote and historical rows expose `crash_at` normally; leaving the screen also clears this ephemeral protection. Replay independently gates its final value until its own ghost animation ends. Internal replay back navigation pops the existing history entry (`navigate(-1)`), while direct public entry replaces the replay route with `/`.
+
+## Stage 5 UX surfaces
+
+Project statistics have a dedicated `/stats` route backed by public `/api/stats/summary`; Home no longer owns its polling or detailed balance breakdown. `/api/vault/accruals` reads immutable per-day accrual rows for the authenticated user. Reconciliation remains admin-only and presents invariant counts with explicit refresh. API 401 responses emit a token-scoped browser event; App discards only the matching current JWT and reruns its single-flight bootstrap, remounting Deposit and other private screens safely.

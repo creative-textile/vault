@@ -39,6 +39,9 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   });
   const data = await res.json().catch(()=>({}));
   if (!res.ok && path.startsWith('/api/admin') && res.status===401) sessionStorage.removeItem('vault:admin-password');
+  // Любой актуальный 401 будит единый auth bootstrap. Токен кладём в detail,
+  // чтобы запоздалый ответ старой сессии не мог удалить уже выданный новый JWT.
+  if (res.status===401 && token) window.dispatchEvent(new CustomEvent('vault:unauthorized',{detail:{token}}));
   if (!res.ok) throw new ApiError(data.error || 'Ошибка',res.status,Number(data.retry_after)||undefined);
   return data as T;
 }
@@ -126,7 +129,8 @@ export const vaultApi = {
     api('/api/vault/lock', { method: 'POST', body: JSON.stringify({ amount, term_days }) }),
   earlyUnlock: (deposit_id: number) =>
     api('/api/vault/early-unlock', { method: 'POST', body: JSON.stringify({ deposit_id }) }),
-  history: () => api('/api/vault/history')
+  history: () => api('/api/vault/history'),
+  accruals: () => api('/api/vault/accruals')
 };
 
 export const referralApi = {
