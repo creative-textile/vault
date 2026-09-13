@@ -6,21 +6,35 @@ const API_URL = '';
 
 import { getStoredToken } from '../utils/tokenStorage';
 
+function getDeviceId(): string {
+  let id=localStorage.getItem('vault:device-id');
+  if(!id) { id=crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`; localStorage.setItem('vault:device-id',id); }
+  return id;
+}
+
 function getToken(): string | null {
   return getStoredToken();
 }
 
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
+  let adminPassword='';
+  if(path.startsWith('/api/admin')) {
+    adminPassword=sessionStorage.getItem('vault:admin-password')||'';
+    if(!adminPassword) { adminPassword=window.prompt('Пароль администратора')||''; if(adminPassword) sessionStorage.setItem('vault:admin-password',adminPassword); }
+  }
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(adminPassword ? { 'X-Admin-Password': adminPassword } : {}),
+      'X-Device-Id': getDeviceId(),
       ...options.headers
     }
   });
   const data = await res.json();
+  if (!res.ok && path.startsWith('/api/admin') && res.status===401) sessionStorage.removeItem('vault:admin-password');
   if (!res.ok) throw new Error(data.error || 'Ошибка');
   return data as T;
 }
@@ -112,6 +126,10 @@ export const referralApi = {
 };
 
 export const adminApi = {
+  reconciliation: () => api('/api/admin/reconciliation'),
+  antifraud: (status='open') => api(`/api/admin/antifraud?status=${status}`),
+  reviewFraud: (id:number,status:string) => api(`/api/admin/antifraud/${id}/review`,{method:'POST',body:JSON.stringify({status})}),
+  auditLog: () => api('/api/admin/audit-log'),
   stats: (from?: string, to?: string) => {
     const q = from && to ? `?from=${from}&to=${to}` : '';
     return api('/api/admin/stats' + q);

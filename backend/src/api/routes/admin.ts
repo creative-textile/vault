@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { auth, adminOnly } from '../middleware/auth';
+import { adminPassword, adminAudit, validId, validMoney } from '../middleware/security';
 import { query } from '../../db/pool';
 import { getSetting, setSetting } from '../../services/revenue';
 import { getRocketBankroll, updateRocketBankroll } from '../../services/rocket';
@@ -9,7 +10,7 @@ import { getFinancialReconciliation } from '../../services/financial-audit';
 
 const router = Router();
 
-router.use(auth, adminOnly);
+router.use(auth, adminOnly, adminAudit, adminPassword);
 
 function rangeDates(from: string, to: string) {
   return { from: new Date(from + 'T00:00:00'), to: new Date(to + 'T23:59:59.999') };
@@ -177,6 +178,7 @@ router.post('/rocket-bankroll', async (req, res) => {
     const { add, withdraw } = req.body;
     if (add) {
       const amt = parseFloat(add);
+      if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
       // перевод platform -> rocket
       const plat = await query('SELECT amount FROM platform_cashbox WHERE id = 1 FOR UPDATE');
       if (parseFloat(plat.rows[0].amount) < amt) throw new Error('В главной кассе недостаточно');
@@ -190,6 +192,7 @@ router.post('/rocket-bankroll', async (req, res) => {
     }
     if (withdraw) {
       const amt = parseFloat(withdraw);
+      if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
       if (await getRocketBankroll() < amt) throw new Error('В кассе Ракеты недостаточно');
       await updateRocketBankroll(-amt);
       await query('UPDATE platform_cashbox SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [amt]);
@@ -213,9 +216,8 @@ router.post('/add-pool', async (req, res) => {
   try {
     const { amount } = req.body;
     const amt = parseFloat(amount);
-    const plat = await query('SELECT amount FROM platform_cashbox WHERE id = 1 FOR UPDATE');
-    if (parseFloat(plat.rows[0].amount) < amt) throw new Error('В главной кассе недостаточно');
-    await query('UPDATE platform_cashbox SET amount = amount - $1, updated_at = NOW() WHERE id = 1', [amt]);
+    if (!validMoney(amt, 0.01)) throw new Error('Некорректная сумма');
+    // addManualPool атомарно резервирует сумму из platform_cashbox.
     await addManualPool(amt);
     await query(
       `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
@@ -233,6 +235,7 @@ router.post('/withdraw-platform', async (req, res) => {
   try {
     const { amount, note } = req.body;
     const amt = parseFloat(amount);
+    if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
     const plat = await query('SELECT amount FROM platform_cashbox WHERE id = 1 FOR UPDATE');
     if (parseFloat(plat.rows[0].amount) < amt) throw new Error('В главной кассе недостаточно');
     await query('UPDATE platform_cashbox SET amount = amount - $1, updated_at = NOW() WHERE id = 1', [amt]);
@@ -252,6 +255,7 @@ router.post('/seed-platform', async (req, res) => {
   try {
     const { amount } = req.body;
     const amt = parseFloat(amount);
+    if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
     await query('UPDATE platform_cashbox SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [amt]);
     await query(
       `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
@@ -403,6 +407,7 @@ router.post('/users/:id/adjust', async (req, res) => {
     if (isNaN(id)) throw new Error('Некорректный ID пользователя');
     const { delta, reason } = req.body;
     const d = parseFloat(delta);
+    if (!Number.isFinite(d) || Math.round(d*100)!==d*100 || Math.abs(d)>10000000) throw new Error('Некорректная сумма');
     const { modifyBalance } = await import('../../services/balance');
     await modifyBalance(id, d, 'admin_adjust', { description: reason || 'Корректировка админом' });
     res.json({ ok: true });
@@ -464,8 +469,11 @@ router.get('/settings', async (_req, res) => {
 // POST /api/admin/settings
 router.post('/settings', async (req, res) => {
   try {
-    for (const [k, v] of Object.entries(req.body)) {
-      await setSetting(k, String(v));
+    const ranges:Record<string,[number,number]>={commission_percent:[0,50],withdraw_commission:[0,20],referral_percent:[0,50],min_bet:[0.01,1000000],rocket_max_bet_percent:[1,100],vault_pool_percent:[0,100],safe_min_bank:[0,10000000],safe_min_participants:[1,100000],beautiful_flight_chance:[0,100],vault_min_deposit:[0.01,10000000],vault_max_floor:[0.01,10000000],vault_max_multiplier:[0.01,1000],safe_crack_hour:[0,23],safe_crack_minute:[0,59],safe_crack_timeout_minutes:[0.1,1440],safe_drum_speed_multiplier:[0.1,10]};
+    for (const [k,v] of Object.entries(req.body)) {
+      if(k==='project_start_date') { if(!/^\d{4}-\d{2}-\d{2}$/.test(String(v))) throw new Error('Некорректная дата'); }
+      else { const range=ranges[k],n=Number(v); if(!range||!Number.isFinite(n)||n<range[0]||n>range[1]) throw new Error(`Некорректная настройка: ${k}`); }
+      await setSetting(k,String(v));
     }
     res.json({ ok: true });
   } catch (e: any) {
@@ -516,6 +524,22 @@ router.get('/transactions', async (req, res) => {
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// Антифрод: общие устройства/IP и ручная проверка флагов.
+router.get('/antifraud', async (req,res) => {
+  const status=String(req.query.status||'open');
+  const rows=await query(`SELECT f.*,u.username,u.telegram_id FROM antifraud_flags f JOIN users u ON u.id=f.user_id WHERE f.status=$1 ORDER BY f.risk_score DESC,f.id DESC LIMIT 500`,[status]);
+  res.json(rows.rows);
+});
+router.post('/antifraud/:id/review', async (req,res) => {
+  if(!validId(req.params.id)||!['resolved','confirmed','open'].includes(String(req.body.status))) return res.status(400).json({error:'Некорректные данные'});
+  await query(`UPDATE antifraud_flags SET status=$1,reviewed_at=NOW() WHERE id=$2`,[req.body.status,Number(req.params.id)]);
+  res.json({ok:true});
+});
+router.get('/audit-log', async (_req,res) => {
+  const rows=await query(`SELECT a.*,u.username actor FROM admin_audit_log a LEFT JOIN users u ON u.id=a.actor_user_id ORDER BY a.id DESC LIMIT 500`);
+  res.json(rows.rows);
 });
 
 export default router;

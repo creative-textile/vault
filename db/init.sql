@@ -201,3 +201,23 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE safes ADD CONSTRAINT safes_money_nonnegative CHECK (bank >= 0 AND prize_pool >= 0 AND commission_amount >= 0);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id BIGSERIAL PRIMARY KEY, actor_user_id INTEGER REFERENCES users(id), method VARCHAR(12), path TEXT,
+  payload JSONB, status_code INTEGER, ip VARCHAR(128), user_agent TEXT, duration_ms INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS user_security_identifiers (
+  id BIGSERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  ip_hash CHAR(64) NOT NULL, device_hash CHAR(64) NOT NULL, first_seen TIMESTAMPTZ DEFAULT NOW(),
+  last_seen TIMESTAMPTZ DEFAULT NOW(), UNIQUE(user_id,ip_hash,device_hash)
+);
+CREATE TABLE IF NOT EXISTS antifraud_flags (
+  id BIGSERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, kind VARCHAR(64),
+  risk_score INTEGER DEFAULT 0, details JSONB, details_hash CHAR(64), status VARCHAR(16) DEFAULT 'open',
+  created_at TIMESTAMPTZ DEFAULT NOW(), reviewed_at TIMESTAMPTZ,
+  UNIQUE(user_id,kind,details_hash)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS users_withdraw_address_unique
+  ON users(withdraw_address) WHERE withdraw_address IS NOT NULL AND withdraw_address <> '';

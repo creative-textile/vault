@@ -384,7 +384,7 @@ const finish = () => {
     const call = async (method, url, body) => {
       const res = await fetch(base + url, {
         method,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-admin-password': 'admin' },
         body: body ? JSON.stringify(body) : undefined
       });
       let json = null;
@@ -546,7 +546,7 @@ const finish = () => {
     const call = async (method, url, body) => {
       const res = await fetch(base + url, {
         method,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-admin-password': 'admin' },
         body: body ? JSON.stringify(body) : undefined
       });
       let json = null;

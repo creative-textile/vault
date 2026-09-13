@@ -346,3 +346,20 @@ console.log('House edge:', (1 - totalPaid/totalWagered * 0.9) * 100, '%');
 ## 📄 Лицензия
 
 MIT
+
+## Security and access control
+
+The non-blockchain security stage is implemented:
+
+- Redis-backed general and endpoint-specific rate limits with an in-memory outage fallback;
+- 15-minute PIN lockout after five failed attempts and a withdrawal rate limit;
+- bounded JSON and strict money/PIN validation before service execution;
+- administrator access requires both an allowed Telegram ID and `ADMIN_PASSWORD`;
+- every mutating administrator request is written to `admin_audit_log` with sensitive fields redacted;
+- privacy-preserving HMAC hashes of IP/device identifiers detect shared-account patterns;
+- one withdrawal wallet cannot be linked to multiple users;
+- the admin panel contains antifraud review and financial reconciliation views;
+- Redis coordinates Socket.io across instances and leases cron/Rocket launch work;
+- CORS is restricted by `ALLOWED_ORIGINS`.
+
+Required secrets are documented in `.env.example`. Real Telegram `initData` signature validation and real TON wallet checks intentionally remain in the final Telegram/TON stage.

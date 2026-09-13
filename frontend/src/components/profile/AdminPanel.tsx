@@ -11,7 +11,7 @@ function todayISO(offset = 0) {
   return d.toISOString().slice(0, 10);
 }
 
-type Tab = 'overview' | 'cashboxes' | 'settings' | 'users' | 'tx';
+type Tab = 'overview' | 'cashboxes' | 'settings' | 'users' | 'tx' | 'antifraud';
 
 export default function AdminPanel() {
   const { showToast } = useAuth();
@@ -35,11 +35,14 @@ export default function AdminPanel() {
   const [banReason, setBanReason] = useState('');
   const [txFilter, setTxFilter] = useState<any>({ type: '', from: '', to: '', userId: '' });
   const [txs, setTxs] = useState<any[]>([]);
+  const [fraud, setFraud] = useState<any[]>([]);
+  const [reconciliation, setReconciliation] = useState<any>(null);
 
   const loadStats = async () => {
     try {
       const s = await adminApi.stats(rangeFrom, rangeTo);
       setStats(s);
+      adminApi.reconciliation().then(setReconciliation).catch(()=>{});
     } catch (e: any) {
       showToast('Нет доступа: ' + e.message);
     }
@@ -69,6 +72,7 @@ export default function AdminPanel() {
   useEffect(() => { loadStats(); /* eslint-disable-next-line */ }, [rangeFrom, rangeTo]);
   useEffect(() => { loadSettings(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { loadUsers(); /* eslint-disable-next-line */ }, [userSearch]);
+  useEffect(() => { adminApi.antifraud().then(setFraud).catch(()=>{}); }, []);
   useEffect(() => { loadTxs(); /* eslint-disable-next-line */ }, [txFilter.type, txFilter.from, txFilter.to]);
 
   if (!stats) return <><Header title="🔧 Админ" /><div className="text-center mt">Загрузка / проверка доступа...</div></>;
@@ -81,6 +85,7 @@ export default function AdminPanel() {
     {id:'cashboxes', label:'Кассы', icon:'💰'},
     {id:'users', label:'Пользователи', icon:'👥'},
     {id:'tx', label:'Операции', icon:'📋'},
+    {id:'antifraud', label:'Антифрод', icon:'🚨'},
     {id:'settings', label:'Настройки', icon:'⚙️'}
   ];
 
@@ -112,6 +117,11 @@ export default function AdminPanel() {
 
       {tab === 'overview' && (
         <>
+          {reconciliation && <div className="card" style={{border:`1px solid ${reconciliation.ok?'#22c55e':'#ef4444'}`}}>
+            <div className="card-title">{reconciliation.ok?'✅':'🚨'} Финансовая сверка</div>
+            <div className="text-dim">{reconciliation.ok?'Все инварианты соблюдены':'Обнаружены расхождения'}</div>
+            <div style={{fontSize:12}}>Пользователи ${fmt(reconciliation.user_accounts?.balance)} · Сейф ${fmt(reconciliation.obligations?.safe)} · Vault ${fmt(reconciliation.obligations?.vault_principal)}</div>
+          </div>}
           <div className="card">
             <div className="card-title">📅 Период: {rangeFrom} — {rangeTo}</div>
             <div style={{display:'flex', gap:8, marginTop:8}}>
@@ -399,6 +409,13 @@ export default function AdminPanel() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'antifraud' && (
+        <div className="card"><div className="card-title">🚨 Антифрод</div>
+          {fraud.map((f:any)=><div className="history-item" key={f.id}><div><b>@{f.username||f.telegram_id}</b><div className="text-dim">{f.kind} · риск {f.risk_score}</div></div><div style={{display:'flex',gap:4}}><button className="btn btn-small" onClick={async()=>{await adminApi.reviewFraud(f.id,'confirmed');setFraud(fraud.filter(x=>x.id!==f.id));}}>Подтвердить</button><button className="btn btn-small btn-secondary" onClick={async()=>{await adminApi.reviewFraud(f.id,'resolved');setFraud(fraud.filter(x=>x.id!==f.id));}}>Закрыть</button></div></div>)}
+          {!fraud.length&&<div className="text-dim text-center">Открытых флагов нет</div>}
+        </div>
       )}
 
       {tab === 'tx' && (

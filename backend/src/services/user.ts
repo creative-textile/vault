@@ -145,7 +145,9 @@ export async function updateSettings(userId: number, settings: Partial<{
   const fields: string[] = [];
   const values: any[] = [];
   let i = 1;
+  const allowed=new Set(['withdraw_address','auto_safe_percent','notif_duel','notif_safe','notif_referral','notif_vault']);
   for (const [k, v] of Object.entries(settings)) {
+    if(!allowed.has(k)) throw new Error('Неизвестная настройка');
     fields.push(`${k} = $${i++}`);
     values.push(v);
   }

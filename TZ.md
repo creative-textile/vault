@@ -59,7 +59,7 @@
 - ✅ React + TypeScript + Vite + Three.js + Telegram SDK.
 - ✅ Node.js + TypeScript + Express + PostgreSQL + Socket.io.
 - ✅ Redis и Docker Compose присутствуют.
-- 🟡 Redis пока не используется для distributed locks, rate limiting и Socket.io adapter.
+- ✅ Redis используется для rate limiting, distributed leases и Socket.io adapter.
 - ⬜ Полноценная система версионных миграций.
 - ⬜ CI/CD, production monitoring, error tracking.
 - ⏸ TON Jetton listener, automatic withdrawals, TON Connect и mainnet.
@@ -160,9 +160,9 @@
 - ✅ Статистика, пользователи, транзакции, баны и корректировки.
 - ✅ Rocket bankroll, platform cashbox, ручной Vault Pool и настройки.
 - ✅ Финансовая reconciliation API.
-- ⬜ Пароль администратора в дополнение к Telegram ID.
-- ⬜ Audit log каждого административного действия: actor, before, after, IP, reason.
-- ⬜ Антифрод-раздел и связанные аккаунты/кошельки.
+- ✅ Пароль администратора в дополнение к Telegram ID.
+- ✅ Audit log административных мутаций: actor, payload с редактированием секретов, status, IP, user-agent.
+- ✅ Антифрод-раздел: общие IP/device hashes, risk flags, review; один withdrawal wallet на аккаунт.
 - 🟡 Финансовую сверку нужно вывести отдельной карточкой в UI.
 
 ## 12. Безопасность
@@ -171,12 +171,12 @@
 - ✅ Уникальный Telegram ID в БД.
 - ✅ Точечная защита основных денежных гонок.
 - ⬜ Telegram initData HMAC и проверка `auth_date`.
-- ⬜ Общий rate limit 60/мин.
-- ⬜ Rocket 10/мин, Duel create/accept 5/мин, Safe deposit 3/мин, withdrawal 3/час.
-- ⬜ PIN lockout/backoff.
-- ⬜ Единая schema validation входных данных.
-- ⬜ Мультиаккаунт-детекция и антифрод.
-- ⬜ Production CORS/origin allowlist.
+- ✅ Общий rate limit 60/мин.
+- ✅ Rocket 10/мин, Duel create/accept 5/мин, Safe deposit 3/мин, withdrawal 3/час.
+- ✅ PIN lockout на 15 минут после пяти ошибок.
+- ✅ Общая структурная validation и строгие валидаторы денежных/PIN операций.
+- ✅ Мультиаккаунт-детекция по HMAC IP/device и withdrawal wallet; флаги в админке.
+- ✅ Production CORS/origin allowlist.
 - ⏸ Один реальный TON-кошелёк на один аккаунт проверяется после TON-интеграции.
 
 ## 13. Реплеи, 3D и производительность
@@ -214,9 +214,9 @@
 ✅ Настройки комиссий как источник истины; запрет отрицательных средств; общий SQL transaction context; атомарные составные операции основных игр; отложенная комиссия Сейфа; обеспеченный Vault Pool; фиксированный суточный лимит; точное распределение центов; maturity 24 часа; остаток Сейфа; reconciliation endpoint.  
 Завершено: денежные операции атомарны; rollback покрыт race/smoke-тестами; почасовая reconciliation проверяет отрицательные суммы, резервы Дуэлей и хвост журнала транзакций.
 
-## Этап 2 — безопасность и контроль доступа: ~20%
+## Этап 2 — безопасность и контроль доступа: 100%
 
-Rate limiting через Redis, PIN lockout, validation schemas, admin password, admin audit log, production CORS, антифрод и мультиаккаунты. Telegram HMAC переносится в последний этап.
+✅ Redis rate limiting и distributed leases; PIN lockout; строгая money/PIN и bounded JSON validation; двойной admin access; audit log; origin allowlist; Socket.io Redis adapter; HMAC-хеши устройств/IP; уникальный withdrawal wallet; antifraud flags и интерфейс проверки. Telegram HMAC и реальные wallet-связи по решению заказчика остаются в последнем этапе.
 
 ## Этап 3 — уведомления и жизненный цикл пользователей: ~25%
 
@@ -259,7 +259,7 @@ Telegram initData HMAC, production bot notifications, уникальные depos
 - ⬜ Подтверждённые 30 FPS на iPhone SE 2020.
 - ⬜ 2D fallback.
 - 🟡 Уведомления.
-- 🟡 Админка: кассы/пул/настройки есть, антифрода нет.
+- 🟡 Админка: кассы, пул, настройки, reconciliation и антифрод есть.
 - ⬜ Rate limiting.
 - ⬜ Мультиаккаунт-детекция.
 - ⬜ Нагрузочный тест 100 пользователей.
@@ -271,8 +271,8 @@ Telegram initData HMAC, production bot notifications, уникальные depos
 - Игровой MVP: **около 82%**.
 - UX: **около 70%**.
 - Финансовое ядро без blockchain: **около 95%**.
-- Безопасность production: **около 30%**.
+- Безопасность без Telegram/TON: **около 95%**.
 - Уведомления и lifecycle: **около 30%**.
 - Реплеи/производительность: **около 35%**.
 - TON/mainnet: **около 5%**.
-- Проект целиком относительно актуализированного ТЗ: **примерно 64%**.
+- Проект целиком относительно актуализированного ТЗ: **примерно 72%**.

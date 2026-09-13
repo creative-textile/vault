@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
+import { moneyBody } from '../middleware/security';
 import {
   createDuel, getLobby, acceptDuel, cancelDuel, getDuelHistory, getDuel,
   notifyDuelFinished, ensureDuelResultNotifications
@@ -13,7 +14,7 @@ import {
 const router = Router();
 
 // POST /api/duel/create
-router.post('/create', auth, async (req, res) => {
+router.post('/create', auth, moneyBody('amount',0.01), async (req, res) => {
   try {
     const user = (req as any).user;
     const { amount } = req.body;

@@ -10,9 +10,12 @@ export const config = {
   tonApiKey: process.env.TON_API_KEY || '',
   tonMnemonic: process.env.TON_WALLET_MNEMONIC || '',
   usdtAddress: process.env.USDT_JETTON_ADDRESS || '',
+  adminPassword: process.env.ADMIN_PASSWORD || (process.env.DEMO_MODE === 'true' ? 'admin' : ''),
+  securityPepper: process.env.SECURITY_PEPPER || process.env.JWT_SECRET || 'change-me',
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || process.env.WEBAPP_URL || 'http://localhost:3000').split(',').map(x => x.trim()),
   adminTelegramIds: (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(id => parseInt(id)).filter(Boolean),
   demoMode: process.env.DEMO_MODE === 'true',
-  jwtSecret: 'vault_secret_change_me_in_prod'
+  jwtSecret: process.env.JWT_SECRET || 'vault_secret_change_me_in_prod'
 };
 
 // Multipliers for vault deposit by term

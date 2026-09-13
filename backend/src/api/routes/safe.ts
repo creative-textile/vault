@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
+import { moneyBody } from '../middleware/security';
 import {
   getActiveSafe, getCollectingSafe, getLastFinishedSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
   getSafeResults, getUserSafeDeposit, getSafeById,
@@ -115,7 +116,7 @@ router.get('/current', auth, async (req, res) => {
 });
 
 // POST /api/safe/deposit
-router.post('/deposit', auth, async (req, res) => {
+router.post('/deposit', auth, moneyBody('amount',0.01), async (req, res) => {
   try {
     const user = (req as any).user;
     const { amount } = req.body;

@@ -8,6 +8,7 @@
     "test": "node tests/smoke.cjs"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "@ton/core": "^0.56.3",
     "@ton/crypto": "^3.2.0",
     "bcryptjs": "^2.4.3",

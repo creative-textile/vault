@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
+import { moneyBody } from '../middleware/security';
 import {
   lockVaultDeposit, getActiveDeposit, earlyUnlock,
   getVaultHistory, getPoolInfo, addManualPool
@@ -23,7 +24,7 @@ router.get('/status', auth, async (req, res) => {
 });
 
 // POST /api/vault/lock
-router.post('/lock', auth, async (req, res) => {
+router.post('/lock', auth, moneyBody('amount',0.01), async (req, res) => {
   try {
     const user = (req as any).user;
     const { amount, term_days } = req.body;

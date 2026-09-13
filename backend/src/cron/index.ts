@@ -8,6 +8,7 @@ import { getSetting } from '../services/revenue';
 import { broadcast } from '../services/notifications';
 import { nowMSK, todayMSK, todaySlotMSK } from '../utils/time';
 import { getFinancialReconciliation } from '../services/financial-audit';
+import { withRedisLock } from '../services/distributed-lock';
 
 /**
  * Старт взлома в настроенное время МСК.
@@ -92,7 +93,8 @@ export function initCrons() {
   let lastCrackDate = '';
   tasks.push(cron.schedule('* * * * *', async () => {
     try {
-      lastCrackDate = await runSafeTick(lastCrackDate);
+      const next = await withRedisLock('safe-tick',55000,()=>runSafeTick(lastCrackDate));
+      if(next !== undefined) lastCrackDate=next;
     } catch (e: any) {
       console.error('[CRON safe] error:', e.message);
     }
@@ -114,7 +116,8 @@ export function initCrons() {
   // 21:00 UTC == 00:00 MSK — распределение Вклада
   tasks.push(cron.schedule('0 21 * * *', async () => {
     console.log('[CRON] Дневное распределение Вклада (полночь МСК)');
-    const res = await dailyVaultDistribution();
+    const res = await withRedisLock(`vault-distribution:${todayMSK()}`,120000,()=>dailyVaultDistribution());
+    if (!res) return;
     broadcast('vault_distributed', res);
     await createDailySafe();
   }, { timezone: 'UTC' }));

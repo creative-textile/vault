@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
+import { moneyBody } from '../middleware/security';
 import { placeBet, getRocketHistory, getRocketBankroll, processCrash } from '../../services/rocket';
 
 const router = Router();
 
 // POST /api/rocket/start — сделать ставку, начать раунд
-router.post('/start', auth, async (req, res) => {
+router.post('/start', auth, moneyBody('bet',0.01), async (req, res) => {
   try {
     const user = (req as any).user;
     const { bet } = req.body;
