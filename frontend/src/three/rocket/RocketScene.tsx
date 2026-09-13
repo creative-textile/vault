@@ -4,18 +4,23 @@ import * as THREE from 'three';
 interface Props {
   phase: 'idle' | 'flying' | 'crashed' | 'cashed';
   multiplier?: number;
+  cashoutAt?: number;
+  crashAt?: number;
   onReady?: () => void;
   seed?: string;
 }
 
-export default function RocketScene({ phase, multiplier = 1, seed = 'vault-rocket' }: Props) {
+export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, crashAt = 1, seed = 'vault-rocket' }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ phase, multiplier, rocket: null as THREE.Group | null, particles: null as THREE.Points | null });
+  const stateRef = useRef({ phase, multiplier, cashoutAt, crashAt, cashedStarted: phase === 'cashed' ? performance.now() : 0, rocket: null as THREE.Group | null, particles: null as THREE.Points | null });
 
   useEffect(() => {
+    if (phase === 'cashed' && stateRef.current.phase !== 'cashed') stateRef.current.cashedStarted = performance.now();
     stateRef.current.phase = phase;
     stateRef.current.multiplier = multiplier;
-  }, [phase, multiplier]);
+    stateRef.current.cashoutAt = cashoutAt;
+    stateRef.current.crashAt = crashAt;
+  }, [phase, multiplier, cashoutAt, crashAt]);
 
   useEffect(() => {
     const container = ref.current;
@@ -107,6 +112,20 @@ export default function RocketScene({ phase, multiplier = 1, seed = 'vault-rocke
     scene.add(rocket);
     stateRef.current.rocket = rocket;
 
+    // После кэшаута оригинал приземляется, а полупрозрачный «призрак»
+    // бесплатно доигрывает исходную/красивую траекторию до обязательного взрыва.
+    const ghost = rocket.clone(true);
+    ghost.traverse((obj:any) => {
+      if (obj.material) {
+        obj.material = obj.material.clone();
+        obj.material.transparent = true;
+        obj.material.opacity = 0.3;
+        obj.material.depthWrite = false;
+      }
+    });
+    ghost.visible = false;
+    scene.add(ghost);
+
     // Свет
     const ambient = new THREE.AmbientLight(0x6666aa, 0.6);
     scene.add(ambient);
@@ -147,6 +166,8 @@ export default function RocketScene({ phase, multiplier = 1, seed = 'vault-rocke
       const phase = stateRef.current.phase;
 
       if (phase === 'flying') {
+        rocket.visible = true;
+        ghost.visible = false;
         // Плавный набор высоты (логарифмически замедляется)
         const targetAlt = Math.log(1 + t * 0.6) * 4;
         altitude += (targetAlt - altitude) * 0.08;
@@ -174,6 +195,7 @@ export default function RocketScene({ phase, multiplier = 1, seed = 'vault-rocke
         altitude = 0;
         camera.position.lerp(cameraBase, 0.05);
         rocket.position.x = 0; rocket.position.z = 0;
+        ghost.visible = false;
         stars.rotation.z = 0;
         debrisGroup.children.forEach(c => { c.visible = false; c.position.set(0, 0, 0); });
       } else if (phase === 'crashed') {
@@ -191,10 +213,31 @@ export default function RocketScene({ phase, multiplier = 1, seed = 'vault-rocke
           c.rotation.y += c.userData.vr.y;
         });
       } else if (phase === 'cashed') {
-        // Приземление
+        // Результат по ТЗ: настоящая ракета уже приземлилась, её призрак летит
+        // дальше по той же e^(0.075t) и взрывается в сохранённой точке.
         flameLight.intensity = 0;
         (flame.material as THREE.MeshBasicMaterial).opacity = 0;
-        rocket.position.y = 0.3 + Math.sin(t * 2) * 0.02;
+        rocket.visible = true;
+        rocket.position.set(0, 0.3 + Math.sin(t * 2) * 0.02, 0);
+        const from = Math.max(1.01, stateRef.current.cashoutAt);
+        const to = Math.max(from, stateRef.current.crashAt);
+        const fullMs = Math.max(900, Math.log(to / from) / 0.075 * 1000);
+        const passed = Math.max(0, performance.now() - stateRef.current.cashedStarted);
+        const ghostMult = Math.min(to, from * Math.exp(0.075 * passed / 1000));
+        const ghostAlt = Math.log(1 + Math.max(0, Math.log(ghostMult) / 0.075) * 0.6) * 4;
+        ghost.position.set(0, 0.3 + ghostAlt, 0);
+        ghost.visible = passed < fullMs;
+        if (passed >= fullMs) {
+          debrisGroup.position.copy(ghost.position);
+          debrisGroup.children.forEach(c => {
+            c.visible = true;
+            c.position.x += c.userData.vx;
+            c.position.y += c.userData.vy - 0.01;
+            c.position.z += c.userData.vz;
+            c.rotation.x += c.userData.vr.x;
+            c.rotation.y += c.userData.vr.y;
+          });
+        }
       }
 
       renderer.render(scene, camera);

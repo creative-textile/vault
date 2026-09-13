@@ -746,4 +746,4 @@ Deposit address acquisition has bounded retries, visibility recovery and explici
 
 ### Beautiful-flight timeline consistency
 
-A beautiful Rocket cashout no longer clears the active server interval. The active round is marked `cashedOut`, its terminal multiplier is replaced with the persisted extended `crash_at`, and ticks continue until that point; `processCrash` is skipped because settlement already completed. The client uses a dedicated `beautiful` phase to keep the flying scene alive while displaying the locked cashout. Public replay reconstructs this exact start → cashout → extension → terminal sequence.
+Cashout clears the authoritative active-round interval immediately and settles money once. The result scene keeps the landed original rocket visible while a translucent ghost independently evaluates the stored exponential curve from `cashout_at` to `crash_at`, then explodes. `maybe_beautiful_flight` changes only that post-cashout terminal multiplier. Public replay switches from the live-flight phase to the same landed-rocket/ghost phase at the stored cashout time, so gameplay and replay share one visual model without extending the monetary round.
