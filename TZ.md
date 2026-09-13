@@ -335,3 +335,5 @@ Telegram initData HMAC, production bot notifications, уникальные depos
 - ✅ Fresh Docker DB bootstrap дополнительно защищён повторным созданием `platform_cashbox` перед constraints.
 
 Следующими остаются Этап 6 (производительность/эксплуатация) и последний Этап 7 (Telegram/USDT TON).
+
+- ✅ На главной устранён дублирующий переход в статистику: оставлена одна плитка `/stats` в нижнем меню.

@@ -151,10 +151,6 @@ export default function Home() {
         <span className="text-accent" style={{whiteSpace:'nowrap'}}>Открыть →</span>
       </div>
 
-      <Link to="/stats" className="card" style={{display:'flex',justifyContent:'space-between',alignItems:'center',textDecoration:'none',color:'inherit',padding:'12px 14px'}}>
-        <span style={{fontWeight:900}}>📊 Статистика VAULT</span><span className="text-accent">Открыть →</span>
-      </Link>
-
       {/* Нижнее меню */}
       <div className="game-grid">
         <Link to="/referral" className="game-tile" style={{padding: '12px'}}>

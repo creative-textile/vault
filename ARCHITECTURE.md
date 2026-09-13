@@ -755,3 +755,5 @@ Rocket history applies spoiler protection only when a row matches the locally he
 ## Stage 5 UX surfaces
 
 Project statistics have a dedicated `/stats` route backed by public `/api/stats/summary`; Home no longer owns its polling or detailed balance breakdown. `/api/vault/accruals` reads immutable per-day accrual rows for the authenticated user. Reconciliation remains admin-only and presents invariant counts with explicit refresh. API 401 responses emit a token-scoped browser event; App discards only the matching current JWT and reruns its single-flight bootstrap, remounting Deposit and other private screens safely.
+
+Home exposes the `/stats` route through one navigation tile only, avoiding duplicate calls to the same destination.
