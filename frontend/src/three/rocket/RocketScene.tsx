@@ -7,17 +7,24 @@ interface Props {
   cashoutAt?: number;
   crashAt?: number;
   onReady?: () => void;
+  onGhostFinished?: () => void;
   seed?: string;
 }
 
-export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, crashAt = 1, seed = 'vault-rocket' }: Props) {
+export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, crashAt = 1, onGhostFinished, seed = 'vault-rocket' }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [ghostMultiplier, setGhostMultiplier] = useState<number | null>(null);
   const lastGhostUiRef = useRef(0);
+  const ghostFinishedRef = useRef(false);
+  const onGhostFinishedRef = useRef(onGhostFinished);
+  onGhostFinishedRef.current = onGhostFinished;
   const stateRef = useRef({ phase, multiplier, cashoutAt, crashAt, cashedStarted: phase === 'cashed' ? performance.now() : 0, rocket: null as THREE.Group | null, particles: null as THREE.Points | null });
 
   useEffect(() => {
-    if (phase === 'cashed' && stateRef.current.phase !== 'cashed') stateRef.current.cashedStarted = performance.now();
+    if (phase === 'cashed' && stateRef.current.phase !== 'cashed') {
+      stateRef.current.cashedStarted = performance.now();
+      ghostFinishedRef.current = false;
+    }
     stateRef.current.phase = phase;
     stateRef.current.multiplier = multiplier;
     stateRef.current.cashoutAt = cashoutAt;
@@ -238,6 +245,10 @@ export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, cras
           setGhostMultiplier(ghostMult);
         }
         if (passed >= fullMs) {
+          if (!ghostFinishedRef.current) {
+            ghostFinishedRef.current = true;
+            onGhostFinishedRef.current?.();
+          }
           debrisGroup.position.copy(ghost.position);
           debrisGroup.children.forEach(c => {
             c.visible = true;
