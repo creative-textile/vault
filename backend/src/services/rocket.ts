@@ -52,7 +52,7 @@ export async function placeBet(userId: number, betAmount: number) {
 
   const minBet = parseFloat(await getSetting('min_bet') || '1');
   if (betAmount < minBet) throw new Error(`Минимальная ставка: $${minBet}`);
-  if (betAmount > available) throw new Error('Недостаточно средств');
+  if (Math.round(betAmount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
   if (betAmount > maxBet) throw new Error(`Максимальная ставка: $${maxBet}`);
 
   // Списать ставку

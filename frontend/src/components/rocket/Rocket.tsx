@@ -128,7 +128,7 @@ export default function Rocket() {
   const start = async () => {
     const b = parseFloat(bet);
     if (!b || b < minBet) return showToast(`Мин. ставка $${minBet}`);
-    if (b > (user?.balance || 0) - (user?.frozen_balance || 0)) return showToast('Недостаточно средств');
+    if (Math.round(b * 100) > Math.round(((user?.balance || 0) - (user?.frozen_balance || 0)) * 100)) return showToast('Недостаточно средств');
     try {
       const res = await rocketApi.start(b);
       setRoundId(res.round_id);

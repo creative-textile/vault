@@ -122,5 +122,5 @@ export async function getUserByTelegramId(tgId: number) {
 export async function getAvailableBalance(userId: number): Promise<number> {
   const u = await getUser(userId);
   if (!u) return 0;
-  return u.balance - u.frozen_balance;
+  return Math.round((u.balance - u.frozen_balance) * 100) / 100;
 }

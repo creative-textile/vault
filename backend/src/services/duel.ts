@@ -11,7 +11,7 @@ export async function createDuel(userId: number, amount: number) {
   const minBet = parseFloat(await getSetting('min_bet') || '1');
   if (amount < minBet) throw new Error(`Мин. ставка $${minBet}`);
   const available = await getAvailableBalance(userId);
-  if (amount > available) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
 
   // Проверить кол-во активных вызовов
   const activeCount = await query(
@@ -79,7 +79,7 @@ export async function acceptDuel(duelId: number, opponentId: number) {
 
   const amount = parseFloat(duel.amount);
   const available = await getAvailableBalance(opponentId);
-  if (amount > available) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
 
   // Атомарно занимаем вызов ДО любых операций с деньгами. Проверка статуса
   // через SELECT оставляла гонку: два одновременных «Принять» (двойной клик,

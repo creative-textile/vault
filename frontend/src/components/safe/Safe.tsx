@@ -320,6 +320,11 @@ export default function Safe() {
                   <div className="text-accent" style={{ fontWeight: 700 }}>
                     Возможный приз: ${fmt(collectDeposit.amount * 1.5)}
                   </div>
+                  {collect.prize_pool + 0.001 < collectDeposit.amount * 1.5 && (
+                    <div className="text-dim" style={{ fontSize: 11, marginTop: 2 }}>
+                      В пуле пока ${fmt(collect.prize_pool)} — для полного приза нужно больше.
+                    </div>
+                  )}
                 </div>
                 <button className="btn btn-small btn-danger" onClick={cancel}>ОТМЕНА</button>
               </div>

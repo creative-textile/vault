@@ -123,7 +123,7 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
         </button>
         <label style={{display:'flex', alignItems:'center', gap:8, marginTop:12, fontSize:12, color:'#aaa', cursor:'pointer'}}>
           <input type="checkbox" checked={mutePrompts} onChange={e => setMutePrompts(e.target.checked)} />
-          Не показывать предложения 24 часа
+          Больше не предлагать сегодня
         </label>
         <button className="btn btn-secondary mt" onClick={() => { if (mutePrompts) muteSafePrompt(); onClose(); }}>ПРОПУСТИТЬ</button>
       </div>

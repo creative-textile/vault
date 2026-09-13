@@ -15,16 +15,17 @@ export default function MoneyBreakdown({ detailed = false }: { detailed?: boolea
   const vault = Number(user.vault_locked) || 0;
 
   if (!detailed) {
-    return frozen > 0 ? (
+    const locked = frozen + safe + vault;
+    return locked > 0 ? (
       <div className="text-dim" style={{ marginTop: 6, fontSize: 12 }}>
-        ⚔️ Заморожено: <b style={{ color: '#fff' }}>${frozen.toFixed(2)}</b>
+        ❄️ Заморожено: <b style={{ color: '#fff' }}>${locked.toFixed(2)}</b>
       </div>
     ) : null;
   }
 
   const rows = [
     { key: 'available', label: 'Доступно', value: balance - frozen },
-    { key: 'duel', label: '⚔️ В дуэлях', value: frozen },
+    { key: 'duel', label: 'В дуэлях', value: frozen },
     { key: 'safe', label: '🔒 В сейфе', value: safe },
     { key: 'vault', label: '💎 Во вкладе', value: vault }
   ];

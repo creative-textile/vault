@@ -267,7 +267,7 @@ export async function safeDeposit(userId: number, amount: number) {
   const minBet = parseFloat(await getSetting('min_bet') || '1');
   if (amount < minBet) throw new Error(`Минимум $${minBet}`);
   const available = await getAvailableBalance(userId);
-  if (amount > available) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
 
   const commPercent = 10;
   const commission = Math.round(amount * (commPercent / 100) * 100) / 100;

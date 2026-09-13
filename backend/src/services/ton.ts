@@ -50,7 +50,7 @@ export async function processWithdrawal(
   if (!user) throw new Error('Пользователь не найден');
 
   if (amount < 5) throw new Error('Минимум $5');
-  if (amount > user.balance - user.frozen_balance) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round((user.balance - user.frozen_balance) * 100)) throw new Error('Недостаточно средств');
 
   // PIN
   const bcrypt = await import('bcryptjs');

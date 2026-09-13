@@ -37,7 +37,7 @@ export async function lockVaultDeposit(userId: number, amount: number, termDays:
 
   if (amount < dynMin) throw new Error(`Минимум $${dynMin}`);
   if (amount > dynMax) throw new Error(`Максимум $${dynMax}`);
-  if (amount > available) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
   if (!(termDays in VAULT_MULTIPLIERS)) throw new Error('Срок: 1, 7, 14 или 30 дней');
   if (await getActiveDeposit(userId)) throw new Error('У вас уже есть активный вклад');
 
