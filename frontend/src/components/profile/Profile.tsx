@@ -51,7 +51,7 @@ export default function Profile() {
 
       <div className="card">
         <div className="card-title">💰 Баланс</div>
-        <div style={{fontSize:28, fontWeight:900, color:'#ffd700'}}>${user?.balance.toFixed(2)}</div>
+        <div style={{fontSize:28, fontWeight:900, color:'var(--gold)'}}>${user?.balance.toFixed(2)}</div>
         {/* Полная раскладка средств показывается только в профиле */}
         <MoneyBreakdown detailed />
         <div className="btn-row">
@@ -83,7 +83,7 @@ export default function Profile() {
         </div>
         <div className="bet-chips">
           {[0, 10, 25, 50, 100].map(p => (
-            <div key={p} className="chip" onClick={() => saveAutoSafe(p)} style={{background: autoSafe === p ? '#ffd700' : '', color: autoSafe === p ? '#000' : ''}}>
+            <div key={p} className="chip" onClick={() => saveAutoSafe(p)} style={{background: autoSafe === p ? 'var(--gold)' : '', color: autoSafe === p ? 'var(--bg)' : ''}}>
               {p === 0 ? 'ВЫКЛ' : `${p}%`}
             </div>
           ))}

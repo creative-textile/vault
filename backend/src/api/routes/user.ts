@@ -3,18 +3,27 @@ import { auth } from '../middleware/auth';
 import { authenticateTelegram, getProfile, getTransactionHistory, updateSettings } from '../../services/user';
 import { getSetting } from '../../services/revenue';
 import { query } from '../../db/pool';
+import { config } from '../../config';
 
 const router = Router();
 
-// GET /api/config — публичная конфигурация для клиента (минимумы и т.п.)
+/**
+ * GET /api/config — публичная конфигурация для клиента (минимумы и т.п.).
+ *
+ * `demo_mode` обязателен на клиенте: карточка демо-пополнения больше не
+ * рисуется «всегда» (раньше в реальном режиме она показывала кнопку, а сервер
+ * отвечал 403 — теперь её просто нет).
+ */
 router.get('/config', async (_req, res) => {
-  const [minBet, safeMinBank, safeMinPart, rocketMaxPct, vaultMin, vaultMaxBase] = await Promise.all([
+  const [minBet, safeMinBank, safeMinPart, rocketMaxPct, vaultMin, vaultMaxBase, safeMult, withdrawComm] = await Promise.all([
     getSetting('min_bet'),
     getSetting('safe_min_bank'),
     getSetting('safe_min_participants'),
     getSetting('rocket_max_bet_percent'),
     getSetting('vault_min_deposit'),
-    getSetting('vault_max_floor')
+    getSetting('vault_max_floor'),
+    getSetting('safe_payout_multiplier'),
+    getSetting('withdraw_commission')
   ]);
   res.json({
     min_bet: parseFloat(minBet || '1'),
@@ -22,7 +31,11 @@ router.get('/config', async (_req, res) => {
     safe_min_participants: parseInt(safeMinPart || '2'),
     rocket_max_bet_percent: parseInt(rocketMaxPct || '50'),
     vault_min_deposit_base: parseFloat(vaultMin || '10'),
-    vault_max_deposit_base: parseFloat(vaultMaxBase || '100')
+    vault_max_deposit_base: parseFloat(vaultMaxBase || '100'),
+    safe_payout_multiplier: parseFloat(safeMult || '1.5'),
+    withdraw_commission: parseFloat(withdrawComm || '1'),
+    demo_mode: config.demoMode,
+    bot_username: config.botUsername
   });
 });
 

@@ -39,7 +39,7 @@ export default function Onboarding() {
         {screens.map((_, i) => (
           <div key={i} style={{
             width: 10, height: 10, borderRadius: '50%',
-            background: i === step ? '#ffd700' : '#333355'
+            background: i === step ? 'var(--gold)' : 'var(--bg-4)'
           }} />
         ))}
       </div>

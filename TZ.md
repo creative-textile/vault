@@ -52,7 +52,8 @@
 - ✅ Пул Vault распределяется до последнего цента методом наибольших остатков.
 - ✅ Есть административный endpoint финансовой сверки `/api/admin/reconciliation`.
 - 🟡 Нужны расширенные fault-injection тесты (падение процесса на каждом шаге) и постоянный ledger audit cron.
-- ⏸ Реальные blockchain deposits/withdrawals и on-chain reconciliation оставлены на последний этап.
+- ✅ Вывод создаёт заявку (`withdrawals`) той же транзакцией, что и списание денег (статус `pending`); админ отмечает `paid` с `tx_hash` или `reject` с возвратом. PIN проверяется сервером при каждом выводе.
+- ⏸ Реальная отправка TON-транзакций при выплате, blockchain deposits и on-chain reconciliation оставлены на последний этап (зависимости `@ton/ton`/`@ton/crypto` будут добавлены обратно при реализации).
 
 ## 3. Технический стек и архитектура
 
@@ -60,8 +61,9 @@
 - ✅ Node.js + TypeScript + Express + PostgreSQL + Socket.io.
 - ✅ Redis и Docker Compose присутствуют.
 - ✅ Redis используется для rate limiting, distributed leases и Socket.io adapter.
-- ⬜ Полноценная система версионных миграций.
-- ⬜ CI/CD, production monitoring, error tracking.
+- 🟡 Миграции: идемпотентные `DO`-блоки в `init.sql` + дублирующие `ALTER` в `src/index.ts` для существующих БД; отдельной системы версионных миграций (Flyway/Prisma) нет.
+- ✅ CI: GitHub Actions — 5 job'ов (backend tsc + 7-режимный smoke, schema-check на postgres:16, frontend tsc + build, bot tsc + build, docker build 4 образов + compose config).
+- ⬜ Production monitoring, error tracking (Sentry).
 - ⏸ TON Jetton listener, automatic withdrawals, TON Connect и mainnet.
 
 ## 4. Балансы и терминология
@@ -92,6 +94,7 @@
 - ✅ При отсутствии пула используется floor, сейчас $100.
 - ✅ Календарное начисление отделено от срока: прибыль начисляется по расчётным дням, тело возвращается после полных 24 часов × срок.
 - ✅ `unlocks_at` хранится в БД, maturity проверяется каждую минуту.
+- ✅ «Один активный вклад» обеспечивает БД: `UNIQUE INDEX vault_deposits_one_active (user_id) WHERE status='active'`. Проверка отдельным `SELECT` пропускала два параллельных `create`, а досрочный разлок (`earlyUnlock`) сначала атомарно переводит `active → early_unlock` и только потом возвращает тело — два одновременных «Закрыть досрочно» больше не выплачивают тело дважды (гонка воспроизводилась на настоящем PostgreSQL).
 - ✅ Есть таблица ежедневных начислений `vault_deposit_accruals`.
 - 🟡 API и UI детальной истории ежедневных начислений ещё не завершены.
 - ✅ Ненавязчивые уведомления о ежедневном начислении и финальной выплате.
@@ -108,6 +111,10 @@
 - ✅ Раунд сохраняет replay seed; геометрия, звёзды, огонь и обломки воспроизводимы.
 - ✅ Детерминированный тест 100 000 раундов подтверждает house edge около 10%.
 - ✅ Server ticks 30 FPS и клиентская requestAnimationFrame-интерполяция 60 FPS.
+- ✅ `crash_at` — секрет до конца раунда: не отдаётся в `/api/rocket/start` (только `round_id`/`replay_seed`/`max_bet`), отсутствует в публичной истории незавершённых раундов и в реплее незавершённого раунда.
+- ✅ `crash_at` хранится в `DECIMAL(12,4)` (было `8,4`): при кассе > $10k и ставке $1 точка взрыва `bankroll/bet` выходила за `9999.9999` и INSERT падал с `22003 numeric overflow`; `CRASH_HARD_CAP = 1e6` клампит значение на уровне сервиса.
+- ✅ Кэшаут работает на любом инстансе: время полёта считается от `rocket_rounds.tick_started_at` (атомарный `claimRocketTick()`), а не только от `Map` в памяти процесса.
+- ✅ Cron `settleStaleRounds()` (раз в минуту, под Redis-локом) дорасчитывает раунды, зависшие после рестарта процесса: `tick_started_at` есть, результата нет, прошло > `STALE_ROUND_GRACE_SEC` → `profit = -bet`.
 
 ## 7. Дуэль
 
@@ -125,6 +132,11 @@
 - ✅ Сбор, отмена, ежедневный старт, взлом и результаты.
 - ✅ Сервер проверяет тапы по коду и скорости.
 - ✅ Скорость барабанов регулируется в админке.
+- ✅ Время взлома считается **только по серверным часам**: `recorded = spinLead + max(макс. валидный тап, spinElapsed)`, где `spinElapsed = (now − crack_started_at) − spinLead`. Заявленное клиентом `time_ms` в ранжировании не участвует (логируется только при расхождении > 1 мин). Тапы вне `[0, spinElapsed + 1 с]` считаются некорректными.
+- ✅ До общего старта вращения результат не принимается (`400 «Вращение барабанов ещё не началось»`) — прежняя версия принимала его с первой миллисекунды фазы `cracking`, а код был виден всё это время: скрипт читал код заранее и guaranteed первое место.
+- ✅ Код и скорости барабанов открываются только за `SPIN_CODE_LEAD_MS` (3 с) до общего старта (`isCodeRevealed()`); до этого `/api/safe/current` отдаёт `code: null`, `drum_speeds: null` и `code_reveal_in_ms`. Клиент делает один точечный запрос к моменту открытия.
+- ✅ Отмена раунда, не набравшего минимум (`cancelSafeReturnDeposits`), обнуляет `bank`, `prize_pool` и `participants_count` вместе со статусом `cancelled` (раньше обнулялся только статус, и отменённый раунд продолжал показывать банк).
+- ✅ Выплата `amount × safe_payout_multiplier` (настройка, по умолчанию 1.5); нераспределённый остаток пула — доход платформы (`safe_remainder`).
 - 🔁 Минимальный вклад остаётся равным общей минимальной ставке, сейчас $1 вместо $2 v4.
 - 🔁 Минимум участников — 2 вместо 3.
 - 🔁 Следующий Сейф начинает собираться сразу после старта взлома предыдущего.
@@ -160,6 +172,8 @@
 - ✅ Статистика, пользователи, транзакции, баны и корректировки.
 - ✅ Rocket bankroll, platform cashbox, ручной Vault Pool и настройки.
 - ✅ Финансовая reconciliation API.
+- ✅ Переводы между кассами (`rocket-bankroll`, `add-pool`, `withdraw-platform`, `seed-platform`) — одна транзакция с `SELECT … FOR UPDATE` (в autocommit блокировка не удерживалась, два параллельных перевода читали одну сумму, CHECK ронял второй UPDATE, оставляя половину перевода выполненной).
+- ✅ Заявки на вывод: вкладка «payouts» в админке — отметить `paid` с `tx_hash` или `reject` с возвратом денег; статус меняется только из `pending`.
 - ✅ Пароль администратора в дополнение к Telegram ID.
 - ✅ Audit log административных мутаций: actor, payload с редактированием секретов, status, IP, user-agent.
 - ✅ Антифрод-раздел: общие IP/device hashes, risk flags, review; один withdrawal wallet на аккаунт.
@@ -170,9 +184,9 @@
 - ✅ JWT и bcrypt PIN.
 - ✅ Уникальный Telegram ID в БД.
 - ✅ Точечная защита основных денежных гонок.
-- ⬜ Telegram initData HMAC и проверка `auth_date`.
-- ✅ Общий rate limit 60/мин.
-- ✅ Rocket 10/мин, Duel create/accept 5/мин, Safe deposit 3/мин, withdrawal 3/час.
+- ✅ Telegram initData HMAC-SHA256 (`secret_key = HMAC("WebAppData", bot_token)`) + проверка `auth_date` (< 24 ч) и `hash != 0`, сравнение `timingSafeEqual`; пользователь создаётся по данным из подписанного `initData`. В демо-режиме (без `BOT_TOKEN`) подпись пропускается с предупреждением в лог.
+- ✅ Общий rate limit 60/мин (по IP).
+- ✅ `authedRateLimit()` на аутентифицированного пользователя для денежных эндпоинтов: Rocket 10/мин, Duel create/accept/cancel 5/мин, Safe deposit/cancel/crack 3/мин, Vault create/unlock, withdrawal 3/час, demo-deposit. Ограничение «по юзеру» обязательно: лимита по IP недостаточно (IP меняется).
 - ✅ PIN lockout на 15 минут после пяти ошибок.
 - ✅ Общая структурная validation и строгие валидаторы денежных/PIN операций.
 - ✅ Мультиаккаунт-детекция по HMAC IP/device и withdrawal wallet; флаги в админке.
@@ -181,11 +195,15 @@
 
 ## 13. Реплеи, 3D и производительность
 
-- ✅ Процедурные Three.js-сцены Rocket/Duel/Safe.
-- 🔁 Вместо GLTF/GLB используются процедурные модели для меньшего MVP bundle.
-- 🟡 Duel replay частичный.
-- ⬜ Единый replay JSON и маршруты Rocket/Duel/Safe.
-- ⬜ Публичные share links.
+- ✅ Процедурные Three.js-сцены Rocket/Duel/Safe пересобраны заново: общий слой `three/lib/` (stage с PMREM и bloom, environment, ~18 canvas-текстур с кэшем, PBR-материалы, пул частиц на одном `THREE.Points`, сид-ГПСЧ), корпус ракеты и дверь сейфа — профили вращения с фаской, монета — чеканка с bumpMap и насечкой гурта.
+- ✅ Анимации переведены с покадровых констант на время: бросок монеты жёстко равен окну экрана (2800 мс), формулы вынесены в чистые `flipMath.ts`/`drumMath.ts` и покрыты `tests/scene-math.mjs` (208 проверок, шаг `npm test` в CI). Цифры 3D-барабанов и DOM считаются одним модулем — расхождение означало бы засчитанный промах при visibly правильной цифре.
+- ✅ Авто-снижение качества по реальному FPS (< 34 → bloom off, pixelRatio 1.1, тени off) и `createStageSafe()` → `null` без WebGL: экран остаётся играбельным.
+- ✅ Vite `manualChunks {three, vendor}`: бандл 241/243/501 КБ. Чанк `three` — одна неделимая vendor-библиотека, кэшируется браузером отдельно от кода приложения, поэтому `chunkSizeWarningLimit` поднят до 560 КБ осознанно (не молча: комментарий в `vite.config.ts`).
+- ✅ Звук: ~40 процедурных эффектов WebAudio без единого аудиофайла (`audio/engine.ts`), фасад `sfx`, трекер тиков множителя, вибрация Telegram, переключатель в шапке, пауза в фоновой вкладке.
+- 🔁 Вместо GLTF/GLB — процедурные модели: 0 байт ассетов, нет сетевых запросов на старте зала, нет риска незагрузившейся модели в Mini App.
+- ✅ Duel replay полный (сохранённая траектория через единый публичный JSON).
+- ✅ Единый replay JSON и маршруты Rocket/Duel/Safe (`/api/replay/:game/:id`, публичный `/replay/:game/:id`).
+- ✅ Публичные share links.
 - ⬜ Lazy loading каждого зала.
 - ⬜ 2D fallback при FPS < 20.
 - ⬜ Проверка 30 FPS на iPhone SE 2020 и слабых Android.
@@ -201,7 +219,7 @@
 
 - ✅ Docker Compose: frontend/backend/PostgreSQL/Redis/bot.
 - ✅ Московский timezone расчётов.
-- ⬜ CI: builds, tests, schema check и Docker build.
+- ✅ CI: builds (backend/frontend/bot), tsc, 7-режимный smoke, schema-check на postgres:16 и Docker build 4 образов + `compose config` (`.github/workflows/ci.yml`).
 - ⬜ Ежедневные backups и проверка restore.
 - ⬜ Нагрузочный тест на 100 одновременных пользователей.
 - ⬜ SSL, production domain, monitoring и alerting.
@@ -218,7 +236,7 @@
 
 Локальная эксплуатация: Docker Compose передаёт security-переменные явно; пароль по умолчанию `admin`, пользовательское значение берётся из корневого `.env`. Production обязан переопределить все demo defaults.
 
-✅ Redis rate limiting и distributed leases; PIN lockout; строгая money/PIN и bounded JSON validation; двойной admin access; audit log; origin allowlist; Socket.io Redis adapter; HMAC-хеши устройств/IP; уникальный withdrawal wallet; antifraud flags и интерфейс проверки. Telegram HMAC и реальные wallet-связи по решению заказчика остаются в последнем этапе.
+✅ Redis rate limiting и distributed leases; PIN lockout; строгая money/PIN и bounded JSON validation; двойной admin access; audit log; origin allowlist; Socket.io Redis adapter; HMAC-хеши устройств/IP; уникальный withdrawal wallet; antifraud flags и интерфейс проверки. ✅ Telegram initData HMAC-SHA256 + проверка `auth_date` реализованы (`middleware/telegramAuth.ts`); в демо-режиме без `BOT_TOKEN` подпись пропускается с предупреждением. Реальные wallet-связи по решению заказчика остаются в последнем этапе.
 
 ## Этап 3 — уведомления и жизненный цикл пользователей: 100%
 
@@ -228,27 +246,31 @@
 
 Rocket replay, статистический RTP test, 30/60 FPS; адресный Duel rematch/reject; детерминированные replay всех игр; share links.
 
-## Этап 5 — UX и статистика: ~65%
+## Этап 5 — UX и статистика: завершён
 
-«Один экран — одно действие», главная в одну прокрутку, отдельная статистика проекта, accrual history UI, reconciliation UI.
+«Один экран — одно действие», главная в одну прокрутку, отдельная статистика проекта `/stats`, accrual history UI, reconciliation UI (детали — в разделе «Этап 5 — UX и статистика: завершён» ниже).
 
-## Этап 6 — производительность и эксплуатация: ~30%
+- ✅ Дизайн-система подключена к экранам: 138 хардкод-цветов в 19 компонентах заменены на токены, состояния — модификаторами классов, выигрыши ракеты и дуэли сведены в один блок `.bigwin`, HUD множителя — поверх 3D-сцены, плитки игр получили акцентный цвет своей игры и фактические бейджи.
+- ✅ Звук подключён во всех залах (был мёртвым кодом: `AudioProvider` монтировался, но `sfx` не вызывался ни разу) + переключатель 🔊/🔇 в шапке каждого экрана.
+- 🟡 Из 160 классов `app.css` задействовано 99: остальные — заготовки (`.modal*`, `.stat-*`, `.wins-ticker`, `.skeleton`, утилиты). Подключать по мере надобности либо удалить, чтобы мёртвый CSS не расползался.
 
-Lazy loading, 2D fallback, device tests, CI/CD, migrations, backups, monitoring, нагрузочные тесты.
+## Этап 6 — производительность и эксплуатация: ~45%
 
-## Этап 7 — реальные Telegram и USDT TON: ~5% (выполняется последним)
+✅ CI/CD (GitHub Actions, 5 job'ов: backend tsc + 7-режимный smoke, schema-check на postgres:16, frontend tsc + build, bot tsc + build, docker build 4 образов + compose config). ✅ Vite `manualChunks {three, vendor}` — бандл 142/243/463 КБ, предупреждения >500 КБ нет. ✅ Идемпотентные миграции (`DO`-блоки в `init.sql` + `ALTER` в `src/index.ts`). Осталось: lazy loading залов, 2D fallback при FPS < 20, device tests (iPhone SE 2020), ежедневные backups + restore, нагрузочный тест 100 пользователей, monitoring/alerting.
 
-Telegram initData HMAC, production bot notifications, уникальные deposit memo/address, idempotent USDT Jetton listener, очередь выводов, on-chain statuses/refunds, TON testnet и mainnet.
+## Этап 7 — реальные Telegram и USDT TON: ~10% (выполняется последним)
+
+✅ Telegram initData HMAC (готово, см. Этап 2). ✅ Очередь выводов: заявка `withdrawals` создаётся транзакцией со списанием, админ отмечает `paid`/`reject`. Осталось: production bot push-notifications, уникальные deposit memo/address, idempotent USDT Jetton listener, реальная отправка TON-транзакций при выплате, on-chain statuses/refunds, TON testnet и mainnet (зависимости `@ton/ton`/`@ton/crypto` добавляются обратно при реализации).
 
 # Контрольный список v4 — ничего не удалено
 
 - ⏸ Пополнение USDT mainnet.
 - ⏸ Автоматический вывод USDT mainnet.
 - ✅ Seed Rocket $1,500.
-- ⬜ Rocket: статистический тест 1,000+ раундов.
+- ✅ Rocket: статистический тест 100 000 раундов (house edge ~10%, RTP ~90%).
 - ✅ Rocket max и roundDownClean.
 - ✅ Красивые полёты.
-- ✅ Duel create/accept/cancel; 🟡 реванш.
+- ✅ Duel create/accept/cancel; ✅ реванш (адресный, одним INSERT с `target_user_id`/`parent_duel_id`, accept/decline только адресатом, отмена/отклонение атомарны).
 - ✅ Safe полный основной цикл; 🔁 правила победителей изменены.
 - ✅ Vault сроки 1/7/14/30.
 - ✅ Полуночное распределение.
@@ -257,27 +279,27 @@ Telegram initData HMAC, production bot notifications, уникальные depos
 - ✅ Ручной обеспеченный Vault Pool.
 - 🟡 Реплеи всех трёх залов.
 - ✅ Рефералы 3%.
-- ✅ PIN; ⬜ brute-force protection.
+- ✅ PIN; ✅ brute-force protection (lockout 15 мин после 5 ошибок).
 - ⬜ Подтверждённые 30 FPS на iPhone SE 2020.
 - ⬜ 2D fallback.
 - 🟡 Уведомления.
 - 🟡 Админка: кассы, пул, настройки, reconciliation и антифрод есть.
-- ⬜ Rate limiting.
-- ⬜ Мультиаккаунт-детекция.
+- ✅ Rate limiting (общий 60/мин по IP + `authedRateLimit` по юзеру на денежные эндпоинты).
+- ✅ Мультиаккаунт-детекция (HMAC IP/device hashes, risk flags, review в админке; один withdrawal wallet на аккаунт).
 - ⬜ Нагрузочный тест 100 пользователей.
 - ⬜ Ежедневные backups.
 - ⏸ SSL, production domain и production bot.
 
 # Текущая оценка завершённости
 
-- Игровой MVP: **около 82%**.
-- UX: **около 70%**.
-- Финансовое ядро без blockchain: **около 95%**.
-- Безопасность без Telegram/TON: **около 95%**.
-- Уведомления и lifecycle: **около 30%**.
-- Реплеи/производительность: **около 35%**.
-- TON/mainnet: **около 5%**.
-- Проект целиком относительно актуализированного ТЗ: **примерно 72%**.
+- Игровой MVP: **около 90%** (гонки денег закрыты и проверены на настоящем PostgreSQL; секреты игр не покидают сервер до конца раунда).
+- UX: **около 75%**.
+- Финансовое ядро без blockchain: **около 97%** (остались fault-injection тесты и постоянный ledger audit cron).
+- Безопасность без TON: **около 97%** (Telegram initData HMAC реализован; остались реальные wallet-связи и CORS-домен в проде).
+- Уведомления и lifecycle: **около 35%**.
+- Реплеи/производительность: **около 50%** (CI и manualChunks готовы; остались lazy loading, 2D fallback, device tests).
+- TON/mainnet: **около 10%** (очередь выводов и заявка готовы; осталась реальная отправка транзакций).
+- Проект целиком относительно актуализированного ТЗ: **примерно 78%**.
 
 ### Исправление стабильности onboarding
 

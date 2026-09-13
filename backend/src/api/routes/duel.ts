@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { auth } from '../middleware/auth';
+import { auth, optionalAuth } from '../middleware/auth';
 import { moneyBody } from '../middleware/security';
 import {
   createDuel, getLobby, acceptDuel, cancelDuel, getDuelHistory, getDuel,
-  notifyDuelFinished, ensureDuelResultNotifications, createRematch, declineRematch
+  notifyDuelFinished, ensureDuelResultNotifications, createRematch, declineRematch,
+  computeDuelPrize
 } from '../../services/duel';
 import { getUnreadUserNotifications } from '../../services/notifications';
 import {
@@ -25,10 +26,12 @@ router.post('/create', auth, moneyBody('amount',0.01), async (req, res) => {
   }
 });
 
-// GET /api/duel/lobby
-router.get('/lobby', async (_req, res) => {
+// GET /api/duel/lobby — открытые вызовы + адресные реванши ТЕКУЩЕГО игрока.
+// optionalAuth: без токена выдача остаётся публичной (только открытые вызовы),
+// с токеном сервер сам отфильтрует чужие реванши (раньше это делал клиент).
+router.get('/lobby', optionalAuth, async (req, res) => {
   try {
-    res.json(await getLobby());
+    res.json(await getLobby((req as any).user?.id));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
@@ -167,8 +170,9 @@ router.get('/:id', auth, async (req, res) => {
     if (!d) return res.status(404).json({ error: 'Не найдено' });
     const user = (req as any).user;
     const amount = parseFloat(d.amount);
-    const prize = Math.round(amount * 2 * 0.9 * 100) / 100;
-    const i_won = d.winner_id === user.id;
+    // Приз — по действующей настройке комиссии, а не захардкоженные x1.8
+    const prize = await computeDuelPrize(amount);
+    const i_won = Number(d.winner_id) === Number(user.id);
     res.json({
       id: d.id,
       result: d.result,

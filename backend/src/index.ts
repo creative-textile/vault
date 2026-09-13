@@ -5,7 +5,8 @@ import { Server } from 'socket.io';
 import { config } from './config';
 import { initCrons, stopCrons } from './cron';
 import { initNotifications } from './services/notifications';
-import { rateLimit, validatePayload, securityTelemetry } from './api/middleware/security';
+import { rateLimit, authedRateLimit, validatePayload, securityTelemetry } from './api/middleware/security';
+import { INSECURE_DEMO_DEFAULTS } from './config';
 import { initNotificationsTable } from './services/user-notifications';
 import { startDepositListener } from './services/ton';
 
@@ -33,15 +34,27 @@ app.use(securityTelemetry);
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/api', userRoutes);
-app.use('/api/wallet/withdraw', rateLimit('withdrawal',3,3600));
+
+// Денежные эндпоинты лимитируются ПОСЛЕ авторизации и по user_id: прежние
+// лимитеры стояли до auth и ключевались заголовком X-Device-Id, который задаёт
+// сам клиент — то есть снимались одной сменой заголовка.
+app.use('/api/wallet/withdraw', authedRateLimit('withdrawal',3,3600));
+app.use('/api/wallet/set-pin', authedRateLimit('set_pin',5,3600));
+app.use('/api/wallet/demo-deposit', authedRateLimit('demo_deposit',20,3600));
 app.use('/api/wallet', walletRoutes);
-app.use('/api/rocket/start', rateLimit('rocket_start',10,60));
+app.use('/api/rocket/start', authedRateLimit('rocket_start',10,60));
+app.use('/api/rocket/cashout', authedRateLimit('rocket_cashout',30,60));
 app.use('/api/rocket', rocketRoutes);
-app.use('/api/duel/create', rateLimit('duel_create',5,60));
-app.use('/api/duel/accept', rateLimit('duel_accept',5,60));
+app.use('/api/duel/create', authedRateLimit('duel_create',5,60));
+app.use('/api/duel/accept', authedRateLimit('duel_accept',5,60));
+app.use('/api/duel/cancel', authedRateLimit('duel_cancel',10,60));
+app.use('/api/duel/rematch', authedRateLimit('duel_rematch',10,60));
 app.use('/api/duel', duelRoutes);
-app.use('/api/safe/deposit', rateLimit('safe_deposit',3,60));
+app.use('/api/safe/deposit', authedRateLimit('safe_deposit',3,60));
+app.use('/api/safe/crack', authedRateLimit('safe_crack',10,60));
 app.use('/api/safe', safeRoutes);
+app.use('/api/vault/lock', authedRateLimit('vault_lock',10,60));
+app.use('/api/vault/early-unlock', authedRateLimit('vault_early_unlock',10,60));
 app.use('/api/vault', vaultRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/admin', adminRoutes);
@@ -50,7 +63,15 @@ app.use('/api/replay', replayRoutes);
 // WebSocket: при получении rocket round start, запустить тики
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' }
+  // Тот же allowlist, что и для HTTP: origin '*' позволял любому сайту
+  // открывать сокет к игровому серверу и слушать раунды/события баланса.
+  cors: {
+    origin: (origin: string | undefined, cb: (err: Error | null, ok?: boolean) => void) => {
+      if (!origin || config.allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error('Origin не разрешён'));
+    },
+    credentials: true
+  }
 });
 
 // Redis adapter synchronizes rooms/events when backend is scaled horizontally.
@@ -87,19 +108,23 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  // Когда клиент запускает ракету — сервер стартует тики по round_id
-  socket.on('rocket:launch', (data: { round_id: number, crash_at: number }) => {
-    // Доверяем клиенту только round_id; crash_at достаём из БД заново
+  // Когда клиент запускает ракету — сервер стартует тики по round_id.
+  // `crash_at` от клиента игнорируется: точка взрыва читается из БД внутри
+  // startRocketRound, а право на запуск проверяется по владельцу раунда.
+  socket.on('rocket:launch', (data: { round_id: number }) => {
+    const roundId = Number(data?.round_id);
+    if (!Number.isInteger(roundId) || roundId <= 0) return;
     import('./db/pool').then(async ({ query }) => {
-      const res = await query('SELECT user_id, crash_at FROM rocket_rounds WHERE id = $1', [data.round_id]);
-      if (res.rows.length) {
-        const userId = res.rows[0].user_id;
-        if (userId !== socket.data.userId) return;
-        const { ensureRedis, redis }=await import('./db/redis');
-        try { await ensureRedis(); const claimed=await redis.set(`rocket-launch:${data.round_id}`,String(userId),'PX',3600000,'NX'); if(claimed!=='OK') return; } catch { /* DB/instance guards remain fallback */ }
-        startRocketRound(io, data.round_id, userId, parseFloat(res.rows[0].crash_at));
-      }
-    });
+      const res = await query('SELECT user_id FROM rocket_rounds WHERE id = $1', [roundId]);
+      if (!res.rows.length) return;
+      const userId = Number(res.rows[0].user_id);
+      if (userId !== Number(socket.data.userId)) return;
+      const { ensureRedis, redis }=await import('./db/redis');
+      try { await ensureRedis(); const claimed=await redis.set(`rocket-launch:${roundId}`,String(userId),'PX',3600000,'NX'); if(claimed!=='OK') return; } catch { /* DB/instance guards remain fallback */ }
+      // claimRocketTick внутри startRocketRound — вторая (базовая) защита от
+      // двойных тиков: если Redis недоступен, раунд всё равно займёт один процесс.
+      await startRocketRound(io, roundId, userId);
+    }).catch((e: any) => console.error('[ROCKET] launch error:', e?.message || e));
   });
 });
 
@@ -107,9 +132,25 @@ io.on('connection', (socket) => {
 registerRocketHandlers(io);
 
 server.listen(config.port, async () => {
-  if (!config.demoMode && (config.jwtSecret === 'vault_secret_change_me_in_prod' || config.securityPepper === 'change-me' || !config.adminPassword)) {
-    console.error('[SECURITY] JWT_SECRET, SECURITY_PEPPER и ADMIN_PASSWORD обязательны вне demo');
-    process.exit(1);
+  // Вне демо-режима сервер обязан быть сконфигурирован: с demo-значениями
+  // секретов можно подписать чужой JWT, а без BOT_TOKEN и ADMIN_TELEGRAM_IDS
+  // админка либо недоступна никому, либо (в демо) открыта всем.
+  if (!config.demoMode) {
+    const problems: string[] = [];
+    if (INSECURE_DEMO_DEFAULTS.has(config.jwtSecret)) problems.push('JWT_SECRET');
+    if (INSECURE_DEMO_DEFAULTS.has(config.securityPepper)) problems.push('SECURITY_PEPPER');
+    if (!config.adminPassword) problems.push('ADMIN_PASSWORD');
+    if (!config.botToken || config.botToken === 'demo_token') problems.push('BOT_TOKEN');
+    if (!config.adminTelegramIds.length) problems.push('ADMIN_TELEGRAM_IDS');
+    if (problems.length) {
+      console.error(`[SECURITY] Вне demo-режима обязательны: ${problems.join(', ')}. Заполните .env (см. .env.example)`);
+      process.exit(1);
+    }
+  } else {
+    console.warn('[SECURITY] DEMO_MODE=true: вход по demo:<id> и демо-пополнение ВКЛЮЧЕНЫ. Не используйте этот режим для реальных денег.');
+    if (INSECURE_DEMO_DEFAULTS.has(config.jwtSecret)) {
+      console.warn('[SECURITY] JWT_SECRET — демо-значение: в этом режиме токены подписываются известным ключом.');
+    }
   }
   console.log(`[VAULT] Backend running on port ${config.port}`);
   console.log(`[VAULT] Demo mode: ${config.demoMode}`);
@@ -126,6 +167,23 @@ server.listen(config.port, async () => {
   // Миграции для совместимости с уже запущенными БД (idempotent)
   try {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`);
+    // Ракета: crash_at в DECIMAL(8,4) переполнялся при кассе > $10k и ставке $1
+    // (ошибка 22003 numeric field overflow → игрок получал 500 вместо раунда).
+    await query(`ALTER TABLE rocket_rounds ALTER COLUMN crash_at TYPE DECIMAL(12,4)`);
+    // Серверный якорь тиков: по нему cashout считает множитель, если раунд
+    // стартовал на другом экземпляре backend (in-memory activeRounds там пуст).
+    await query(`ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS tick_started_at TIMESTAMPTZ`);
+    // Вклад: только ОДИН активный вклад на пользователя. Без индекса два
+    // параллельных запроса создавали два вклада, а досрочное расторжение
+    // выплачивало тело и бонус обоих (проверялось лишь «есть активный»).
+    try {
+      await query(`CREATE UNIQUE INDEX IF NOT EXISTS vault_deposits_one_active
+                     ON vault_deposits (user_id) WHERE status = 'active'`);
+    } catch (e: any) {
+      // Уже существующая БД может содержать несколько активных вкладов:
+      // сообщаем и продолжаем запуск, чистка — задача оператора.
+      console.error('[DB] vault_deposits_one_active: ', e.message);
+    }
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`);
     await query(`ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS replay_seed VARCHAR(64)`);
     await query(`ALTER TABLE duels ADD COLUMN IF NOT EXISTS target_user_id INTEGER REFERENCES users(id)`);
@@ -159,6 +217,19 @@ server.listen(config.port, async () => {
     await query(`DO $$ BEGIN ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`DO $$ BEGIN ALTER TABLE platform_cashbox ADD CONSTRAINT platform_cashbox_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`DO $$ BEGIN ALTER TABLE safes ADD CONSTRAINT safes_money_nonnegative CHECK (bank >= 0 AND prize_pool >= 0 AND commission_amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`CREATE TABLE IF NOT EXISTS withdrawals (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+        fee DECIMAL(12,2) NOT NULL DEFAULT 0 CHECK (fee >= 0),
+        payout DECIMAL(12,2) NOT NULL CHECK (payout >= 0),
+        address TEXT NOT NULL,
+        status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','rejected')),
+        tx_hash TEXT, reject_reason TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(), paid_at TIMESTAMPTZ)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status, created_at DESC)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id, created_at DESC)`);
+    await query(`ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS reject_reason TEXT`);
     await query(`CREATE TABLE IF NOT EXISTS cashbox_transfers (
         id SERIAL PRIMARY KEY, from_source VARCHAR(32) NOT NULL, to_source VARCHAR(32) NOT NULL,
         amount DECIMAL(12,2) NOT NULL, note TEXT, created_at TIMESTAMP DEFAULT NOW()
@@ -176,6 +247,7 @@ server.listen(config.port, async () => {
       safe_crack_hour:'21', safe_crack_minute:'0',
       safe_crack_timeout_minutes: '1',
       safe_drum_speed_multiplier: '1',
+      safe_payout_multiplier: '1.5',
       project_start_date: '2026-01-01'
     };
     // Принудительно обновим min_bank/safe_min_bank на корректные (на случай если в БД остались старые значения $2/$5)

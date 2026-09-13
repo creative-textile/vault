@@ -103,3 +103,25 @@ export function securityTelemetry(req:Request,res:Response,next:NextFunction) {
   });
   next();
 }
+
+/**
+ * Лимитер для денежных эндпоинтов: СНАЧАЛА авторизация, затем счётчик по user_id.
+ *
+ * Прежние лимитеры стояли до auth, поэтому `clientKey` не видел `req.user` и
+ * ключевался заголовком `X-Device-Id` — его задаёт сам клиент. Любой
+ * пользователь снимал ограничение, просто сменив или убрав заголовок: защита от
+ * перебора депозитов, ставок и кода сейфа не работала. Публичные эндпоинты
+ * (/api/auth, /api/replay) остаются на device/IP-ключе — там пользователя нет.
+ */
+export function authedRateLimit(name: string, limit: number, windowSec: number) {
+  const limiter = rateLimit(name, limit, windowSec);
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!(req as any).user) {
+      const { auth } = await import('./auth');
+      await new Promise<void>(resolve => { auth(req, res, () => resolve()); });
+      // auth уже ответил 401/403 — дальше по цепочке идти нельзя
+      if (res.headersSent) return;
+    }
+    return limiter(req, res, next);
+  };
+}

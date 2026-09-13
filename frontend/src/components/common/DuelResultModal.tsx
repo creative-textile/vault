@@ -177,13 +177,13 @@ export default function DuelResultModal() {
     <div style={{
       // Фон глухой, без полупрозрачности: под окном может быть главная с
       // балансом в 48px, а суммарная цифра выдаёт исход непросмотренных дуэлей
-      position: 'fixed', inset: 0, background: '#05050c',
+      position: 'fixed', inset: 0, background: 'var(--bg)',
       zIndex: 2500, display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 16
     }}>
       <div style={{
-        background: '#12122a', borderRadius: 16, padding: 18, maxWidth: 400, width: '100%',
-        border: '2px solid #ffd700', textAlign: 'center',
+        background: 'var(--bg-2)', borderRadius: 16, padding: 18, maxWidth: 400, width: '100%',
+        border: '2px solid var(--gold)', textAlign: 'center',
         maxHeight: '88vh', display: 'flex', flexDirection: 'column'
       }}>
         <div style={{ fontSize: 34, marginBottom: 2 }}>⚔️</div>
@@ -208,7 +208,7 @@ export default function DuelResultModal() {
               : null;
             return (
               <div key={`${n.id}-${duelId}`} style={{
-                background: '#0d0d20', border: '1px solid #2a2a4a',
+                background: 'var(--bg-2)', border: '1px solid var(--bg-4)',
                 borderRadius: 12, padding: 12, textAlign: 'left'
               }}>
                 <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>

@@ -16,8 +16,13 @@ import { useEffect, useState } from 'react';
  */
 export interface RocketFlight {
   roundId: number;
-  /** Множитель, на котором раунд упадёт (клиент знает его с момента запуска). */
-  crashAt: number;
+  /**
+   * Множитель, на котором раунд упадёт. Сервер больше НЕ сообщает его до
+   * взрыва (иначе достаточно было открыть DevTools и всегда забирать выигрыш),
+   * поэтому значение появляется только вместе с событием `crash` или
+   * `cashout_result` — там оно нужно для анимации «призрака».
+   */
+  crashAt?: number;
   startedAt: number;
   /** Последний множитель из серверного тика. */
   multiplier: number;
@@ -31,8 +36,15 @@ function emit() {
   listeners.forEach(l => { try { l(current); } catch { /* подписчик не должен ронять полёт */ } });
 }
 
-export function setFlight(roundId: number, crashAt: number) {
+export function setFlight(roundId: number, crashAt?: number) {
   flight = { roundId, crashAt, startedAt: Date.now(), multiplier: 1 };
+  emit();
+}
+
+/** Точка взрыва становится известна, когда раунд уже закончился. */
+export function setFlightCrashAt(crashAt: number) {
+  if (!flight || !Number.isFinite(crashAt)) return;
+  flight = { ...flight, crashAt };
   emit();
 }
 

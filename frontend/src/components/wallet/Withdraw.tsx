@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import MoneyBreakdown from '../common/MoneyBreakdown';
 import Header from '../layout/Header';
 import { useAuth } from '../../stores/auth';
-import { walletApi } from '../../api/client';
+import { walletApi, publicConfig } from '../../api/client';
 
 export default function Withdraw() {
   const { user, refreshUser, showToast } = useAuth();
@@ -10,9 +10,16 @@ export default function Withdraw() {
   const [address, setAddress] = useState(user?.withdraw_address || '');
   const [pin, setPin] = useState(['', '', '', '']);
   const [loading, setLoading] = useState(false);
+  // Комиссия вывода — из настроек платформы (админка), а не захардкоженный 1%:
+  // иначе экран показывал одну сумму, а сервер списывал другую.
+  const [feePercent, setFeePercent] = useState(1);
+  useEffect(() => { publicConfig().then((c: any) => {
+    const p = Number(c?.withdraw_commission);
+    if (Number.isFinite(p) && p >= 0) setFeePercent(p);
+  }).catch(() => {}); }, []);
 
   const amt = parseFloat(amount) || 0;
-  const fee = Math.round(amt * 0.01 * 100) / 100;
+  const fee = Math.round(amt * (feePercent / 100) * 100) / 100;
   const payout = Math.round((amt - fee) * 100) / 100;
   const available = user?.available || 0;
 
@@ -30,13 +37,19 @@ export default function Withdraw() {
   const doWithdraw = async () => {
     if (amt < 5) return showToast('Минимум $5');
     if (amt > available) return showToast('Недостаточно средств');
-    if (!user?.pin_set && pin.join('') !== '0000') {
-      return showToast('Установите PIN в профиле (в демо: 0000)');
-    }
+    // PIN обязателен всегда: сервер больше не принимает «0000» вместо
+    // неустановленного PIN (раньше так можно было вывести деньги без PIN).
+    if (!user?.pin_set) return showToast('Сначала установите PIN-код в профиле');
+    if (!/^\d{4}$/.test(pin.join(''))) return showToast('Введите 4 цифры PIN-кода');
+    if (!address) return showToast('Укажите адрес для вывода');
     setLoading(true);
     try {
       const res = await walletApi.withdraw(amt, pin.join(''), address);
-      showToast(`📤 $${res.payout.toFixed(2)} отправлено!`);
+      // В реальном режиме выплата уходит оператору на отправку (status=pending),
+      // в демо — выполняется мгновенно. Сообщаем честно, что произошло.
+      showToast(res.status === 'pending'
+        ? `📤 Заявка #${res.withdrawal_id} на $${Number(res.payout).toFixed(2)} принята: деньги списаны, выплата будет отправлена оператором`
+        : `📤 $${Number(res.payout).toFixed(2)} отправлено!`);
       setAmount('');
       setPin(['','','','']);
       await refreshUser();
@@ -52,7 +65,7 @@ export default function Withdraw() {
 
       <div className="card text-center">
         <div className="balance-label">Доступно</div>
-        <div style={{fontSize:32, fontWeight:900, color:'#ffd700'}}>${available.toFixed(2)}</div>
+        <div style={{fontSize:32, fontWeight:900, color:'var(--gold)'}}>${available.toFixed(2)}</div>
         {/* Почему доступно меньше, чем на балансе */}
         <MoneyBreakdown />
       </div>
@@ -70,7 +83,7 @@ export default function Withdraw() {
           <span className="text-dim">Мин: $5</span>
           <button
             className="text-accent"
-            style={{background:'none', border:'none', color:'#ffd700', cursor:'pointer', fontWeight:700}}
+            style={{background:'none', border:'none', color:'var(--gold)', cursor:'pointer', fontWeight:700}}
             onClick={() => setAmount(String(Math.floor(available)))}
           >
             Вывести всё
@@ -92,7 +105,7 @@ export default function Withdraw() {
 
       <div className="card">
         <div style={{display:'flex', justifyContent:'space-between', fontSize:16}}>
-          <span className="text-dim">Комиссия (1%):</span>
+          <span className="text-dim">Комиссия ({feePercent}%):</span>
           <span>${fee.toFixed(2)}</span>
         </div>
         <div style={{display:'flex', justifyContent:'space-between', fontSize:20, fontWeight:900, marginTop:8}}>
@@ -118,9 +131,14 @@ export default function Withdraw() {
             />
           ))}
         </div>
-        {!user?.pin_set && (
+        {!user?.pin_set ? (
+          <div className="text-center" style={{fontSize:12}}>
+            <span className="text-red">PIN не установлен — вывод недоступен.</span>{' '}
+            <a href="/set-pin" style={{color:'var(--gold)'}}>Установить PIN</a>
+          </div>
+        ) : (
           <div className="text-dim text-center" style={{fontSize:12}}>
-            В демо используйте PIN 0000 или <a href="/set-pin" style={{color:'#ffd700'}}>установите свой</a>
+            5 неверных попыток блокируют вывод на 15 минут
           </div>
         )}
       </div>
@@ -128,7 +146,7 @@ export default function Withdraw() {
       <button
         className="btn btn-danger btn-big"
         onClick={doWithdraw}
-        disabled={loading || amt < 5 || amt > available}
+        disabled={loading || amt < 5 || amt > available || !user?.pin_set || !/^\d{4}$/.test(pin.join(''))}
       >
         {loading ? 'Обработка...' : '📤 ВЫВЕСТИ'}
       </button>

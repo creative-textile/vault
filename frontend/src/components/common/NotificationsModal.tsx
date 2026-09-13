@@ -98,8 +98,8 @@ export default function NotificationsModal() {
           onClick={handleOpen}
         >
           <div style={{
-            background: '#ffd700',
-            color: '#000',
+            background: 'var(--gold)',
+            color: 'var(--bg)',
             borderRadius: '50%',
             width: 50,
             height: 50,
@@ -116,8 +116,8 @@ export default function NotificationsModal() {
             position: 'absolute',
             top: -10,
             right: 55,
-            background: '#1a1a3a',
-            color: '#fff',
+            background: 'var(--bg-3)',
+            color: 'var(--text)',
             padding: '4px 8px',
             borderRadius: 4,
             fontSize: 12,
@@ -146,14 +146,14 @@ export default function NotificationsModal() {
           padding: 20
         }}>
           <div style={{
-            background: '#12122a',
+            background: 'var(--bg-2)',
             borderRadius: 16,
             padding: 24,
             maxWidth: 400,
             width: '100%',
             maxHeight: '80vh',
             overflowY: 'auto',
-            border: '2px solid #ffd700'
+            border: '2px solid var(--gold)'
           }}>
             <div style={{
               display: 'flex',
@@ -161,13 +161,13 @@ export default function NotificationsModal() {
               alignItems: 'center',
               marginBottom: 16
             }}>
-              <h2 style={{ color: '#ffd700', margin: 0, fontSize: 20 }}>⚔️ Уведомления</h2>
+              <h2 style={{ color: 'var(--gold)', margin: 0, fontSize: 20 }}>⚔️ Уведомления</h2>
               <button 
                 onClick={handleClose}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#fff',
+                  color: 'var(--text)',
                   fontSize: 24,
                   cursor: 'pointer'
                 }}
@@ -183,21 +183,21 @@ export default function NotificationsModal() {
             ) : (
               <>
                 {duelNotifications.length === 0 && otherNotifications.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 20, color: '#888' }}>
+                  <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-dim)' }}>
                     Нет новых уведомлений
                   </div>
                 ) : (
                   <>
                     {duelNotifications.length > 0 && (
                       <div style={{ marginBottom: 16 }}>
-                        <h3 style={{ color: '#fff', fontSize: 16, marginBottom: 8 }}>
+                        <h3 style={{ color: 'var(--text)', fontSize: 16, marginBottom: 8 }}>
                           🎲 Результаты дуэлей
                         </h3>
                         {duelNotifications.map((notification: Notification) => (
                           <div 
                             key={notification.id}
                             style={{
-                              background: '#1a1a3a',
+                              background: 'var(--bg-3)',
                               borderRadius: 8,
                               padding: 12,
                               marginBottom: 8,
@@ -208,22 +208,22 @@ export default function NotificationsModal() {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div>
-                                <div style={{ fontWeight: 'bold', color: '#fff' }}>
+                                <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                                   {notification.title}
                                 </div>
-                                <div style={{ color: '#ccc', fontSize: 14, marginTop: 4 }}>
+                                <div style={{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>
                                   {notification.message}
                                 </div>
                                 {notification.data?.prize && (
                                   // Нейтрально и без цвета победы: это банк за
                                   // вычетом комиссии, а не выигрыш игрока —
                                   // исход он узнаёт на экране дуэли
-                                  <div style={{ color: '#8888aa', fontSize: 12, marginTop: 4 }}>
+                                  <div style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 4 }}>
                                     Приз победителю: ${notification.data.prize.toFixed(2)}
                                   </div>
                                 )}
                               </div>
-                              <div style={{ color: '#ffd700', fontSize: 12 }}>
+                              <div style={{ color: 'var(--gold)', fontSize: 12 }}>
                                 ▶
                               </div>
                             </div>
@@ -234,23 +234,23 @@ export default function NotificationsModal() {
 
                     {otherNotifications.length > 0 && (
                       <div>
-                        <h3 style={{ color: '#fff', fontSize: 16, marginBottom: 8 }}>
+                        <h3 style={{ color: 'var(--text)', fontSize: 16, marginBottom: 8 }}>
                           📢 Другие уведомления
                         </h3>
                         {otherNotifications.map((notification: Notification) => (
                           <div 
                             key={notification.id}
                             style={{
-                              background: '#1a1a3a',
+                              background: 'var(--bg-3)',
                               borderRadius: 8,
                               padding: 12,
                               marginBottom: 8
                             }}
                           >
-                            <div style={{ fontWeight: 'bold', color: '#fff' }}>
+                            <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                               {notification.title}
                             </div>
-                            <div style={{ color: '#ccc', fontSize: 14, marginTop: 4 }}>
+                            <div style={{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>
                               {notification.message}
                             </div>
                             {notification.type==='duel_rematch' && <div style={{display:'flex',gap:8,marginTop:10}}>

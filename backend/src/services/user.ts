@@ -5,29 +5,77 @@ import { getSetting } from './revenue';
 import { config } from '../config';
 import { notifyPreferred } from './notifications';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+
+/** Максимальный возраст `auth_date` в initData, после которого вход отвергается. */
+const INIT_DATA_MAX_AGE_SEC = 24 * 60 * 60;
 
 /**
- * Telegram WebApp авторизация: верифицирует initData от ТГ, возвращает JWT.
- * В демо-режиме позволяет передавать telegram_id напрямую (для тестов).
+ * Проверка подписи Telegram WebApp initData по официальному алгоритму:
+ *   secret_key = HMAC_SHA256(key = "WebAppData", msg = BOT_TOKEN)
+ *   data_check_string = отсортированные "key=value" без поля hash, через "\n"
+ *   hash == HMAC_SHA256(key = secret_key, msg = data_check_string).hex
+ *
+ * Прежняя «верификация» просто читала `user` из query-строки, поэтому любой
+ * запрос вида `user={"id":<чужой id>}` входил в ЛЮБОЙ аккаунт: подписи не
+ * проверялось, BOT_TOKEN не использовался, `auth_date` игнорировался.
+ */
+export function verifyTelegramInitData(initData: string): { id: number; username: string | null } {
+  if (!config.botToken || config.botToken === 'demo_token') {
+    throw new Error('BOT_TOKEN не настроен: реальная авторизация Telegram невозможна');
+  }
+  const params = new URLSearchParams(initData);
+  const receivedHash = params.get('hash');
+  if (!receivedHash) throw new Error('Invalid Telegram initData');
+
+  params.delete('hash');
+  const dataCheckString = [...params.entries()]
+    .map(([k, v]) => `${k}=${v}`)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .join('\n');
+
+  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(config.botToken).digest();
+  const expected = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+  const a = Buffer.from(expected, 'hex');
+  const b = Buffer.from(receivedHash, 'hex');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    throw new Error('Invalid Telegram initData');
+  }
+
+  const authDate = parseInt(params.get('auth_date') || '0', 10);
+  if (!authDate || (Date.now() / 1000 - authDate) > INIT_DATA_MAX_AGE_SEC) {
+    throw new Error('Telegram initData устарел');
+  }
+
+  const userStr = params.get('user');
+  if (!userStr) throw new Error('Invalid Telegram initData');
+  let tgUser: any;
+  try { tgUser = JSON.parse(userStr); } catch { throw new Error('Invalid Telegram initData'); }
+  const telegramId = Number(tgUser.id);
+  if (!Number.isInteger(telegramId) || telegramId <= 0) throw new Error('Invalid Telegram initData');
+  return { id: telegramId, username: tgUser.username || tgUser.first_name || null };
+}
+
+/**
+ * Telegram WebApp авторизация: верифицирует initData, возвращает JWT.
+ * Вход по `demo:<id>` работает ТОЛЬКО при DEMO_MODE=true — в реальном режиме
+ * такой запрос отклоняется, иначе любой посетитель получал аккаунт с нужным
+ * telegram_id без единой проверки.
  */
 export async function authenticateTelegram(initData: string, refCode?: string) {
   let telegramId: number;
   let username: string | null = null;
 
-  if (config.demoMode && initData.startsWith('demo:')) {
+  if (initData.startsWith('demo:')) {
+    if (!config.demoMode) throw new Error('Демо-вход отключён');
     // demo:<telegram_id>[:<username>]
     const parts = initData.split(':');
-    telegramId = parseInt(parts[1]);
+    telegramId = parseInt(parts[1], 10);
+    if (!Number.isInteger(telegramId) || telegramId <= 0) throw new Error('Invalid demo initData');
     username = parts[2] || ('user' + telegramId);
   } else {
-    // Простая верификация для прод-режима — парсим initData
-    // (Полный алгоритм: проверка HMAC с bot_token по доке Telegram)
-    const params = new URLSearchParams(initData);
-    const userStr = params.get('user');
-    if (!userStr) throw new Error('Invalid Telegram initData');
-    const tgUser = JSON.parse(userStr);
-    telegramId = tgUser.id;
-    username = tgUser.username || tgUser.first_name || null;
+    ({ id: telegramId, username } = verifyTelegramInitData(initData));
   }
 
   let user = await getUserByTelegramId(telegramId);

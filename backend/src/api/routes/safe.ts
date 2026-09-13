@@ -5,7 +5,7 @@ import {
   getActiveSafe, getCollectingSafe, getLastFinishedSafe, safeDeposit, cancelSafeDeposit, submitCrackTime,
   getSafeResults, getUserSafeDeposit, getSafeById,
   getCrackWindowMs, getCrackRemainingMs, getPendingCracksCount,
-  getSpinLeadMs, getSpinStartInMs, SPIN_CODE_LEAD_MS
+  getSpinLeadMs, getSpinStartInMs, isCodeRevealed, getCodeRevealInMs, SPIN_CODE_LEAD_MS
 } from '../../services/safe';
 import { nextMSK, fmtMSK } from '../../utils/time';
 
@@ -47,6 +47,17 @@ router.get('/current', auth, async (req, res) => {
     // расхождения часов и для поправки на время доставки ответа.
     const spinLeadMs = isCracking ? await getSpinLeadMs(crackWindowMs ?? undefined) : null;
     const spinInMs = isCracking ? await getSpinStartInMs(safe!.id, crackWindowMs ?? undefined) : null;
+
+    // Код сейфа отдаётся только с момента «открытия» (за 3 с до общего старта
+    // вращения) и после завершения раунда. Прежняя версия возвращала код весь
+    // статус cracking, то есть за 6 секунд до старта барабанов: этого хватало,
+    // чтобы скриптом отправить результат на первой миллисекунде и забрать пул.
+    // `code_reveal_in_ms` нужен клиенту, чтобы запросить код ровно в момент
+    // открытия (опрос раз в 5 с мог бы опоздать к отсчёту 3-2-1).
+    const codeRevealed = safe ? await isCodeRevealed(safe, crackWindowMs ?? undefined) : false;
+    const codeRevealInMs = safe && isCracking && !codeRevealed
+      ? await getCodeRevealInMs(safe!.id, crackWindowMs ?? undefined)
+      : null;
 
     const collectingIsOther = !!collecting && collecting?.id !== safe?.id;
     const myCollectingDeposit = collectingIsOther
@@ -95,8 +106,10 @@ router.get('/current', auth, async (req, res) => {
         participants_count: safe.participants_count,
         winners_count: safe.winners_count,
         status: safe.status,
-        code: safe.status === 'cracking' || safe.status === 'finished' ? safe.code : null,
-        drum_speeds: safe.drum_speeds,
+        code: codeRevealed ? safe.code : null,
+        // Скорости барабанов без кода ничего не дают, но до розыгрыша это
+        // всё равно часть секрета: отдаём их вместе с кодом.
+        drum_speeds: codeRevealed ? safe.drum_speeds : null,
         date: safe.date,
         crack_at: crackAt.toISOString(),
         time_to_crack_ms: isCracking ? (crackRemainingMs ?? 0) : timeToCrack,
@@ -105,6 +118,7 @@ router.get('/current', auth, async (req, res) => {
         crack_spin_in_ms: spinInMs,
         crack_spin_lead_ms: spinLeadMs,
         crack_code_lead_ms: isCracking ? SPIN_CODE_LEAD_MS : null,
+        code_reveal_in_ms: codeRevealInMs,
         pending_cracks: pendingCracks
       } : null,
       my_deposit: myDeposit,
@@ -164,13 +178,21 @@ router.get('/results/:id', auth, async (req, res) => {
   }
 });
 
-// GET /api/safe/:id (replay)
-router.get('/:id', async (req, res) => {
+/**
+ * GET /api/safe/:id (replay)
+ *
+ * Требует авторизации и отдаёт только ЗАВЕРШЁННЫЕ сейфы. Прежде маршрут был
+ * публичным и возвращал строку `safes` целиком: код и скорости барабанов
+ * действующего раунда читались одним запросом `GET /api/safe/<id>` без токена
+ * (проверено: код сегодняшнего сейфа отдавался всем). Клиент этим эндпоинтом
+ * не пользуется — реплеи идут через /api/replay/safe/:id.
+ */
+router.get('/:id', auth, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) throw new Error('Некорректный ID сейфа');
     const safe = await getSafeById(id);
-    if (!safe) return res.status(404).json({ error: 'Не найдено' });
+    if (!safe || safe.status !== 'finished') return res.status(404).json({ error: 'Не найдено' });
     res.json(safe);
   } catch (e: any) {
     res.status(400).json({ error: e.message });

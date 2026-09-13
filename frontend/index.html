@@ -3,14 +3,92 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0a0a1a" />
-  <title>VAULT</title>
+  <meta name="theme-color" content="#05060f" />
+  <meta name="description" content="VAULT — игровая платформа: Ракета, Дуэль, Сейф и Вклад. Выплаты в USDT (TON)." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>VAULT — Ракета · Дуэль · Сейф · Вклад</title>
   <style>
-    html, body, #root { margin: 0; padding: 0; height: 100%; background: #0a0a1a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overscroll-behavior: none; }
+    html, body, #root {
+      margin: 0; padding: 0; height: 100%;
+      background: #05060f; color: #fff;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overscroll-behavior: none;
+    }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    /* ── Загрузочный экран рисуется до того, как React смонтируется ─────────
+       Первый кадр приложения должен быть «дорогим»: пустой белый прямоугольник
+       на 300 мс убивает впечатление сильнее, чем любая мелочь в интерфейсе.
+       Элемент удаляет main.tsx после монтирования (см. #vault-splash).       */
+    #vault-splash {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 22px;
+      background:
+        radial-gradient(90% 60% at 50% 0%, #1a1147 0%, rgba(26,17,71,0) 60%),
+        radial-gradient(70% 50% at 50% 100%, #062033 0%, rgba(6,32,51,0) 62%),
+        #05060f;
+      transition: opacity .42s ease, visibility .42s;
+    }
+    #vault-splash.is-hidden { opacity: 0; visibility: hidden; }
+
+    .splash__ring {
+      position: relative;
+      width: 96px; height: 96px;
+    }
+    .splash__ring::before, .splash__ring::after {
+      content: ''; position: absolute; inset: 0;
+      border-radius: 50%;
+      border: 2px solid transparent;
+    }
+    .splash__ring::before {
+      border-top-color: #f5c542;
+      border-right-color: rgba(245,197,66,.35);
+      animation: splash-ring 1.05s cubic-bezier(.5,.15,.5,.85) infinite;
+    }
+    .splash__ring::after {
+      inset: 12px;
+      border-bottom-color: #a855f7;
+      border-left-color: rgba(168,85,247,.35);
+      animation: splash-ring 1.6s cubic-bezier(.5,.15,.5,.85) infinite reverse;
+    }
+    .splash__core {
+      position: absolute; inset: 30px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 40% 34%, #fff3c4, #f5c542 46%, #8c5a06 100%);
+      box-shadow: 0 0 34px rgba(245,197,66,.6), inset 0 -3px 8px rgba(0,0,0,.45);
+      animation: splash-glow 1.9s ease-in-out infinite;
+    }
+    .splash__title {
+      font-family: 'Orbitron', 'Inter', sans-serif;
+      font-size: 26px; font-weight: 900; letter-spacing: .34em;
+      padding-left: .34em; /* компенсация letter-spacing для центрирования */
+      background: linear-gradient(135deg, #fff3c4 0%, #f5c542 45%, #b8860b 100%);
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent; -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 3px 16px rgba(245,197,66,.45));
+    }
+    .splash__sub {
+      font-size: 10px; letter-spacing: .3em; text-transform: uppercase;
+      color: #5f628a; margin-top: -14px;
+    }
+    @keyframes splash-ring { to { transform: rotate(360deg); } }
+    @keyframes splash-glow {
+      0%, 100% { opacity: .62; transform: scale(1); }
+      50%      { opacity: 1;   transform: scale(1.08); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .splash__ring::before, .splash__ring::after, .splash__core { animation: none; }
+    }
   </style>
 </head>
 <body>
+  <div id="vault-splash">
+    <div class="splash__ring"><div class="splash__core"></div></div>
+    <div class="splash__title">VAULT</div>
+    <div class="splash__sub">Хранилище азарта</div>
+  </div>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
 </body>

@@ -110,11 +110,17 @@ const DDL = [
      max_deposit DECIMAL DEFAULT 100, distributed_at TIMESTAMPTZ)`,
   `CREATE TABLE rocket_rounds (id SERIAL PRIMARY KEY, user_id INTEGER, bet DECIMAL NOT NULL, crash_at DECIMAL NOT NULL,
      cashout_at DECIMAL, profit DECIMAL DEFAULT 0, flight_curve DECIMAL DEFAULT 0.075,
-     was_beautiful BOOLEAN DEFAULT FALSE, replay_seed VARCHAR(64), started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
+     was_beautiful BOOLEAN DEFAULT FALSE, replay_seed VARCHAR(64), tick_started_at TIMESTAMPTZ,
+     started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE rocket_bankroll (id SERIAL PRIMARY KEY, amount DECIMAL DEFAULT 1500, updated_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE duels (id SERIAL PRIMARY KEY, creator_id INTEGER, opponent_id INTEGER, target_user_id INTEGER, parent_duel_id INTEGER, amount DECIMAL,
      status VARCHAR(16) DEFAULT 'waiting', result VARCHAR(8), winner_id INTEGER, coin_trajectory JSONB,
      created_at TIMESTAMP DEFAULT NOW(), finished_at TIMESTAMP)`,
+  `CREATE TABLE withdrawals (id SERIAL PRIMARY KEY, user_id INTEGER, amount DECIMAL NOT NULL, fee DECIMAL DEFAULT 0,
+     payout DECIMAL NOT NULL, address TEXT, status VARCHAR(16) DEFAULT 'pending', tx_hash TEXT, reject_reason TEXT,
+     created_at TIMESTAMPTZ DEFAULT NOW(), paid_at TIMESTAMPTZ)`,
+  `CREATE TABLE cashbox_transfers (id SERIAL PRIMARY KEY, from_source VARCHAR(32), to_source VARCHAR(32),
+     amount DECIMAL NOT NULL, note TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE user_notifications (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, type VARCHAR(50) NOT NULL,
      title VARCHAR(255) NOT NULL, message TEXT NOT NULL, data JSONB, is_read BOOLEAN DEFAULT FALSE,
      created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, related_entity_type VARCHAR(50), related_entity_id INTEGER,
@@ -162,6 +168,18 @@ const finish = () => {
     await query(`UPDATE safes SET collect_started_at = $1 WHERE id = $2`,
       [new Date(Date.now() - 3 * 3600 * 1000).toISOString(), collecting.id]);
     return collecting;
+  }
+
+  /**
+   * Сдвинуть отметку старта фазы взлома так, будто с её начала прошло elapsedMs.
+   *
+   * Результат принимается только ПОСЛЕ общего старта вращения (серверные часы),
+   * а код открывается за SPIN_CODE_LEAD_MS до него — тесты «прокручивают» фазу
+   * на нужное время вместо того, чтобы ждать 6 секунд в каждом режиме.
+   */
+  async function setCrackElapsed(safeId, elapsedMs) {
+    await query(`UPDATE safes SET crack_started_at = $1 WHERE id = $2`,
+      [new Date(Date.now() - elapsedMs).toISOString(), safeId]);
   }
 
   /** Моменты тапов, которые действительно дают цифры кода. */
@@ -237,7 +255,10 @@ const finish = () => {
       check(`раунд ${round}: следующий сейф уже собирает (#${next?.id}, ${String(next?.date).slice(0, 15)})`,
         !!next && next.id !== collecting.id, next && { id: next.id, date: next.date });
 
-      // Оба участника сдали → итоги досрочно, не дожидаясь конца окна
+      // Оба участника сдали → итоги досрочно, не дожидаясь конца окна.
+      // До общего старта вращения результат не принимается, поэтому фазу
+      // «прокручиваем» на разгон + 2 с; порядок сдачи сохраняется (alice раньше).
+      await setCrackElapsed(collecting.id, (await safeSvc.getSpinLeadMs()) + 2000);
       await safeSvc.submitCrackTime(1, 5000 + round * 10);
       await safeSvc.submitCrackTime(2, 9000 + round * 10);
       const done = await safeSvc.getSafeById(collecting.id);
@@ -317,8 +338,25 @@ const finish = () => {
     try { await safeSvc.submitCrackTime(4, 1000); } catch (e) { err = e.message; }
     check('игрок без вклада отклонён', typeof err === 'string' && /Нет вклада/.test(err), err);
 
-    // 2) Тапы с чужими цифрами отклоняются, и временем НЕ штрафуются
+    // 1b) До общего старта вращения результат не принимается НИ у кого.
+    // Именно здесь был эксплойт: фаза взлома длится 2 минуты, из них первые 6 с —
+    // обратный отсчёт, а результат, сданный на первой секунде, получал время
+    // ~0.5 с и гарантированное первое место (код при этом был виден заранее).
+    await setCrackElapsed(collecting.id, Math.round(spinLead / 2));
+    err = null;
+    try { await safeSvc.submitCrackTime(2, 500, tapsFor(safe, [10, 20, 30])); } catch (e) { err = e.message; }
+    check('до общего старта вращения результат отклонён',
+      typeof err === 'string' && /ещё не началось/i.test(err), err);
+    const notRecorded = await safeSvc.getUserSafeDeposit(collecting.id, 2);
+    check('отклонённый досрочный результат не записан', notRecorded.crack_time_ms == null, notRecorded);
+
+    // Дальше все проверки — после общего старта: «сейчас» на 500 мс позже
+    // последнего честного тапа (тапы остаются в пределах допуска на skew).
     const good = tapsFor(safe);
+    const maxGood = Math.max(...good);
+    await setCrackElapsed(collecting.id, spinLead + maxGood - 500);
+
+    // 2) Тапы с чужими цифрами отклоняются, и временем НЕ штрафуются
     const bad = good.map((t, i) => { let ms = t; do { ms += 1; } while (safeSvc.digitAt(safe.drum_speeds[i], ms) === safe.code[i]); return ms; });
     err = null;
     try { await safeSvc.submitCrackTime(3, 1500, bad); } catch (e) { err = e.message; }
@@ -327,26 +365,33 @@ const finish = () => {
     check('отклонённый результат не записан (можно попробовать снова)',
       afterReject.crack_time_ms == null, afterReject);
 
-    // 3) Правильные тапы: засчитано ровно max(taps), заявленное время не улучшает результат
-    const maxGood = Math.max(...good);
+    // 3) Правильные тапы: засчитано «разгон + max(taps)» — заявленное клиентом
+    //    время результат не улучшает (оно в ранжировании больше не участвует).
     const rBob = await safeSvc.submitCrackTime(2, 1000, good);
-    check('заявленные 1000 мс не прошли — засчитано по тапам', rBob.crack_time_ms === maxGood,
-      [rBob.crack_time_ms, maxGood]);
-    check('штрафа за промахи нет (время = max(taps), без +0.5 с)',
-      rBob.crack_time_ms === maxGood && !/500/.test(String(rBob.crack_time_ms)), rBob.crack_time_ms);
+    check('заявленные 1000 мс не прошли — засчитано разгон + max(taps)',
+      rBob.crack_time_ms === spinLead + maxGood, [rBob.crack_time_ms, spinLead + maxGood]);
+    check('засчитанное время не меньше реально прошедшего от старта вращения',
+      rBob.crack_time_ms >= spinLead + maxGood - 500, rBob.crack_time_ms);
 
     // 4) Повторная отправка не перезаписывает результат
     const again = await safeSvc.submitCrackTime(2, 4000, good);
     check('повтор → already_recorded, время прежнее',
-      again.already_recorded === true && again.crack_time_ms === maxGood, again);
+      again.already_recorded === true && again.crack_time_ms === spinLead + maxGood, again);
 
-    // 5) Мусор вместо тапов — считается только время клиента, но не лучше серверного
+    // 5) Мусор вместо тапов — засчитывается СЕРВЕРНОЕ время, заявленное клиентом
+    //    игнорируется. Фазу прокручиваем вперёд, чтобы carol сдала позже bob:
+    //    порядок мест теперь определяют серверные часы, а не присланные числа.
+    const carolElapsed = spinLead + maxGood + 30000;
+    await setCrackElapsed(collecting.id, carolElapsed);
     const rCarol = await safeSvc.submitCrackTime(3, 30000, 'не массив');
-    check('мусор вместо тапов принят (время клиента)', rCarol.recorded === true, rCarol);
+    check('мусор вместо тапов принят, но время — серверное, а не заявленные 30000',
+      rCarol.recorded === true
+        && rCarol.crack_time_ms !== 30000
+        && Math.abs(rCarol.crack_time_ms - carolElapsed) < 2000,
+      [rCarol.crack_time_ms, carolElapsed]);
 
     // 6) Окно закрылось — результат не принимается
-    await query(`UPDATE safes SET crack_started_at = $1 WHERE id = $2`,
-      [new Date(Date.now() - 10 * 60000).toISOString(), collecting.id]);
+    await setCrackElapsed(collecting.id, 10 * 60000);
     err = null;
     try { await safeSvc.submitCrackTime(1, 5000, tapsFor(safe, [1000, 2000, 3000])); } catch (e) { err = e.message; }
     check('после закрытия окна результат отклонён', typeof err === 'string' && /закрыто/i.test(err), err);
@@ -426,6 +471,35 @@ const finish = () => {
       { lead: r.json?.safe?.crack_spin_lead_ms, code: r.json?.safe?.crack_code_lead_ms });
     check('server_now в ответе — клиент правит расхождение своих часов',
       Math.abs(Number(r.json?.server_now) - Date.now()) < 5000, r.json?.server_now);
+
+    // ── Код сейфа открывается только за 3 с до общего старта вращения ──────
+    // Раньше /api/safe/current отдавал код и скорости барабанов весь статус
+    // cracking (включая 6 секунд обратного отсчёта), а результат принимался с
+    // первой миллисекунды фазы: скрипт читал код заранее и забирал весь пул.
+    check('до открытия кода: code и drum_speeds скрыты',
+      r.json?.safe?.code == null && r.json?.safe?.drum_speeds == null,
+      { code: r.json?.safe?.code, drums: r.json?.safe?.drum_speeds });
+    const codeLead = Number(r.json?.safe?.crack_code_lead_ms);
+    check('сервер сообщил, через сколько миллисекунд код откроется',
+      Number(r.json?.safe?.code_reveal_in_ms) > 0 && Number(r.json?.safe?.code_reveal_in_ms) <= codeLead + 500,
+      { reveal_in: r.json?.safe?.code_reveal_in_ms, codeLead });
+    const spinLeadHttp = Number(r.json?.safe?.crack_spin_lead_ms);
+    await setCrackElapsed(collecting.id, spinLeadHttp - codeLead + 200);
+    r = await call('GET', '/api/safe/current');
+    check('в момент открытия код и скорости барабанов видны',
+      r.json?.safe?.code?.length === 3 && r.json?.safe?.drum_speeds?.length === 3,
+      { code: r.json?.safe?.code, drums: r.json?.safe?.drum_speeds });
+    check('после открытия code_reveal_in_ms = 0', Number(r.json?.safe?.code_reveal_in_ms) === 0,
+      r.json?.safe?.code_reveal_in_ms);
+
+    // До общего старта вращения результат не принимается (эксплойт «сдать на 1-й секунде»)
+    global.__STUB_USER__ = { id: 1, role: 'admin', username: 'alice' };
+    r = await call('POST', '/api/safe/crack', { time_ms: 500, taps: [10, 20, 30] });
+    check('до общего старта вращения сервер отклоняет результат',
+      r.status === 400 && /ещё не началось/i.test(r.json?.error || ''), [r.status, r.json]);
+
+    // «Прокручиваем» фазу за общий старт — дальше барабаны уже крутятся
+    await setCrackElapsed(collecting.id, spinLeadHttp + 16000);
 
     // Два «игрока» опрашивают сервер в разные моменты — абсолютный старт один и тот же
     const rA = await call('GET', '/api/safe/current'); const tA = Date.now();
@@ -949,6 +1023,115 @@ const finish = () => {
     check('транзакция возврата при отмене одна', Number(refundTx.c) === 1, refundTx.c);
     check('отменённый раунд не держит деньги: safe_locked 0',
       (await getBalanceSnapshot(2)).safe_locked === 0, await getBalanceSnapshot(2));
+
+    // ── Дуэль: два одновременных «Отменить вызов» ────────────────────────
+    // Гонка воспроизводилась на реальном PostgreSQL: обе транзакции читали
+    // status='waiting' до того, как первая его меняла, и размораживали ставку
+    // дважды — доступный баланс завышался на сумму вызова.
+    const duelSvc = require(path.join(BACKEND, 'src/services/duel.ts'));
+    await query(`INSERT INTO users (telegram_id, username, balance) VALUES (9001,'duelist',1000)`);
+    const duelist = Number((await query(`SELECT id FROM users WHERE telegram_id = 9001`)).rows[0].id);
+    const made = await duelSvc.createDuel(duelist, 100);
+    const frozenAfterCreate = Number((await query(`SELECT frozen_balance FROM users WHERE id = $1`, [duelist])).rows[0].frozen_balance);
+    check('вызов заморозил ставку один раз (100)', close(frozenAfterCreate, 100), frozenAfterCreate);
+    const duelCancels = await Promise.all([
+      duelSvc.cancelDuel(made.duel_id, duelist).then(() => 'ok').catch(e => e.message),
+      duelSvc.cancelDuel(made.duel_id, duelist).then(() => 'ok').catch(e => e.message)
+    ]);
+    check('два одновременных «Отменить»: сработал один',
+      duelCancels.filter(x => x === 'ok').length === 1, duelCancels);
+    const frozenAfterCancel = Number((await query(`SELECT frozen_balance FROM users WHERE id = $1`, [duelist])).rows[0].frozen_balance);
+    check('заморозка снята один раз (0, а не -100)', close(frozenAfterCancel, 0), frozenAfterCancel);
+    check('баланс игрока не изменился (ставка не списывалась и не «удвоилась»)',
+      close(await bal(duelist), 1000), await bal(duelist));
+
+    // Адресный реванш виден в лобби только адресату и создателю
+    await query(`INSERT INTO users (telegram_id, username, balance) VALUES (9002,'rival',1000)`);
+    const rival = Number((await query(`SELECT id FROM users WHERE telegram_id = 9002`)).rows[0].id);
+    await query(`INSERT INTO duels (creator_id, amount, status, target_user_id) VALUES ($1, 50, 'waiting', $2)`, [duelist, rival]);
+    const lobbyRival = await duelSvc.getLobby(rival);
+    const lobbyStranger = await duelSvc.getLobby(777);
+    const lobbyAnon = await duelSvc.getLobby();
+    check('адресный реванш виден адресату', lobbyRival.some(d => Number(d.target_user_id) === rival), lobbyRival);
+    check('адресный реванш НЕ виден постороннему', !lobbyStranger.some(d => d.target_user_id != null), lobbyStranger);
+    check('анонимное лобби: только открытые вызовы', !lobbyAnon.some(d => d.target_user_id != null), lobbyAnon);
+    check('создатель видит свой вызов (чтобы отменить)', (await duelSvc.getLobby(duelist)).some(d => Number(d.creator_id) === duelist),
+      (await duelSvc.getLobby(duelist)).map(d => d.creator_id));
+
+    // ── Вклад: два одновременных «Разблокировать досрочно» ───────────────
+    const vaultSvc = require(path.join(BACKEND, 'src/services/vault-deposit.ts'));
+    await query(`INSERT INTO users (telegram_id, username, balance) VALUES (9003,'saver',1000)`);
+    const saver = Number((await query(`SELECT id FROM users WHERE telegram_id = 9003`)).rows[0].id);
+    // Сумма — в пределах дневного лимита (vault_max_floor = 100 в настройках теста)
+    const locked = await vaultSvc.lockVaultDeposit(saver, 100, 7);
+    check('вклад открыт и списан один раз', close(await bal(saver), 900), await bal(saver));
+    const unlocks = await Promise.all([
+      vaultSvc.earlyUnlock(saver, locked.deposit_id).then(() => 'ok').catch(e => e.message),
+      vaultSvc.earlyUnlock(saver, locked.deposit_id).then(() => 'ok').catch(e => e.message)
+    ]);
+    check('два одновременных досрочных разлока: сработал один',
+      unlocks.filter(x => x === 'ok').length === 1, unlocks);
+    check('тело вклада вернулось один раз (1000, а не 1100)', close(await bal(saver), 1000), await bal(saver));
+    const returnTx = (await query(
+      `SELECT COUNT(*)::int AS c FROM transactions WHERE user_id = $1 AND type = 'vault_return'`, [saver])).rows[0];
+    check('транзакция возврата тела одна', Number(returnTx.c) === 1, returnTx.c);
+
+    // ── Ракета: точка взрыва не покидает сервер до завершения раунда ─────
+    const liveRound = await rocketSvc.placeBet(1, 50);
+    check('в ответе /start нет crash_at', liveRound.crash_at === undefined, Object.keys(liveRound));
+    check('в ответе /start есть round_id и replay_seed',
+      Number.isInteger(liveRound.round_id) && typeof liveRound.replay_seed === 'string', liveRound);
+    const liveHistory = await rocketSvc.getRocketHistory(50);
+    check('незавершённый раунд не попадает в публичную историю',
+      !liveHistory.some(h => h.round_id === liveRound.round_id), liveHistory.map(h => h.round_id));
+    const { getReplay } = require(path.join(BACKEND, 'src/services/replay.ts'));
+    check('реплей незавершённого раунда не отдаёт crash_at',
+      (await getReplay('rocket', liveRound.round_id)) === null, await getReplay('rocket', liveRound.round_id));
+
+    // Кэшаут без локального интервала: время берётся из tick_started_at (БД),
+    // поэтому раунд, запущенный на другом экземпляре backend, тоже можно забрать
+    await query(`UPDATE rocket_rounds SET crash_at = 50, tick_started_at = $1 WHERE id = $2`,
+      [new Date(Date.now() - 4000).toISOString(), liveRound.round_id]);
+    const remoteCashout = await rocketSvc.processCashout(liveRound.round_id, 1);
+    check('кэшаут по серверному якорю из БД прошёл', remoteCashout.result === 'win', remoteCashout);
+    check('множитель посчитан от tick_started_at (≈ e^(0.075×4) = 1.35)',
+      remoteCashout.cashout_at > 1.25 && remoteCashout.cashout_at < 1.5, remoteCashout.cashout_at);
+    check('реплей завершённого раунда доступен', (await getReplay('rocket', liveRound.round_id)) !== null, null);
+    check('завершённый раунд виден в истории',
+      (await rocketSvc.getRocketHistory(50)).some(h => h.round_id === liveRound.round_id), null);
+
+    // Зависший раунд (рестарт процесса в середине полёта) дорасчитывает cron
+    const staleRound = await rocketSvc.placeBet(1, 50);
+    await query(`UPDATE rocket_rounds SET tick_started_at = $1 WHERE id = $2`,
+      [new Date(Date.now() - (rocketSvc.STALE_ROUND_GRACE_SEC + 60) * 1000).toISOString(), staleRound.round_id]);
+    const settled = await rocketSvc.settleStaleRounds();
+    check('зависший раунд закрыт как проигрыш', settled >= 1, settled);
+    const staleRow = (await query(`SELECT profit, bet FROM rocket_rounds WHERE id = $1`, [staleRound.round_id])).rows[0];
+    check('profit = -bet (ставка сгорела, crash_at больше не «живой»)',
+      close(Number(staleRow.profit), -Number(staleRow.bet)), staleRow);
+    check('дорасчитанный раунд не отдаёт crash_at в реплее… но попадает в историю как проигрыш',
+      (await rocketSvc.getRocketHistory(50)).some(h => h.round_id === staleRound.round_id && h.cashout_at === null), null);
+
+    // ── Демо-пополнение: вне демо-режима денег не печатает ───────────────
+    const tonSvc = require(path.join(BACKEND, 'src/services/ton.ts'));
+    const { config: appConfig } = require(path.join(BACKEND, 'src/config.ts'));
+    const beforeDemo = await bal(1);
+    appConfig.demoMode = false;
+    let demoErr = null;
+    try { await tonSvc.demoDeposit(1, 1000000); } catch (e) { demoErr = e.message; }
+    check('вне демо-режима demo-deposit отклонён',
+      typeof demoErr === 'string' && /отключено/i.test(demoErr), demoErr);
+    check('вне демо-режима баланс не изменился', close(await bal(1), beforeDemo), [await bal(1), beforeDemo]);
+    appConfig.demoMode = true;
+    let capErr = null;
+    try { await tonSvc.demoDeposit(1, 10_000_000); } catch (e) { capErr = e.message; }
+    check('в демо действует потолок суммы (10 млн больше не начисляется)',
+      typeof capErr === 'string' && /Максимум/.test(capErr), capErr);
+    const demo = await tonSvc.demoDeposit(1, 100);
+    check('демо-пополнение в демо-режиме работает и пишется типом demo_deposit',
+      close(demo.balance, beforeDemo + 100)
+        && Number((await query(`SELECT COUNT(*)::int AS c FROM transactions WHERE user_id = 1 AND type = 'demo_deposit'`)).rows[0].c) === 1,
+      demo.balance);
 
     // 100 000 воспроизводимых раундов: фиксированный cashout x2 должен дать
     // RTP около 90%, то есть фактический house edge около 10%.

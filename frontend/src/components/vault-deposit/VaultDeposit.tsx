@@ -87,7 +87,7 @@ export default function VaultDeposit() {
       {active ? (
         <>
           <div className="card card-hl text-center">
-            <div className="card-title" style={{fontSize:20, color:'#a855f7'}}>💎 АКТИВЕН</div>
+            <div className="card-title" style={{fontSize:20, color:'var(--violet)'}}>💎 АКТИВЕН</div>
             <div style={{fontSize:22, fontWeight:900}}>
               🔒 ${fmt(active.amount)} на {active.term_days} дней (×{active.multiplier})
             </div>
@@ -96,7 +96,7 @@ export default function VaultDeposit() {
 
           <div className="card text-center">
             <div className="balance-label">Накоплено</div>
-            <div style={{fontSize:36, fontWeight:900, color:'#ffd700'}}>${fmt(active.accumulated_profit)}</div>
+            <div style={{fontSize:36, fontWeight:900, color:'var(--gold)'}}>${fmt(active.accumulated_profit)}</div>
             <div className="progress">
               <div className="progress-fill" style={{width: `${(active.days_elapsed / active.term_days) * 100}%`}} />
             </div>
@@ -129,7 +129,7 @@ export default function VaultDeposit() {
           <div className="card text-center">
             <div style={{fontSize:16}}>Зарабатывайте с оборота платформы каждый день.</div>
             <div style={{fontSize:14}} className="text-dim">Тело вклада возвращается всегда.</div>
-            <div className="mt" style={{fontSize:20, fontWeight:900, color:'#a855f7'}}>
+            <div className="mt" style={{fontSize:20, fontWeight:900, color:'var(--violet)'}}>
               📊 Вчера: {baseRate.toFixed(1)}% (базовая)
             </div>
           </div>
@@ -170,7 +170,7 @@ export default function VaultDeposit() {
             При досрочном выходе тело возвращается 100%, доход сгорает.
           </div>
 
-          <button className="btn btn-big" onClick={lock} style={{background:'#a855f7', color:'#fff'}}>
+          <button className="btn btn-big" onClick={lock} style={{background:'var(--violet)', color:'var(--text)'}}>
             🔒 ЗАБЛОКИРОВАТЬ ${parseFloat(amount||'0').toFixed(0)} НА {selectedTerm} {selectedTerm === 1 ? 'ДЕНЬ' : 'ДНЕЙ'}
           </button>
         </>

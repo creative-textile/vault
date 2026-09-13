@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { sfx } from '../../audio';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
 import { vaultApi, safeApi } from '../../api/client';
@@ -86,27 +87,33 @@ export default function Home() {
   return (
     <>
       <div className="topbar">
-        <div className="logo">VAULT</div>
-        <Link to="/profile" style={{color:'#fff', textDecoration:'none', fontSize:24}}>⚙️</Link>
+        <div className="logo">VAULT<span className="logo-sub">ХРАНИЛИЩЕ</span></div>
+        <Link to="/profile" onClick={() => sfx.tapSoft()} style={{color:'var(--text)', textDecoration:'none', fontSize:24}}>⚙️</Link>
       </div>
 
       <div className="balance-block">
         <div className="balance-label">БАЛАНС</div>
         <div className="balance-amount">${fmt(available)}</div>
-        {(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))>0&&<div className="text-dim" style={{fontSize:13}}>❄️ Заморожено: ${fmt(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))}</div>}
+        {(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))>0&&(
+          <div className="balance-sub">
+            ❄️ <span className="balance-frozen" style={{ color: 'inherit' }}>
+              Заморожено: ${fmt(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="btn-row">
-        <Link to="/deposit" className="btn btn-secondary">📥 Пополнить</Link>
-        <Link to="/withdraw" className="btn btn-secondary">📤 Вывести</Link>
+        <Link to="/deposit" className="btn btn-secondary" onClick={() => sfx.tap()}>📥 Пополнить</Link>
+        <Link to="/withdraw" className="btn btn-secondary" onClick={() => sfx.tap()}>📤 Вывести</Link>
       </div>
 
       {/* Vault Вклад */}
-      <div className="vault-card" onClick={() => nav('/vault')} style={{cursor:'pointer'}}>
+      <div className="vault-card" onClick={() => { sfx.transition(); nav('/vault'); }} style={{cursor:'pointer'}}>
         {activeDeposit ? (
           <>
             <div style={{display:'flex', justifyContent:'center', alignItems:'center', gap:10}}>
-              <div className="card-title" style={{color:'#c084fc', margin:0}}>💎 Вклад АКТИВЕН</div>
+              <div className="card-title" style={{color:'var(--violet-hi)', margin:0}}>💎 Вклад АКТИВЕН</div>
               <span className="pill pill-active">×{activeDeposit.multiplier}</span>
             </div>
             <div style={{margin:'8px 0'}}>🔒 ${fmt(activeDeposit.amount)} · {activeDeposit.term_days} дн.</div>
@@ -120,44 +127,62 @@ export default function Home() {
           </>
         ) : (
           <>
-            <div className="card-title" style={{color:'#c084fc', marginBottom:4}}>💎 Vault Вклад</div>
+            <div className="card-title" style={{color:'var(--violet-hi)', marginBottom:4}}>💎 Vault Вклад</div>
             <div style={{fontSize:13}}>1–30 дней · до ×2.0 доли прибыли</div>
-            <div style={{fontSize:15, fontWeight:900, color:'#ffd700', margin:'4px 0'}}>
+            <div style={{fontSize:15, fontWeight:900, color:'var(--gold)', margin:'4px 0'}}>
               Пул сегодня: ${pendingPool.toFixed(2)}
             </div>
             <div className="text-dim" style={{fontSize:12}}>Вчера: {baseRate.toFixed(1)}% · макс. вклад ${vaultStatus?.pool_info?.max_deposit || 100}</div>
-            <div style={{marginTop:10}}><button className="btn btn-small" style={{background:'#c084fc', color:'#fff'}}>ОТКРЫТЬ ВКЛАД</button></div>
+            <div style={{marginTop:10}}><button className="btn btn-small" style={{background:'var(--violet-hi)', color:'var(--text)'}}>ОТКРЫТЬ ВКЛАД</button></div>
           </>
         )}
       </div>
 
       {/* Игры */}
       <div className="game-grid">
-        <Link to="/rocket" className="game-tile">
+        {/* tile-* задаёт --tile-glow/--tile-edge: у каждой игры свой цвет
+            свечения, поэтому витрина читается как набор разных залов, а не
+            четыре одинаковые кнопки. Бейджи — фактические цифры из правил игр,
+            не выдуманные «HOT». */}
+        <Link to="/rocket" className="game-tile tile-rocket" onClick={() => sfx.transition()}>
+          <span className="tile-badge tile-badge--gold">до ×90</span>
           <div className="game-icon">🚀</div>
           <div className="game-name">Ракета</div>
-          <div className="text-dim" style={{fontSize:11, marginTop:4}}>мин. $1 · до ×90</div>
+          <div className="game-sub">мин. $1 · забери до взрыва</div>
         </Link>
-        <Link to="/duel" className="game-tile">
+        <Link to="/duel" className="game-tile tile-duel" onClick={() => sfx.transition()}>
+          <span className="tile-badge">PvP 50/50</span>
           <div className="game-icon">⚔️</div>
           <div className="game-name">Дуэль</div>
-          <div className="text-dim" style={{fontSize:11, marginTop:4}}>мин. $1 · PvP 50/50</div>
+          <div className="game-sub">мин. $1 · орёл или решка</div>
         </Link>
       </div>
 
       {/* Короткий статус; внесение и детали — одно действие на экране Сейфа. */}
-      <div className="card" onClick={() => nav('/safe')} style={{cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-        <div><b>🔒 Сейф #{collect?.id || '—'}</b><div className="text-dim" style={{fontSize:12}}>{safe?.status==='cracking'?`🔥 Взлом · ${timeToStr(timeToCrack)}`:collect?.status==='collecting'?`${timeToStr(collectTimeToCrack)} · банк $${fmt(collect.bank)}`:'Подготовка'}</div></div>
+      <div className="card" onClick={() => { sfx.transition(); nav('/safe'); }} style={{cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+        <div>
+          <b>🔒 Сейф #{collect?.id || '—'}</b>
+          <div className="text-dim" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Пульсирующая точка — взлом идёт прямо сейчас: это действие
+                ограничено по времени, и его нельзя пропустить */}
+            {safe?.status === 'cracking' && <span className="live-dot" style={{ color: 'var(--red)' }} />}
+            {safe?.status==='cracking'
+              ? <span style={{ color: 'var(--red)', fontWeight: 700 }}>Взлом · {timeToStr(timeToCrack)}</span>
+              : collect?.status==='collecting'
+                ? <>{timeToStr(collectTimeToCrack)} · банк ${fmt(collect.bank)}</>
+                : <>Подготовка</>}
+          </div>
+        </div>
         <span className="text-accent" style={{whiteSpace:'nowrap'}}>Открыть →</span>
       </div>
 
       {/* Нижнее меню */}
       <div className="game-grid">
-        <Link to="/referral" className="game-tile" style={{padding: '12px'}}>
+        <Link to="/referral" className="game-tile tile-ref" style={{padding: '12px'}} onClick={() => sfx.tapSoft()}>
           <div className="game-icon" style={{fontSize:32}}>👥</div>
           <div className="game-name" style={{fontSize:14}}>Рефералы</div>
         </Link>
-        <Link to="/stats" className="game-tile" style={{padding: '12px'}}>
+        <Link to="/stats" className="game-tile tile-stats" style={{padding: '12px'}} onClick={() => sfx.tapSoft()}>
           <div className="game-icon" style={{fontSize:32}}>📊</div>
           <div className="game-name" style={{fontSize:14}}>Статистика</div>
         </Link>

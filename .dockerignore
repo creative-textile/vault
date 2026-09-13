@@ -1,0 +1,11 @@
+# Контекст сборки db-образа — корень репозитория, поэтому исключаем всё тяжёлое
+# и локальное. Без этого docker build отправляет демонy сотни МБ node_modules.
+.git
+.github
+**/node_modules
+**/dist
+**/coverage
+.env
+*.log
+pgdata
+.DS_Store

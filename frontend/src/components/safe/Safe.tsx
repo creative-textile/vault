@@ -5,6 +5,7 @@ import Header from '../layout/Header';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import { sfx } from '../../audio';
 import { onSafeEvent } from '../../utils/socketEvents';
 import { tabStore, resultSeenKey } from '../../utils/tabStore';
 
@@ -34,12 +35,12 @@ function outcomeOf(amount: number, prize: number, crackTimeMs: number | null | u
   const net = Math.round(((Number(prize) || 0) - (Number(amount) || 0)) * 100) / 100;
   if (!(prize > 0)) {
     return crackTimeMs == null
-      ? { key: 'late', icon: '⏱', title: 'НЕ УСПЕЛИ', color: '#ef4444', net }
-      : { key: 'lose', icon: '❌', title: 'ПОРАЖЕНИЕ', color: '#ef4444', net };
+      ? { key: 'late', icon: '⏱', title: 'НЕ УСПЕЛИ', color: 'var(--red)', net }
+      : { key: 'lose', icon: '❌', title: 'ПОРАЖЕНИЕ', color: 'var(--red)', net };
   }
-  if (net > 0) return { key: 'win', icon: '🏆', title: 'ПОБЕДА', color: '#22c55e', net };
-  if (net === 0) return { key: 'even', icon: '⚖️', title: 'В НОЛЬ', color: '#38bdf8', net };
-  return { key: 'partial', icon: '⚠️', title: 'ЧАСТИЧНЫЙ ПРИЗ', color: '#f59e0b', net };
+  if (net > 0) return { key: 'win', icon: '🏆', title: 'ПОБЕДА', color: 'var(--green)', net };
+  if (net === 0) return { key: 'even', icon: '⚖️', title: 'В НОЛЬ', color: 'var(--cyan)', net };
+  return { key: 'partial', icon: '⚠️', title: 'ЧАСТИЧНЫЙ ПРИЗ', color: 'var(--accent-2)', net };
 }
 
 /** «+$12.50» / «−$11.00» / «±$0.00» — прибыль или убыток относительно вклада. */
@@ -177,14 +178,18 @@ export default function Safe() {
 
   const deposit = async () => {
     const a = parseFloat(amount);
-    if (!a || a < minBet) return showToast(`Минимум $${minBet}`);
+    if (!a || a < minBet) { sfx.error(); return showToast(`Минимум $${minBet}`); }
     try {
       const r: any = await safeApi.deposit(a);
       const target = r?.safe_id ?? collect?.id;
+      // Деньги ушли в сейф: звон монет и подтверждение
+      sfx.deposit();
+      sfx.money();
       showToast(`✅ $${a.toFixed(2)} внесено в СЕЙФ #${target}`);
       await refreshUser();
       load();
     } catch (e: any) {
+      sfx.error();
       showToast(e.message);
     }
   };
@@ -193,10 +198,12 @@ export default function Safe() {
     if (!confirm('Вернуть вклад? Призовой фонд будет уменьшен.')) return;
     try {
       const r: any = await safeApi.cancel();
+      sfx.refund();
       showToast(`💸 $${fmt(r?.returned || 0)} возвращено (СЕЙФ #${r?.safe_id ?? collect?.id})`);
       await refreshUser();
       load();
     } catch (e: any) {
+      sfx.error();
       showToast(e.message);
     }
   };
@@ -220,7 +227,7 @@ export default function Safe() {
       <div className="card-title">{collectDeposit ? 'Добавить ещё' : 'Внести'}</div>
       <input type="number" className="input" value={amount} onChange={e => setAmount(e.target.value)} min={1} />
       <div className="bet-chips">
-        {CHIPS_DEFAULTS.filter(x => x >= minBet).map(c => <div key={c} className="chip" onClick={() => setAmount(String(c))}>${c}</div>)}
+        {CHIPS_DEFAULTS.filter(x => x >= minBet).map(c => <div key={c} className="chip" onClick={() => { sfx.chip(); setAmount(String(c)); }}>${c}</div>)}
       </div>
       <button className="btn btn-big btn-green" onClick={deposit}>
         💰 {collectDeposit ? 'ДОБАВИТЬ' : 'ВНЕСТИ'} ${(parseFloat(amount) || 0).toFixed(0)}
@@ -258,10 +265,10 @@ export default function Safe() {
           Карточка нужна тем, кто уже сдал результат, кто в этом раунде не
           участвовал, и как запасной вход для того, кто вышел из игры сам. */}
       {isCracking && (
-        <div className="card" style={{ border: '1px solid #ef4444', background: 'rgba(255,68,68,0.08)', padding: '10px 12px' }}>
+        <div className="card" style={{ border: '1px solid var(--red)', background: 'rgba(255,68,68,0.08)', padding: '10px 12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
             <div style={{ fontWeight: 900, fontSize: 15 }}>🔥 СЕЙФ #{safe.id} — ИДЁТ ВЗЛОМ</div>
-            <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: 'nowrap', color: crackTime < 15000 ? '#ef4444' : undefined }}>
+            <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: 'nowrap', color: crackTime < 15000 ? 'var(--red)' : undefined }}>
               {crackTime > 0 ? `⏱ ${timeToStr(crackTime)}` : '⏳ подводим итоги…'}
             </div>
           </div>
@@ -437,7 +444,7 @@ export default function Safe() {
                       return (
                         <div key={i} className="history-item" style={{
                           fontSize: 13,
-                          color: isMe ? '#ffd700' : o.color,
+                          color: isMe ? 'var(--gold)' : o.color,
                           background: isMe ? 'rgba(255,215,0,0.08)' : undefined,
                           borderRadius: 6,
                           padding: '6px 4px'

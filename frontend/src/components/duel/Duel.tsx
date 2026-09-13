@@ -6,6 +6,7 @@ import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import { sfx } from '../../audio';
 import { setDuelAccepting } from '../../utils/duelTransition';
 
 interface LobbyItem {
@@ -56,10 +57,13 @@ export default function Duel() {
 
   const create = async () => {
     const a = parseFloat(amount);
-    if (!a || a < minBet) return showToast(`Мин. ставка $${minBet}`);
+    if (!a || a < minBet) { sfx.error(); return showToast(`Мин. ставка $${minBet}`); }
     setCreating(true);
     try {
       await duelApi.create(a);
+      // Вызов брошен: фишка на стол и скрещивание клинков
+      sfx.betPlace();
+      sfx.sword();
       showToast('✅ Вызов создан — ждите соперника');
       await refreshUser();
       load();
@@ -77,6 +81,7 @@ export default function Duel() {
     setDuelAccepting(true);
     try {
       const result = await duelApi.accept(id);
+      sfx.sword();
       // Ответ уже самодостаточен: переходим к броску сразу. Ожидание profile GET
       // оставляло лобби видимым и успевало на мгновение показать result modal.
       nav(`/duel/${id}`, { state: { result: { ...result, id } }, replace: true });
@@ -94,6 +99,7 @@ export default function Duel() {
   const cancel = async (id: number) => {
     try {
       await duelApi.cancel(id);
+      sfx.tapSoft();
       await refreshUser();
       showToast('Вызов отменён');
       load();
@@ -103,7 +109,7 @@ export default function Duel() {
   };
 
   const decline = async(id:number) => {
-    try { await duelApi.decline(id); showToast('Реванш отклонён'); load(); }
+    try { await duelApi.decline(id); sfx.tapSoft(); showToast('Реванш отклонён'); load(); }
     catch(e:any) { showToast(e.message); }
   };
 
@@ -132,7 +138,7 @@ export default function Duel() {
         <input type="number" className="input" value={amount} onChange={e => setAmount(e.target.value)} min={1} />
         <div className="bet-chips">
           {CHIPS_DEFAULTS.filter(x => x >= minBet).slice(0,6).map(c => (
-            <div key={c} className="chip" onClick={() => setAmount(String(c))}>${c}</div>
+            <div key={c} className="chip" onClick={() => { sfx.chip(); setAmount(String(c)); }}>${c}</div>
           ))}
         </div>
         <div className="text-dim text-center" style={{fontSize:13}}>Победитель получает 90% · Мин. ${minBet}</div>

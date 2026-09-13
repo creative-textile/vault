@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Header from '../layout/Header';
 import { adminApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -11,7 +11,7 @@ function todayISO(offset = 0) {
   return d.toISOString().slice(0, 10);
 }
 
-type Tab = 'overview' | 'cashboxes' | 'settings' | 'users' | 'tx' | 'antifraud';
+type Tab = 'overview' | 'cashboxes' | 'settings' | 'users' | 'tx' | 'payouts' | 'antifraud';
 
 export default function AdminPanel() {
   const { showToast } = useAuth();
@@ -36,6 +36,10 @@ export default function AdminPanel() {
   const [txFilter, setTxFilter] = useState<any>({ type: '', from: '', to: '', userId: '' });
   const [txs, setTxs] = useState<any[]>([]);
   const [fraud, setFraud] = useState<any[]>([]);
+  // Заявки на вывод: в реальном режиме сервер не отправляет TON сам — он
+  // списывает деньги и создаёт заявку pending, а оператор вносит tx_hash.
+  const [payouts, setPayouts] = useState<any[]>([]);
+  const [payoutFilter, setPayoutFilter] = useState<'pending' | 'paid' | 'rejected' | ''>('pending');
   const [reconciliation, setReconciliation] = useState<any>(null);
 
   const loadStats = async () => {
@@ -73,6 +77,12 @@ export default function AdminPanel() {
   useEffect(() => { loadSettings(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { loadUsers(); /* eslint-disable-next-line */ }, [userSearch]);
   useEffect(() => { adminApi.antifraud().then(setFraud).catch(()=>{}); }, []);
+
+  const loadPayouts = useCallback(async () => {
+    try { setPayouts(await adminApi.withdrawals(payoutFilter || undefined)); }
+    catch (e: any) { showToast(e.message); }
+  }, [payoutFilter, showToast]);
+  useEffect(() => { loadPayouts(); }, [loadPayouts]);
   useEffect(() => { loadTxs(); /* eslint-disable-next-line */ }, [txFilter.type, txFilter.from, txFilter.to]);
 
   if (!stats) return <><Header title="🔧 Админ" /><div className="text-center mt">Загрузка / проверка доступа...</div></>;
@@ -85,6 +95,7 @@ export default function AdminPanel() {
     {id:'cashboxes', label:'Кассы', icon:'💰'},
     {id:'users', label:'Пользователи', icon:'👥'},
     {id:'tx', label:'Операции', icon:'📋'},
+    {id:'payouts', label:'Выплаты', icon:'📤'},
     {id:'antifraud', label:'Антифрод', icon:'🚨'},
     {id:'settings', label:'Настройки', icon:'⚙️'}
   ];
@@ -97,7 +108,7 @@ export default function AdminPanel() {
         display:'flex', gap:6, marginBottom:12, padding:'4px 2px 8px',
         overflowX:'auto', WebkitOverflowScrolling:'touch',
         scrollbarWidth:'thin', position:'sticky', top:0,
-        background:'linear-gradient(180deg, #0a0a1a 80%, transparent)',
+        background:'linear-gradient(180deg, var(--bg-2) 80%, transparent)',
         zIndex:10
       }}>
         {tabs.map(t => (
@@ -106,8 +117,8 @@ export default function AdminPanel() {
             onClick={() => setTab(t.id)}
             style={{
               flex:'0 0 auto', padding:'8px 12px', fontSize:13, width:'auto',
-              background: tab === t.id ? '#ffd700' : '#1a1a3a',
-              color: tab === t.id ? '#000' : '#fff'
+              background: tab === t.id ? 'var(--gold)' : 'var(--bg-3)',
+              color: tab === t.id ? 'var(--bg)' : 'var(--text)'
             }}
           >
             {t.icon} {t.label}
@@ -117,7 +128,7 @@ export default function AdminPanel() {
 
       {tab === 'overview' && (
         <>
-          {reconciliation && <div className="card" style={{border:`1px solid ${reconciliation.ok?'#22c55e':'#ef4444'}`}}>
+          {reconciliation && <div className="card" style={{border:`1px solid ${reconciliation.ok?'var(--green)':'var(--red)'}`}}>
             <div className="card-title">{reconciliation.ok?'✅':'🚨'} Финансовая сверка</div>
             <div className="text-dim">{reconciliation.ok?'Все инварианты соблюдены':'Обнаружены расхождения'}</div>
             <div style={{fontSize:12,marginTop:6}}>Пользователи ${fmt(reconciliation.user_accounts?.balance)} · Сейф ${fmt(reconciliation.obligations?.safe)} · Vault ${fmt(reconciliation.obligations?.vault_principal)}</div>
@@ -139,7 +150,7 @@ export default function AdminPanel() {
           </div>
 
           <div className="card">
-            <h3 style={{color:'#ffd700', margin:'0 0 8px'}}>📊 СТАТИСТИКА</h3>
+            <h3 style={{color:'var(--gold)', margin:'0 0 8px'}}>📊 СТАТИСТИКА</h3>
             <div className="history-item"><span>Всего пользователей:</span><b>{stats.users_count}</b></div>
             <div className="history-item"><span>🆕 Новых за период:</span><span className="text-green">+{stats.new_users_range}</span></div>
             <div className="history-item"><span>Активных за период:</span><span>{stats.active_range}</span></div>
@@ -147,13 +158,13 @@ export default function AdminPanel() {
           </div>
 
           <div className="card">
-            <h3 style={{color:'#22c55e', margin:'0 0 8px'}}>💵 ПОПОЛНЕНИЯ / ВЫВОДЫ</h3>
+            <h3 style={{color:'var(--green)', margin:'0 0 8px'}}>💵 ПОПОЛНЕНИЯ / ВЫВОДЫ</h3>
             <div className="history-item"><span>📥 Пополнений:</span><span>{stats.deposits_count} на ${fmt(stats.deposits_total)}</span></div>
             <div className="history-item"><span>📤 Выводов:</span><span>{stats.withdraws_count} на ${fmt(stats.withdraws_total)}</span></div>
           </div>
 
           <div className="card">
-            <h3 style={{color:'#ffd700', margin:'0 0 8px'}}>💸 ДОХОД ПРОЕКТА: ${fmt(totalRev)}</h3>
+            <h3 style={{color:'var(--gold)', margin:'0 0 8px'}}>💸 ДОХОД ПРОЕКТА: ${fmt(totalRev)}</h3>
             <div className="history-item"><span>🚀 Ракета:</span><span className="text-green">+${fmt(rev.rocket || 0)}</span></div>
             <div className="history-item"><span>⚔️ Дуэли:</span><span className="text-green">+${fmt(rev.duel || 0)}</span></div>
             <div className="history-item"><span>🔒 Сейф (всего):</span><span className="text-green">+${fmt((rev.safe||0)+(rev.safe_remainder||0))}</span></div>
@@ -164,7 +175,7 @@ export default function AdminPanel() {
           </div>
 
           <div className="card">
-            <h3 style={{color:'#a855f7', margin:'0 0 8px'}}>💎 ПУЛ ВКЛАДА</h3>
+            <h3 style={{color:'var(--violet)', margin:'0 0 8px'}}>💎 ПУЛ ВКЛАДА</h3>
             <div className="history-item"><span>К распределению завтра:</span><b>${fmt(stats.vault_pool_total)}</b></div>
             <div className="history-item"><span>Заблокировано во вкладах:</span><span>${fmt(stats.vault?.total_locked)}</span></div>
             <div className="history-item"><span>Активных вкладчиков:</span><span>{stats.vault?.depositors}</span></div>
@@ -201,8 +212,8 @@ export default function AdminPanel() {
       {tab === 'cashboxes' && (
         <>
           <div className="card card-hl">
-            <div className="card-title" style={{color:'#ffd700', fontSize:22}}>🏦 ГЛАВНАЯ КАССА</div>
-            <div style={{fontSize:32, fontWeight:900, color:'#ffd700', textAlign:'center', margin:'8px 0'}}>
+            <div className="card-title" style={{color:'var(--gold)', fontSize:22}}>🏦 ГЛАВНАЯ КАССА</div>
+            <div style={{fontSize:32, fontWeight:900, color:'var(--gold)', textAlign:'center', margin:'8px 0'}}>
               ${fmt(stats.platform_cashbox)}
             </div>
             <div className="text-dim text-center" style={{fontSize:12}}>Сюда поступают все комиссии. Отсюда можно выводить из проекта.</div>
@@ -222,8 +233,8 @@ export default function AdminPanel() {
           </div>
 
           <div className="card">
-            <div className="card-title" style={{color:'#3b82f6'}}>🚀 КАССА РАКЕТЫ</div>
-            <div style={{fontSize:28, fontWeight:900, color:'#3b82f6', textAlign:'center', margin:'8px 0'}}>
+            <div className="card-title" style={{color:'var(--blue)'}}>🚀 КАССА РАКЕТЫ</div>
+            <div style={{fontSize:28, fontWeight:900, color:'var(--blue)', textAlign:'center', margin:'8px 0'}}>
               ${fmt(stats.rocket_bankroll)}
             </div>
             <div className="text-dim text-center" style={{fontSize:12}}>Сюда идут 90% ставок, отсюда выплачиваются выигрыши. Пополняется из Главной кассы.</div>
@@ -239,14 +250,14 @@ export default function AdminPanel() {
           </div>
 
           <div className="card">
-            <div className="card-title" style={{color:'#a855f7'}}>💎 ПУЛ ВКЛАДА</div>
-            <div style={{fontSize:28, fontWeight:900, color:'#a855f7', textAlign:'center', margin:'8px 0'}}>
+            <div className="card-title" style={{color:'var(--violet)'}}>💎 ПУЛ ВКЛАДА</div>
+            <div style={{fontSize:28, fontWeight:900, color:'var(--violet)', textAlign:'center', margin:'8px 0'}}>
               ${fmt(stats.vault_pool_total)}
             </div>
             <div className="text-dim text-center" style={{fontSize:12}}>15% от суточного дохода + ручные добавки. Выплачивается активным вкладам в полночь. НЕЛЬЗЯ выводить из проекта.</div>
             <div style={{display:'flex', gap:8, marginTop:12}}>
               <input className="input" style={{fontSize:14, flex:1}} type="number" placeholder="Сумма" value={poolAmt} onChange={e=>setPoolAmt(e.target.value)} />
-              <button className="btn btn-small" style={{background:'#a855f7', color:'#fff'}} onClick={async () => {
+              <button className="btn btn-small" style={{background:'var(--violet)', color:'var(--text)'}} onClick={async () => {
                 await adminApi.addPool(parseFloat(poolAmt)); setPoolAmt(''); loadStats(); showToast('Добавлено в ПУЛ');
               }}>← ИЗ ГЛАВНОЙ</button>
             </div>
@@ -260,7 +271,7 @@ export default function AdminPanel() {
                   <div key={t.id} className="history-item" style={{fontSize:12}}>
                     <span>{t.from} → {t.to}</span>
                     <span>
-                      <b style={{color: t.from === 'external' || t.to === 'external' ? '#ef4444' : '#ffd700'}}>
+                      <b style={{color: t.from === 'external' || t.to === 'external' ? 'var(--red)' : 'var(--gold)'}}>
                         {t.from === 'external' || t.from === 'seed' ? '+' : '-'}${fmt(t.amount)}
                       </b>
                       <div className="text-dim" style={{fontSize:10}}>{t.note} · {new Date(t.created_at).toLocaleString('ru-RU', {timeZone:'Europe/Moscow'})}</div>
@@ -286,8 +297,8 @@ export default function AdminPanel() {
                     <label style={{fontSize:13, flex:1}}>{settingsLabels[k] || k}</label>
                     <input
                       style={{
-                        width: 130, background: '#1a1a3a', border: '1px solid #333',
-                        borderRadius: 6, padding: '8px 10px', color: '#fff', textAlign: 'right', fontWeight:700
+                        width: 130, background: 'var(--bg-3)', border: '1px solid var(--glass-border)',
+                        borderRadius: 6, padding: '8px 10px', color: 'var(--text)', textAlign: 'right', fontWeight:700
                       }}
                       value={settings[k] as string}
                       onChange={e => setSettings({...settings, [k]: e.target.value})}
@@ -311,8 +322,8 @@ export default function AdminPanel() {
                     <label style={{fontSize:13, flex:1}}>{settingsLabels[k] || k}</label>
                     <input
                       style={{
-                        width: 130, background: '#1a1a3a', border: '1px solid #333',
-                        borderRadius: 6, padding: '8px 10px', color: '#fff', textAlign: 'right', fontWeight:700
+                        width: 130, background: 'var(--bg-3)', border: '1px solid var(--glass-border)',
+                        borderRadius: 6, padding: '8px 10px', color: 'var(--text)', textAlign: 'right', fontWeight:700
                       }}
                       value={settings[k] as string}
                       onChange={e => setSettings({...settings, [k]: e.target.value})}
@@ -339,14 +350,14 @@ export default function AdminPanel() {
                     <div style={{fontWeight:700}}>{u.banned ? '🚫 ' : ''}{u.username} <span className="text-dim" style={{fontSize:11}}>#{u.id} · TG:{u.telegram_id}</span></div>
                     <div className="text-dim" style={{fontSize:11}}>Рак:{u.rocket_games} · Дuel:{u.duel_games} · ${fmt(u.rocket_bet_sum)} ставок · деп ${fmt(u.deposits_sum)}</div>
                   </div>
-                  <div style={{fontWeight:900, color:'#ffd700'}}>${fmt(u.balance)}</div>
+                  <div style={{fontWeight:900, color:'var(--gold)'}}>${fmt(u.balance)}</div>
                 </div>
               ))}
             </div>
           </div>
 
           {selectedUser && (
-            <div className="card" style={{border:'2px solid #ffd700'}}>
+            <div className="card" style={{border:'2px solid var(--gold)'}}>
               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <div className="card-title" style={{margin:0}}>
                   {selectedUser.user.banned ? '🚫 ' : ''}{selectedUser.user.username}
@@ -356,7 +367,7 @@ export default function AdminPanel() {
               <div className="text-dim" style={{fontSize:12, marginBottom:8}}>
                 ID: {selectedUser.user.id} · TG: {selectedUser.user.telegram_id} · рег. {new Date(selectedUser.user.created_at).toLocaleDateString('ru-RU', {timeZone:'Europe/Moscow'})}
               </div>
-              <div className="history-item"><span>Баланс:</span><b style={{color:'#ffd700'}}>${fmt(selectedUser.user.balance)}</b></div>
+              <div className="history-item"><span>Баланс:</span><b style={{color:'var(--gold)'}}>${fmt(selectedUser.user.balance)}</b></div>
               <div className="history-item"><span>Заморожено (дуэли):</span><span>${fmt(selectedUser.user.frozen_balance)}</span></div>
               {/* Где ещё деньги игрока: вклад в сейф и тело вклада VAULT */}
               <div className="history-item"><span>В сейфе:</span><span>${fmt(selectedUser.user.safe_locked || 0)}</span></div>
@@ -455,6 +466,72 @@ export default function AdminPanel() {
               </div>
             ))}
             {txs.length === 0 && <div className="text-dim text-center" style={{padding:20}}>Нет операций</div>}
+          </div>
+        </div>
+      )}
+
+      {tab === 'payouts' && (
+        <div className="card">
+          <div className="card-title">📤 Заявки на вывод</div>
+          <div className="text-dim" style={{fontSize:12, marginBottom:8}}>
+            Деньги списаны с баланса в момент создания заявки. В реальном режиме заявка ждёт
+            ручной отправки USDT: внесите tx_hash из блокчейна и нажмите «Выплачено».
+            Отклонение возвращает сумму на баланс игрока.
+          </div>
+          <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:8}}>
+            {([['pending','Ожидают'],['paid','Выплачены'],['rejected','Отклонённые'],['','Все']] as const).map(([v,label]) => (
+              <button key={v || 'all'} className="btn btn-small"
+                style={{background: payoutFilter === v ? 'var(--gold)' : 'var(--bg-3)', color: payoutFilter === v ? 'var(--bg)' : 'var(--text)'}}
+                onClick={() => setPayoutFilter(v as any)}>{label}</button>
+            ))}
+            <button className="btn btn-small btn-secondary" onClick={loadPayouts}>↻ Обновить</button>
+          </div>
+          <div className="scroll-list" style={{maxHeight:520, overflowY:'auto'}}>
+            {payouts.map((w: any) => (
+              <div key={w.id} className="history-item" style={{fontSize:12, display:'block'}}>
+                <div style={{display:'flex', justifyContent:'space-between', gap:8}}>
+                  <div>
+                    <div style={{fontWeight:700}}>#{w.id} · {w.username ? '@' + w.username : 'user ' + w.user_id} <span className="text-dim">(tg {w.telegram_id})</span></div>
+                    <div className="text-dim" style={{fontSize:11, wordBreak:'break-all'}}>{w.address}</div>
+                    <div className="text-dim" style={{fontSize:10}}>
+                      {new Date(w.created_at).toLocaleString('ru-RU', {timeZone:'Europe/Moscow'})}
+                      {w.paid_at ? ` · выплачено ${new Date(w.paid_at).toLocaleString('ru-RU', {timeZone:'Europe/Moscow'})}` : ''}
+                    </div>
+                    {w.tx_hash && <div className="text-dim" style={{fontSize:10, wordBreak:'break-all'}}>tx: {w.tx_hash}</div>}
+                    {w.reject_reason && <div className="text-red" style={{fontSize:10}}>причина: {w.reject_reason}</div>}
+                  </div>
+                  <div style={{textAlign:'right'}}>
+                    <div style={{fontWeight:900}}>${fmt(w.amount)}</div>
+                    <div className="text-dim" style={{fontSize:11}}>комиссия ${fmt(w.fee)}</div>
+                    <div className="text-green" style={{fontSize:12, fontWeight:700}}>к выплате ${fmt(w.payout)}</div>
+                    <div style={{fontSize:11, marginTop:2}}>
+                      {w.status === 'pending' && <span className="text-accent">ожидает</span>}
+                      {w.status === 'paid' && <span className="text-green">выплачено</span>}
+                      {w.status === 'rejected' && <span className="text-red">отклонено</span>}
+                    </div>
+                  </div>
+                </div>
+                {w.status === 'pending' && (
+                  <div style={{display:'flex', gap:6, marginTop:8, flexWrap:'wrap'}}>
+                    <input className="input" style={{flex:1, minWidth:180, fontSize:12, padding:'6px'}}
+                      placeholder="tx_hash из блокчейна"
+                      onChange={e => (w.__tx = e.target.value)} />
+                    <button className="btn btn-small btn-green" onClick={async () => {
+                      const tx = String(w.__tx || '').trim();
+                      if (!tx) return showToast('Введите tx_hash');
+                      try { await adminApi.payWithdrawal(w.id, tx); showToast(`Заявка #${w.id} выплачена`); loadPayouts(); loadStats(); }
+                      catch (e: any) { showToast(e.message); }
+                    }}>✅ Выплачено</button>
+                    <button className="btn btn-small btn-danger" onClick={async () => {
+                      const reason = window.prompt('Причина отклонения (деньги вернутся на баланс)') || '';
+                      try { await adminApi.rejectWithdrawal(w.id, reason || undefined); showToast(`Заявка #${w.id} отклонена, деньги возвращены`); loadPayouts(); loadStats(); }
+                      catch (e: any) { showToast(e.message); }
+                    }}>↩ Отклонить</button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {payouts.length === 0 && <div className="text-dim text-center" style={{padding:20}}>Заявок нет</div>}
           </div>
         </div>
       )}

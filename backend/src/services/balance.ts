@@ -1,4 +1,4 @@
-import { query, pool, currentTransactionClient } from '../db/pool';
+import { query, withTransaction, onAfterCommit } from '../db/pool';
 import type { PoolClient } from 'pg';
 import { emitToUser } from './notifications';
 
@@ -6,7 +6,9 @@ const TX_TYPE_LABELS: Record<string, string> = {
   bet: 'Ставка',
   win: 'Выигрыш',
   deposit: 'Пополнение',
+  demo_deposit: 'Демо-пополнение',
   withdraw: 'Вывод',
+  withdraw_refund: 'Возврат вывода',
   referral: 'Реферальное вознаграждение',
   vault_lock: 'Блокировка Вклада',
   vault_return: 'Возврат тела Вклада',
@@ -17,6 +19,11 @@ const TX_TYPE_LABELS: Record<string, string> = {
 
 /**
  * Единственная функция для изменения баланса пользователя.
+ *
+ * Событие `balance_updated` регистрируется через `onAfterCommit`, поэтому оно
+ * уходит и при автономной операции, и внутри составной транзакции игры
+ * (Ракета, Дуэль, Сейф, Вклад) — раньше вложенный вызов события не слал вовсе,
+ * и баланс на экране не обновлялся именно там, где деньги двигаются.
  */
 export async function modifyBalanceWithClient(
   client: PoolClient,
@@ -42,7 +49,16 @@ export async function modifyBalanceWithClient(
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [userId, type, normalized, newBalance, opts.gameType || null, opts.gameId || null, label]
   );
+  onAfterCommit(() => { void emitBalanceSnapshot(userId, newBalance); });
   return newBalance;
+}
+
+/** Отправить клиенту баланс и снимок «где деньги» после COMMIT. */
+async function emitBalanceSnapshot(userId: number, balance: number): Promise<void> {
+  try {
+    const snap = await getBalanceSnapshot(userId);
+    emitToUser(userId, 'balance_updated', { balance, ...snap });
+  } catch { /* событие не влияет на committed-операцию */ }
 }
 
 /** Единственная публичная операция изменения баланса; отрицательный результат запрещён атомарно. */
@@ -52,23 +68,7 @@ export async function modifyBalance(
   type: string,
   opts: Partial<{ gameType: string, gameId: number, description: string }> = {}
 ): Promise<number> {
-  const outer = currentTransactionClient();
-  if (outer) return modifyBalanceWithClient(outer, userId, amount, type, opts);
-  const client = await pool.connect();
-  let newBalance: number;
-  try {
-    await client.query('BEGIN');
-    newBalance = await modifyBalanceWithClient(client, userId, amount, type, opts);
-    await client.query('COMMIT');
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally { client.release(); }
-  try {
-    const snap = await getBalanceSnapshot(userId);
-    emitToUser(userId, 'balance_updated', { balance: newBalance!, ...snap });
-  } catch { /* событие не влияет на committed-операцию */ }
-  return newBalance!;
+  return withTransaction(client => modifyBalanceWithClient(client, userId, amount, type, opts));
 }
 
 /**
