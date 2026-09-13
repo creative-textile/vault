@@ -12,7 +12,7 @@ import {
   setFlight, setFlightMultiplier, clearFlight, getFlight, setRocketScreenActive
 } from '../../utils/rocketFlight';
 
-type Phase = 'betting' | 'flying' | 'win' | 'lose';
+type Phase = 'betting' | 'flying' | 'beautiful' | 'win' | 'lose';
 
 interface HistoryItem {
   round_id: number;
@@ -81,6 +81,11 @@ export default function Rocket() {
       clearFlight();
       // Если во время полёта не было кэшаута — проигрыш
       setPhase(p => {
+        if (p === 'beautiful') {
+          rocketApi.history(20).then(setHistory);
+          if ((userRef.current?.auto_safe_percent || 0) === 0 && !isSafePromptMuted()) setShowSafePrompt(true);
+          return 'win';
+        }
         if (p === 'flying') {
           refreshUser();
           rocketApi.history(20).then(setHistory);
@@ -96,7 +101,9 @@ export default function Rocket() {
         setCashoutMult(res.cashout_at);
         setCrashAt(res.crash_at);
         setProfit(res.profit);
-        setPhase('win');
+        // Обычный полёт завершается сразу; красивый продолжает ту же сцену до
+        // final crash, хотя выплата уже зафиксирована.
+        setPhase(res.was_beautiful ? 'beautiful' : 'win');
         await refreshUser();
         rocketApi.history(20).then(setHistory);
         // Если настроен автовклад — вносим автоматически без попапа
@@ -112,7 +119,7 @@ export default function Rocket() {
               console.warn('[safe] автовклад не прошёл:', e?.message || e);
             }
           }
-        } else {
+        } else if (!res.was_beautiful) {
           if (!isSafePromptMuted()) setShowSafePrompt(true);
         }
       }
@@ -132,7 +139,7 @@ export default function Rocket() {
   // Socket даёт authoritative checkpoints 30 FPS; requestAnimationFrame
   // интерполирует между ними с той же серверной кривой для плавных 60 FPS.
   useEffect(()=>{
-    if(phase!=='flying') return;
+    if(phase!=='flying' && phase!=='beautiful') return;
     let frame=0;
     const render=()=>{
       const t=targetTickRef.current;
@@ -207,7 +214,7 @@ export default function Rocket() {
     multiplier < 3 ? 'mult-yellow' :
     multiplier < 5 ? 'mult-orange' : 'mult-red';
 
-  const scenePhase = phase === 'win' ? 'cashed' : phase === 'lose' ? 'crashed' : phase === 'flying' ? 'flying' : 'idle';
+  const scenePhase = phase === 'win' ? 'cashed' : phase === 'lose' ? 'crashed' : (phase === 'flying' || phase === 'beautiful') ? 'flying' : 'idle';
   const betNum = parseFloat(bet) || 0;
 
   return (
@@ -254,6 +261,14 @@ export default function Rocket() {
             💰 ЗАБРАТЬ ${(betNum * multiplier).toFixed(2)}
           </button>
         </>
+      )}
+
+      {phase === 'beautiful' && (
+        <div className="card text-center" style={{border:'2px solid #ffd700'}}>
+          <div className="text-green" style={{fontWeight:900,fontSize:20}}>✅ ЗАБРАНО x{cashoutMult.toFixed(2)}</div>
+          <div className="text-accent mt">✨ Красивый полёт продолжается… x{multiplier.toFixed(2)}</div>
+          <div className="text-dim">Выплата уже зафиксирована, дождитесь финала</div>
+        </div>
       )}
 
       {phase === 'win' && (

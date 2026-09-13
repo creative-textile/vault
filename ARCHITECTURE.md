@@ -743,3 +743,7 @@ The pre-auth general limiter keys on `X-Device-Id` (IP fallback) and allows 300 
 Replay URLs may carry `?player=@username`; the backend still returns immutable round facts, while the public client validates the requested hero against replay participants. Monetary outcome fields (`payout`, `profit`, participant `net`, Safe rank/prize) make share cards self-explanatory. Rocket distinguishes `cashout_at` from `crash_at` and exposes `was_beautiful`, preventing a post-cashout visual extension from being mistaken for a payout discrepancy.
 
 Deposit address acquisition has bounded retries, visibility recovery and explicit retry UI. Duel acceptance sets a short client transition lock before the request, preventing its own persisted result event from flashing a modal in the lobby. Rematch notification actions call the same authoritative accept/decline endpoints and then mark the notification read.
+
+### Beautiful-flight timeline consistency
+
+A beautiful Rocket cashout no longer clears the active server interval. The active round is marked `cashedOut`, its terminal multiplier is replaced with the persisted extended `crash_at`, and ticks continue until that point; `processCrash` is skipped because settlement already completed. The client uses a dedicated `beautiful` phase to keep the flying scene alive while displaying the locked cashout. Public replay reconstructs this exact start → cashout → extension → terminal sequence.

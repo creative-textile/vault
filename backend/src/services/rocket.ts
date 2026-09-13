@@ -144,7 +144,8 @@ async function processCashoutImpl(roundId: number, userId: number, elapsedSec: n
     cashout_at: Math.round(currentMult * 100) / 100,
     crash_at: Math.round(finalCrash * 100) / 100,
     profit: Math.round((grossWin - bet) * 100) / 100,
-    gross_win: grossWin
+    gross_win: grossWin,
+    was_beautiful: finalCrash !== parseFloat(round.crash_at)
   };
 }
 

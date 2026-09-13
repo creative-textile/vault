@@ -7,6 +7,7 @@ interface ActiveRound {
   userId: number;
   startedAt: number;
   crashAt: number;
+  cashedOut: boolean;
   interval: NodeJS.Timeout;
 }
 
@@ -33,12 +34,22 @@ export function registerRocketHandlers(io: Server) {
       try {
         const elapsed = (Date.now() - r.startedAt) / 1000;
         const result = await processCashout(roundId, userId, elapsed);
-        clearInterval(r.interval);
-        activeRounds.delete(roundId);
         socket.emit('cashout_result', result);
-        io.to(String(roundId)).emit('crash', {
-          crash_at: result.result === 'win' ? result.crash_at : parseFloat(res.rows[0].crash_at)
-        });
+        if (result.result === 'win' && result.was_beautiful) {
+          // Деньги уже выплачены, но редкий красивый полёт продолжается до
+          // сохранённой финальной точки — replay воспроизведёт ту же шкалу.
+          r.cashedOut = true;
+          r.crashAt = result.crash_at;
+          io.to(String(roundId)).emit('rocket:beautiful', {
+            cashout_at: result.cashout_at, crash_at: result.crash_at
+          });
+        } else {
+          clearInterval(r.interval);
+          activeRounds.delete(roundId);
+          io.to(String(roundId)).emit('crash', {
+            crash_at: result.result === 'win' ? result.crash_at : parseFloat(res.rows[0].crash_at), cashed_out: result.result === 'win'
+          });
+        }
       } catch (e: any) {
         socket.emit('error', { message: e.message });
       }
@@ -53,6 +64,7 @@ export function registerRocketHandlers(io: Server) {
 export function startRocketRound(io: Server, roundId: number, userId: number, crashAt: number) {
   const startedAt = Date.now();
 
+  const round = { roundId, userId, startedAt, crashAt, cashedOut: false, interval: null as any as NodeJS.Timeout };
   const interval = setInterval(() => {
     const elapsed = (Date.now() - startedAt) / 1000;
     const mult = getMultiplierAt(elapsed);
@@ -62,14 +74,15 @@ export function startRocketRound(io: Server, roundId: number, userId: number, cr
       elapsed
     });
 
-    if (mult >= crashAt) {
+    if (mult >= round.crashAt) {
       clearInterval(interval);
       activeRounds.delete(roundId);
-      processCrash(roundId);
-      io.to(String(roundId)).emit('crash', { crash_at: crashAt });
+      if (!round.cashedOut) processCrash(roundId);
+      io.to(String(roundId)).emit('crash', { crash_at: round.crashAt, cashed_out: round.cashedOut });
     }
   }, 1000 / 30); // 30 server ticks/sec; client renders/interpolates at requestAnimationFrame (60 FPS)
 
-  activeRounds.set(roundId, { roundId, userId, startedAt, crashAt, interval });
+  round.interval = interval;
+  activeRounds.set(roundId, round);
   return startedAt;
 }
