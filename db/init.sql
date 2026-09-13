@@ -106,7 +106,15 @@ CREATE TABLE IF NOT EXISTS vault_deposits (
     accumulated_profit DECIMAL(12,2) DEFAULT 0,
     status             VARCHAR(16) DEFAULT 'active',
     created_at         TIMESTAMP DEFAULT NOW(),
-    unlocked_at        TIMESTAMP
+    unlocked_at        TIMESTAMP,
+    unlocks_at         TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS vault_deposit_accruals (
+    id SERIAL PRIMARY KEY, deposit_id INTEGER REFERENCES vault_deposits(id),
+    user_id INTEGER REFERENCES users(id), date DATE NOT NULL,
+    pool_amount DECIMAL(12,2) NOT NULL, profit DECIMAL(12,2) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(deposit_id,date)
 );
 
 CREATE TABLE IF NOT EXISTS vault_pool_daily (
@@ -171,3 +179,21 @@ INSERT INTO settings (key, value) VALUES
     ('vault_max_multiplier', '10'),
     ('manual_pool_addition', '0')
 ON CONFLICT (key) DO NOTHING;
+
+
+-- Денежные инварианты: отрицательные пользовательские средства, кассы и пулы запрещены.
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_balance_nonnegative CHECK (balance >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_frozen_nonnegative CHECK (frozen_balance >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE platform_cashbox ADD CONSTRAINT platform_cashbox_nonnegative CHECK (amount >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE safes ADD CONSTRAINT safes_money_nonnegative CHECK (bank >= 0 AND prize_pool >= 0 AND commission_amount >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

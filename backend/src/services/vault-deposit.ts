@@ -1,5 +1,5 @@
 import { query, getClient } from '../db/pool';
-import { getUser, modifyBalance, getAvailableBalance } from './balance';
+import { getUser, modifyBalance, getAvailableBalance, modifyBalanceWithClient } from './balance';
 import { getSetting, setSetting, getPlatformRevenueForDate } from './revenue';
 import { VAULT_MULTIPLIERS, roundDownClean } from '../config';
 import { nowMSK } from '../utils/time';
@@ -22,17 +22,20 @@ export async function getActiveDeposit(userId: number) {
   };
 }
 
+async function getFixedDailyMax(): Promise<number> {
+  const floor = parseFloat(await getSetting('vault_max_floor') || '100');
+  const latest = await query(`SELECT max_deposit FROM vault_pool_daily ORDER BY date DESC LIMIT 1`);
+  return latest.rows.length ? Math.max(floor, parseFloat(latest.rows[0].max_deposit) || floor) : floor;
+}
+
 export async function lockVaultDeposit(userId: number, amount: number, termDays: number) {
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
 
   const available = await getAvailableBalance(userId);
   const baseMin = parseFloat(await getSetting('vault_min_deposit') || '10');
-  const maxFloor = parseFloat(await getSetting('vault_max_floor') || '100');
-  const maxMultiplier = parseFloat(await getSetting('vault_max_multiplier') || '10');
-  // Минимум фиксирован. Максимум зависит от реального пула, но не падает ниже floor.
-  const pendingPool = await getVaultPool();
-  const dynMax = Math.max(maxFloor, roundDownClean(pendingPool * maxMultiplier));
+  // Лимит фиксирован на сутки по последнему закрытому пулу.
+  const dynMax = await getFixedDailyMax();
   const dynMin = baseMin;
 
   if (amount < dynMin) throw new Error(`Минимум $${dynMin}`);
@@ -51,12 +54,12 @@ export async function lockVaultDeposit(userId: number, amount: number, termDays:
   await modifyBalance(userId, -amount, 'vault_lock', { description: `Вклад на ${termDays} дней` });
 
   const res = await query(
-    `INSERT INTO vault_deposits (user_id, amount, term_days, multiplier, status)
-     VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
-    [userId, amount, termDays, VAULT_MULTIPLIERS[termDays]]
+    `INSERT INTO vault_deposits (user_id, amount, term_days, multiplier, status, unlocks_at)
+     VALUES ($1, $2, $3, $4, 'active', $5) RETURNING id, unlocks_at`,
+    [userId, amount, termDays, VAULT_MULTIPLIERS[termDays], new Date(Date.now() + termDays * 86400000)]
   );
 
-  return { deposit_id: res.rows[0].id, unlocks_at: new Date(Date.now() + termDays * 86400000) };
+  return { deposit_id: res.rows[0].id, unlocks_at: res.rows[0].unlocks_at };
 }
 
 export async function earlyUnlock(userId: number, depositId: number) {
@@ -79,84 +82,82 @@ export async function earlyUnlock(userId: number, depositId: number) {
 }
 
 export async function dailyVaultDistribution() {
-  // Полночь МСК = вчерашний день по МСК
   const yesterday = new Date(nowMSK().getTime() - 86400000);
   yesterday.setHours(0, 0, 0, 0);
-
-  // Доход за вчера (ракета + дуэль + сейф, ПОСЛЕ рефералов)
+  const date = yesterday.toISOString().slice(0, 10);
   const revenue = await getPlatformRevenueForDate(yesterday);
-
-  const poolPercent = parseInt(await getSetting('vault_pool_percent') || '15') / 100;
+  const poolPercent = parseFloat(await getSetting('vault_pool_percent') || '15') / 100;
   const autoPool = Math.round(revenue * poolPercent * 100) / 100;
   const manualPool = parseFloat(await getSetting('manual_pool_addition') || '0');
-  await setSetting('manual_pool_addition', '0');
-  const totalPool = Math.round((autoPool + manualPool) * 100) / 100;
-
-  // Активные вклады
-  const depRes = await query(`SELECT * FROM vault_deposits WHERE status = 'active'`);
-  const deposits = depRes.rows;
-
+  const totalPoolCents = Math.round((autoPool + manualPool) * 100);
   const maxFloor = parseFloat(await getSetting('vault_max_floor') || '100');
   const maxMultiplier = parseFloat(await getSetting('vault_max_multiplier') || '10');
-  const newMax = Math.max(maxFloor, roundDownClean(totalPool * maxMultiplier));
-  // Не перезаписываем пользовательское значение «начального максимума»;
-  // сохраняем рассчитанный максимум как текущий для UI
-  // (храним отдельно в pool_daily.max_deposit)
-  // await setSetting('vault_max_deposit', String(newMax));
+  const newMax = Math.max(maxFloor, roundDownClean((totalPoolCents / 100) * maxMultiplier));
 
-  if (!deposits.length || totalPool <= 0) {
-    await query(
-      `INSERT INTO vault_pool_daily (date, platform_revenue, auto_pool, manual_pool, total_pool, total_locked, depositors_count, base_rate, max_deposit)
-       VALUES ($1, $2, $3, $4, $5, 0, 0, 0, $6)
-       ON CONFLICT (date) DO UPDATE SET platform_revenue = $2, auto_pool = $3, manual_pool = $4, total_pool = $5, max_deposit = $6`,
-      [yesterday.toISOString().slice(0,10), revenue, autoPool, manualPool, totalPool, newMax]
-    );
-    return { distributed: 0 };
-  }
-
-  const totalWeight = deposits.reduce((sum, d) => sum + parseFloat(d.amount) * parseFloat(d.multiplier), 0);
-  let totalLocked = 0;
-  let completedCount = 0;
-
-  for (const d of deposits) {
-    const amount = parseFloat(d.amount);
-    const mult = parseFloat(d.multiplier);
-    const weight = amount * mult;
-    const dailyProfit = Math.round(totalPool * weight / totalWeight * 100) / 100;
-    totalLocked += amount;
-
-    const newDaysElapsed = d.days_elapsed + 1;
-    const newProfit = Math.round((parseFloat(d.accumulated_profit) + dailyProfit) * 100) / 100;
-
-    if (newDaysElapsed >= d.term_days) {
-      // Выплата
-      const payout = Math.round((amount + newProfit) * 100) / 100;
-      await modifyBalance(d.user_id, payout, 'vault_payout', {
-        description: `Вклад ${d.term_days} дней завершён, прибыль $${newProfit}`
-      });
-      await query(
-        `UPDATE vault_deposits SET status = 'completed', accumulated_profit = $1, days_elapsed = $2, unlocked_at = NOW() WHERE id = $3`,
-        [newProfit, newDaysElapsed, d.id]
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    // Автопул физически переводится из кассы. Ручной пул резервируется при добавлении.
+    if (autoPool > 0) {
+      const cash = await client.query(
+        `UPDATE platform_cashbox SET amount=amount-$1, updated_at=NOW()
+          WHERE id=1 AND amount >= $1 RETURNING amount`, [autoPool]
       );
-      completedCount++;
-    } else {
-      await query(
-        `UPDATE vault_deposits SET accumulated_profit = $1, days_elapsed = $2 WHERE id = $3`,
-        [newProfit, newDaysElapsed, d.id]
+      if (!cash.rows.length) throw new Error('Недостаточно средств в кассе для пула VAULT');
+    }
+    await client.query(`UPDATE settings SET value='0' WHERE key='manual_pool_addition'`);
+    const depRes = await client.query(`SELECT * FROM vault_deposits WHERE status='active' ORDER BY id FOR UPDATE`);
+    const deposits = depRes.rows;
+    const weights = deposits.map(d => parseFloat(d.amount) * parseFloat(d.multiplier));
+    const totalWeight = weights.reduce((a,b)=>a+b,0);
+    const allocations = deposits.map((d,i) => {
+      const exact = totalWeight > 0 ? totalPoolCents * weights[i] / totalWeight : 0;
+      return { d, cents: Math.floor(exact), fraction: exact - Math.floor(exact) };
+    });
+    let remainder = totalPoolCents - allocations.reduce((n,a)=>n+a.cents,0);
+    [...allocations].sort((a,b)=>b.fraction-a.fraction || a.d.id-b.d.id).forEach(a => {
+      if (remainder-- > 0) a.cents++;
+    });
+    let totalLocked = 0;
+    for (const a of allocations) {
+      const amount = parseFloat(a.d.amount); totalLocked += amount;
+      const profit = a.cents / 100;
+      await client.query(`UPDATE vault_deposits SET accumulated_profit=accumulated_profit+$1, days_elapsed=days_elapsed+1 WHERE id=$2`, [profit,a.d.id]);
+      await client.query(
+        `INSERT INTO vault_deposit_accruals (deposit_id,user_id,date,pool_amount,profit)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT (deposit_id,date) DO NOTHING`,
+        [a.d.id,a.d.user_id,date,totalPoolCents/100,profit]
       );
     }
+    const baseRate = totalLocked ? (totalPoolCents/100)/totalLocked*100 : 0;
+    await client.query(
+      `INSERT INTO vault_pool_daily (date,platform_revenue,auto_pool,manual_pool,total_pool,total_locked,depositors_count,base_rate,max_deposit)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (date) DO UPDATE SET platform_revenue=$2,auto_pool=$3,manual_pool=$4,total_pool=$5,total_locked=$6,depositors_count=$7,base_rate=$8,max_deposit=$9`,
+      [date,revenue,autoPool,manualPool,totalPoolCents/100,totalLocked,deposits.length,+baseRate.toFixed(4),newMax]
+    );
+    await client.query('COMMIT');
+    return { distributed: totalPoolCents/100, completed: 0 };
+  } catch(e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+}
+
+/** Выплатить созревшие вклады после полных 24 часов срока. */
+export async function completeMatureVaultDeposits(): Promise<number> {
+  const rows = await query(`SELECT id FROM vault_deposits WHERE status='active' AND unlocks_at <= NOW() ORDER BY id`);
+  let completed=0;
+  for (const row of rows.rows) {
+    const client=await getClient();
+    try {
+      await client.query('BEGIN');
+      const claim=await client.query(`UPDATE vault_deposits SET status='completed',unlocked_at=NOW() WHERE id=$1 AND status='active' AND unlocks_at<=NOW() RETURNING *`,[row.id]);
+      if (!claim.rows.length) { await client.query('ROLLBACK'); continue; }
+      const d=claim.rows[0], payout=Math.round((parseFloat(d.amount)+parseFloat(d.accumulated_profit))*100)/100;
+      await modifyBalanceWithClient(client,d.user_id,payout,'vault_payout',{description:`Вклад ${d.term_days} дней завершён, прибыль $${parseFloat(d.accumulated_profit).toFixed(2)}`});
+      await client.query('COMMIT'); completed++;
+    } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
   }
-
-  const baseRate = totalLocked > 0 ? (totalPool / totalLocked * 100) : 0;
-
-  await query(
-    `INSERT INTO vault_pool_daily (date, platform_revenue, auto_pool, manual_pool, total_pool, total_locked, depositors_count, base_rate, max_deposit)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT (date) DO UPDATE SET platform_revenue = $2, auto_pool = $3, manual_pool = $4, total_pool = $5, total_locked = $6, depositors_count = $7, base_rate = $8, max_deposit = $9`,
-    [yesterday.toISOString().slice(0,10), revenue, autoPool, manualPool, totalPool, totalLocked, deposits.length - completedCount, +baseRate.toFixed(4), newMax]
-  );
-
-  return { distributed: totalPool, completed: completedCount };
+  return completed;
 }
 
 export async function getVaultHistory(userId: number, limit = 30) {
@@ -182,9 +183,7 @@ export async function getPoolInfo() {
   const res = await query('SELECT * FROM vault_pool_daily WHERE date = $1', [yesterday]);
   const pendingPool = await getVaultPool();
   const baseMin = parseFloat(await getSetting('vault_min_deposit') || '10');
-  const maxFloor = parseFloat(await getSetting('vault_max_floor') || '100');
-  const maxMultiplier = parseFloat(await getSetting('vault_max_multiplier') || '10');
-  const dynMax = Math.max(maxFloor, roundDownClean(pendingPool * maxMultiplier));
+  const dynMax = await getFixedDailyMax();
   const dynMin = baseMin;
   return {
     yesterday: res.rows[0] ? {
@@ -199,8 +198,16 @@ export async function getPoolInfo() {
 }
 
 export async function addManualPool(amount: number) {
-  const current = parseFloat(await getSetting('manual_pool_addition') || '0');
-  await setSetting('manual_pool_addition', String(current + amount));
+  const value=Math.round(amount*100)/100;
+  if (!(value>0)) throw new Error('Сумма должна быть больше нуля');
+  const client=await getClient();
+  try {
+    await client.query('BEGIN');
+    const cash=await client.query(`UPDATE platform_cashbox SET amount=amount-$1,updated_at=NOW() WHERE id=1 AND amount >= $1 RETURNING amount`,[value]);
+    if (!cash.rows.length) throw new Error('Недостаточно средств в кассе платформы');
+    await client.query(`INSERT INTO settings(key,value) VALUES('manual_pool_addition',$1) ON CONFLICT(key) DO UPDATE SET value=(COALESCE(settings.value,'0')::numeric+$1::numeric)::text`,[value]);
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
 }
 
 /** Сумма, которая завтра будет распределена: 15% от сегодняшней выручки + накопленная ручная добавка. */

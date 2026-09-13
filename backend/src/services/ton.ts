@@ -62,7 +62,8 @@ export async function processWithdrawal(
     if (!config.demoMode) throw new Error('Установите PIN перед выводом');
   }
 
-  const fee = Math.round(amount * 0.01 * 100) / 100;
+  const feePercent = parseFloat((await (await import('./revenue')).getSetting('withdraw_commission')) || '1');
+  const fee = Math.round(amount * (feePercent / 100) * 100) / 100;
   const payout = Math.round((amount - fee) * 100) / 100;
 
   const balance = await modifyBalance(userId, -amount, 'withdraw', {

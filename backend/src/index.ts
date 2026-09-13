@@ -97,6 +97,10 @@ server.listen(config.port, async () => {
     // Отметка старта фазы взлома сейфа (нужна существующим БД: окно взлома считается от неё)
     try {
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS crack_started_at TIMESTAMPTZ`);
+      await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS commission_settled BOOLEAN DEFAULT FALSE`);
+      await query(`ALTER TABLE vault_deposits ADD COLUMN IF NOT EXISTS unlocks_at TIMESTAMPTZ`);
+      await query(`UPDATE vault_deposits SET unlocks_at=created_at + (term_days * INTERVAL '1 day') WHERE unlocks_at IS NULL`);
+      await query(`CREATE TABLE IF NOT EXISTS vault_deposit_accruals (id SERIAL PRIMARY KEY, deposit_id INTEGER REFERENCES vault_deposits(id), user_id INTEGER REFERENCES users(id), date DATE NOT NULL, pool_amount DECIMAL(12,2) NOT NULL, profit DECIMAL(12,2) NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(deposit_id,date))`);
       // Момент начала сбора: по нему планировщик понимает, не отыгран ли
       // сегодняшний слот взлома предыдущим сейфом (важно при переносе времени в админке)
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS collect_started_at TIMESTAMPTZ`);
@@ -111,6 +115,12 @@ server.listen(config.port, async () => {
         id SERIAL PRIMARY KEY, amount DECIMAL(14,2) DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW()
     )`);
     await query(`INSERT INTO platform_cashbox (id, amount) VALUES (1, 500) ON CONFLICT (id) DO NOTHING`);
+    // Инварианты real-money ledger для уже существующих БД.
+    await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_balance_nonnegative CHECK (balance >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_frozen_nonnegative CHECK (frozen_balance >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE platform_cashbox ADD CONSTRAINT platform_cashbox_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE safes ADD CONSTRAINT safes_money_nonnegative CHECK (bank >= 0 AND prize_pool >= 0 AND commission_amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`CREATE TABLE IF NOT EXISTS cashbox_transfers (
         id SERIAL PRIMARY KEY, from_source VARCHAR(32) NOT NULL, to_source VARCHAR(32) NOT NULL,
         amount DECIMAL(12,2) NOT NULL, note TEXT, created_at TIMESTAMP DEFAULT NOW()

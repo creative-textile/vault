@@ -1,6 +1,6 @@
 import { query } from '../db/pool';
-import { getUser, modifyBalance, getAvailableBalance } from './balance';
-import { logPlatformRevenue, getSetting } from './revenue';
+import { getUser, modifyBalance, getAvailableBalance, modifyBalanceWithClient } from './balance';
+import { logPlatformRevenue, getSetting, logPlatformRevenueWithClient } from './revenue';
 import { broadcast } from './notifications';
 import { payReferral } from './referral';
 import { todayMSK } from '../utils/time';
@@ -269,7 +269,7 @@ export async function safeDeposit(userId: number, amount: number) {
   const available = await getAvailableBalance(userId);
   if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
 
-  const commPercent = 10;
+  const commPercent = parseFloat(await getSetting('commission_percent') || '10');
   const commission = Math.round(amount * (commPercent / 100) * 100) / 100;
   const toSafe = Math.round((amount - commission) * 100) / 100;
 
@@ -300,17 +300,9 @@ export async function safeDeposit(userId: number, amount: number) {
     [amount, toSafe, commission, isFirstDeposit, safe.id]
   );
 
-  // Комиссия распределяется
-  const refPercent = parseInt(await getSetting('referral_percent') || '3');
-  const refCut = Math.round(amount * (refPercent / 100) * 100) / 100;
-  let platformCut = commission;
-  if (user.referred_by) {
-    await modifyBalance(user.referred_by, refCut, 'referral', {
-      gameType: 'safe', description: `3% от вклада в Сейф $${amount}`
-    });
-    platformCut = Math.round((commission - refCut) * 100) / 100;
-  }
-  await logPlatformRevenue(platformCut, 'safe');
+  // Комиссия пока только зарезервирована в safe.commission_amount.
+  // Реферал и платформа получат её атомарно при фактическом старте взлома;
+  // поэтому отменённый вклад не создаёт денег.
 
   // Получить итоговый вклад пользователя
   const depositRes = await query(
@@ -353,7 +345,7 @@ export async function cancelSafeDeposit(userId: number) {
 
   const dep = depRes.rows[0];
 
-  const commPercent = 0.10;
+  const commPercent = parseFloat(await getSetting('commission_percent') || '10') / 100;
 
   // Сначала атомарно удаляем вклад и смотрим, сколько реально удалили: два
   // одновременных «Вернуть» раньше читали одну и ту же строку и возвращали
@@ -586,9 +578,14 @@ export async function calculateSafeWinners(safeId: number) {
     }
   }
 
+  // Любой нераспределённый остаток становится доходом платформы, а не зависает в раунде.
+  if (remaining >= 0.01) {
+    await logPlatformRevenue(remaining, 'safe_remainder');
+    remaining = 0;
+  }
   await query(
-    `UPDATE safes SET winners_count = $1, status = 'finished' WHERE id = $2`,
-    [winners, safeId]
+    `UPDATE safes SET winners_count = $1, status = 'finished', prize_pool = prize_pool - $3 WHERE id = $2`,
+    [winners, safeId, remaining]
   );
 }
 
@@ -752,6 +749,7 @@ export async function resumeCracking(): Promise<void> {
   );
   const res = await query(`SELECT id FROM safes WHERE status = 'cracking'`);
   for (const row of res.rows) {
+    await settleSafeCommission(row.id);
     const remaining = await getDeadlineRemainingMs(row.id);
     if (remaining == null || remaining <= 0) {
       await finalizeCracking(row.id);
@@ -760,6 +758,40 @@ export async function resumeCracking(): Promise<void> {
       console.log(`[SAFE] Взлом сейфа #${row.id} продолжается, осталось ${Math.round(remaining / 1000)} с`);
     }
   }
+}
+
+/** Идемпотентно распределить зарезервированную комиссию в момент старта взлома. */
+async function settleSafeCommission(safeId: number): Promise<void> {
+  const { pool } = await import('../db/pool');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimed = await client.query(
+      `UPDATE safes SET commission_settled = TRUE
+        WHERE id = $1 AND commission_settled = FALSE RETURNING commission_amount`, [safeId]
+    );
+    if (!claimed.rows.length) { await client.query('ROLLBACK'); return; }
+    const refPercent = parseFloat(await getSetting('referral_percent') || '3');
+    const deps = await client.query(
+      `SELECT d.user_id, d.amount, u.referred_by FROM safe_deposits d
+       JOIN users u ON u.id=d.user_id WHERE d.safe_id=$1`, [safeId]
+    );
+    let referralTotal = 0;
+    for (const d of deps.rows) {
+      if (!d.referred_by) continue;
+      const reward = Math.round(parseFloat(d.amount) * refPercent) / 100;
+      if (reward <= 0) continue;
+      await modifyBalanceWithClient(client, d.referred_by, reward, 'referral', {
+        gameType: 'safe', gameId: safeId, description: `${refPercent}% от вклада в Сейф $${parseFloat(d.amount)}`
+      });
+      referralTotal += reward;
+    }
+    const commission = parseFloat(claimed.rows[0].commission_amount);
+    const platformCut = Math.round((commission - referralTotal) * 100) / 100;
+    await logPlatformRevenueWithClient(client, platformCut, 'safe');
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
 }
 
 export async function startCracking() {
@@ -796,6 +828,7 @@ export async function startCracking() {
     [safe.id]
   );
   if (!upd.rows.length) return { cancelled: false, started: false };
+  await settleSafeCommission(safe.id);
 
   // Следующий сейф создаём ПОСЛЕ перевода текущего во взлом: сбор не должен
   // прерываться ни на минуту (иначе ensureNextDaySafe увидел бы «сбор идёт»)

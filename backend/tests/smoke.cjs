@@ -90,7 +90,7 @@ const DDL = [
   `CREATE TABLE safes (id SERIAL PRIMARY KEY, bank DECIMAL DEFAULT 0, prize_pool DECIMAL DEFAULT 0,
      commission_amount DECIMAL DEFAULT 0, code INTEGER[], drum_speeds DOUBLE PRECISION[],
      status VARCHAR(16) DEFAULT 'collecting', bonus BOOLEAN DEFAULT FALSE, participants_count INTEGER DEFAULT 0,
-     winners_count INTEGER DEFAULT 0, date DATE UNIQUE, cracked_at TIMESTAMP, crack_started_at TIMESTAMPTZ,
+     winners_count INTEGER DEFAULT 0, commission_settled BOOLEAN DEFAULT FALSE, date DATE UNIQUE, cracked_at TIMESTAMP, crack_started_at TIMESTAMPTZ,
      collect_started_at TIMESTAMPTZ)`,
   `CREATE TABLE safe_deposits (id SERIAL PRIMARY KEY, safe_id INTEGER, user_id INTEGER, amount DECIMAL NOT NULL,
      crack_time_ms INTEGER, prize DECIMAL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), UNIQUE(safe_id, user_id))`,
@@ -100,7 +100,8 @@ const DDL = [
   `CREATE TABLE platform_cashbox (id SERIAL PRIMARY KEY, amount DECIMAL DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE vault_deposits (id SERIAL PRIMARY KEY, user_id INTEGER, amount DECIMAL NOT NULL, term_days INTEGER NOT NULL,
      multiplier DECIMAL NOT NULL, days_elapsed INTEGER DEFAULT 0, accumulated_profit DECIMAL DEFAULT 0,
-     status VARCHAR(16) DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW(), unlocked_at TIMESTAMP)`,
+     status VARCHAR(16) DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW(), unlocked_at TIMESTAMP, unlocks_at TIMESTAMPTZ)`,
+  `CREATE TABLE vault_deposit_accruals (id SERIAL PRIMARY KEY, deposit_id INTEGER, user_id INTEGER, date DATE, pool_amount DECIMAL, profit DECIMAL, UNIQUE(deposit_id,date))`,
   `CREATE TABLE vault_pool_daily (id SERIAL PRIMARY KEY, date DATE UNIQUE NOT NULL, platform_revenue DECIMAL DEFAULT 0,
      auto_pool DECIMAL DEFAULT 0, manual_pool DECIMAL DEFAULT 0, total_pool DECIMAL DEFAULT 0,
      total_locked DECIMAL DEFAULT 0, depositors_count INTEGER DEFAULT 0, base_rate DECIMAL DEFAULT 0,
@@ -782,6 +783,7 @@ const finish = () => {
     for (const d of [todayStr, yStr]) {
       await query(`INSERT INTO daily_revenue (date, source, amount) VALUES ($1, 'duel', 400)`, [d]);
     }
+    await query(`INSERT INTO vault_pool_daily(date,max_deposit) VALUES($1,500)`, [yStr]);
 
     const money = async id => (await query(
       `SELECT balance, frozen_balance FROM users WHERE id = $1`, [id])).rows[0];
@@ -816,8 +818,9 @@ const finish = () => {
 
     // ── Выплата в срок ───────────────────────────────────────────────────
     const dep30 = await vaultSvc.lockVaultDeposit(1, 200, 30);
-    await query(`UPDATE vault_deposits SET days_elapsed = 29 WHERE id = $1`, [dep30.deposit_id]);
+    await query(`UPDATE vault_deposits SET days_elapsed = 29, unlocks_at=NOW()-INTERVAL '1 minute' WHERE id = $1`, [dep30.deposit_id]);
     const dist = await vaultSvc.dailyVaultDistribution();
+    const matured = await vaultSvc.completeMatureVaultDeposits();
     const m3 = await money(1);
     // пул вчера = 400 × 15% = 60, вклад один → вся прибыль ему: 200 + 60 = 260
     check('выплата в срок: 800 + (200 тело + 60 прибыль) = 1060, заморозки нет',
@@ -828,7 +831,7 @@ const finish = () => {
     const pool = (await query(`SELECT total_pool, total_locked FROM vault_pool_daily WHERE date = $1`, [yStr])).rows[0];
     check('пул дня записан: 60 распределено, 200 заблокировано',
       Number(pool.total_pool) === 60 && Number(pool.total_locked) === 200, pool);
-    check('отчёт о распределении', dist.distributed === 60 && dist.completed === 1, dist);
+    check('отчёт о распределении', dist.distributed === 60 && dist.completed === 0 && matured === 1, dist);
 
     // ── Починка вкладов, открытых прежним кодом ──────────────────────────
     await query(`INSERT INTO vault_deposits (user_id, amount, term_days, multiplier, status)

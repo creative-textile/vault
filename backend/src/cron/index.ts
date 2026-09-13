@@ -3,7 +3,7 @@ import {
   createDailySafe, startCracking, getTodaySafe, ensureNextDaySafe,
   finalizeCrackIfDue, resumeCracking, getCollectingSafeOrNull, getCollectStartedAt
 } from '../services/safe';
-import { dailyVaultDistribution } from '../services/vault-deposit';
+import { dailyVaultDistribution, completeMatureVaultDeposits } from '../services/vault-deposit';
 import { getSetting } from '../services/revenue';
 import { broadcast } from '../services/notifications';
 import { nowMSK, todayMSK, todaySlotMSK } from '../utils/time';
@@ -95,6 +95,11 @@ export function initCrons() {
     } catch (e: any) {
       console.error('[CRON safe] error:', e.message);
     }
+  }));
+
+  // Полные сроки вкладов завершаются независимо от полуночного начисления.
+  tasks.push(cron.schedule('* * * * *', async () => {
+    try { await completeMatureVaultDeposits(); } catch (e: any) { console.error('[CRON vault maturity]', e.message); }
   }));
 
   // 21:00 UTC == 00:00 MSK — распределение Вклада

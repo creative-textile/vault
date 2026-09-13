@@ -106,15 +106,15 @@ export async function acceptDuel(duelId: number, opponentId: number) {
   const result = Math.random() < 0.5 ? 'heads' : 'tails';
   const winnerId = result === 'heads' ? duel.creator_id : opponentId;
 
-  // Комиссия 10% от общего банка
   const total = amount * 2;
-  const commission = Math.round(total * 0.10 * 100) / 100;
+  const commissionPercent = parseFloat(await getSetting('commission_percent') || '10');
+  const commission = Math.round(total * (commissionPercent / 100) * 100) / 100;
   const prize = Math.round((total - commission) * 100) / 100;
 
   // Распределение комиссии для обоих игроков
   for (const pid of [duel.creator_id, opponentId]) {
     const refCut = await payReferral(pid, amount, 'duel');
-    const platformCut = Math.round((amount * 0.10 - refCut) * 100) / 100;
+    const platformCut = Math.round((amount * (commissionPercent / 100) - refCut) * 100) / 100;
     if (platformCut > 0) {
       await logPlatformRevenue(platformCut, 'duel');
     }

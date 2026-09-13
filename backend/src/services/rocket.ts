@@ -58,8 +58,8 @@ export async function placeBet(userId: number, betAmount: number) {
   // Списать ставку
   await modifyBalance(userId, -betAmount, 'bet', { gameType: 'rocket' });
 
-  // Комиссия 10%
-  const commission = Math.round(betAmount * 0.10 * 100) / 100;
+  const commissionPercent = parseFloat(await getSetting('commission_percent') || '10');
+  const commission = Math.round(betAmount * (commissionPercent / 100) * 100) / 100;
   const toBankroll = betAmount - commission; // 90%
   const toReferrer = await payReferral(userId, betAmount, 'rocket'); // 3%
   const toPlatform = commission - toReferrer; // 7%
