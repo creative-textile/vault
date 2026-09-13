@@ -216,6 +216,8 @@
 
 ## Этап 2 — безопасность и контроль доступа: 100%
 
+Локальная эксплуатация: Docker Compose передаёт security-переменные явно; пароль по умолчанию `admin`, пользовательское значение берётся из корневого `.env`. Production обязан переопределить все demo defaults.
+
 ✅ Redis rate limiting и distributed leases; PIN lockout; строгая money/PIN и bounded JSON validation; двойной admin access; audit log; origin allowlist; Socket.io Redis adapter; HMAC-хеши устройств/IP; уникальный withdrawal wallet; antifraud flags и интерфейс проверки. Telegram HMAC и реальные wallet-связи по решению заказчика остаются в последнем этапе.
 
 ## Этап 3 — уведомления и жизненный цикл пользователей: ~25%

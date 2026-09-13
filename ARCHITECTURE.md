@@ -707,3 +707,7 @@ Requests pass through a 32 KB JSON limit, structural validation, a 60/minute Red
 Administrator routes require JWT authentication, an allowlisted Telegram ID and a constant-time comparison of `X-Admin-Password`. Mutations are asynchronously recorded in `admin_audit_log`; PIN/password fields are redacted. `user_security_identifiers` stores only HMAC-SHA256 hashes using `SECURITY_PEPPER`, and shared identifiers produce reviewable `antifraud_flags`. Withdrawal addresses have a partial unique index.
 
 Socket.io uses the Redis adapter when available. Redis leases coordinate Safe cron ticks, Vault distribution, and Rocket launch ownership across backend replicas; database transactions and idempotency markers remain authoritative if Redis is unavailable.
+
+### Local administrator credentials
+
+`docker-compose.yml` explicitly forwards `ADMIN_PASSWORD`, `JWT_SECRET`, `SECURITY_PEPPER` and `ALLOWED_ORIGINS` to backend. Local defaults are development-only; `ADMIN_PASSWORD` defaults to `admin`. A changed root `.env` requires recreation of the backend container (`docker compose up -d --build backend frontend`).

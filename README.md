@@ -363,3 +363,15 @@ The non-blockchain security stage is implemented:
 - CORS is restricted by `ALLOWED_ORIGINS`.
 
 Required secrets are documented in `.env.example`. Real Telegram `initData` signature validation and real TON wallet checks intentionally remain in the final Telegram/TON stage.
+
+### Локальный вход в админку
+
+Docker Compose передаёт `ADMIN_PASSWORD` в backend. Если корневого `.env` нет, локальный пароль — **`admin`**. Чтобы использовать свой пароль:
+
+```bash
+cp .env.example .env
+# измените ADMIN_PASSWORD в .env
+docker compose up -d --build backend frontend
+```
+
+После неправильного пароля обновите страницу админки: ошибочное значение удаляется из `sessionStorage`, и приложение запросит пароль снова. Строки `replace_with_...` в старом `.env.example` были обозначениями-заглушками, а не фактически переданными контейнеру значениями.

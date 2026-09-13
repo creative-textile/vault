@@ -45,6 +45,11 @@ services:
       TON_WALLET_MNEMONIC: ""
       USDT_JETTON_ADDRESS: "0:0000000000000000000000000000000000000000000000000000000000000000"
       ADMIN_TELEGRAM_IDS: ${ADMIN_TELEGRAM_IDS:-0}
+      # Локальный пароль — admin, либо значение ADMIN_PASSWORD из корневого .env.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      JWT_SECRET: ${JWT_SECRET:-local_demo_jwt_secret_change_in_production}
+      SECURITY_PEPPER: ${SECURITY_PEPPER:-local_demo_security_pepper_change_in_production}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
       DEMO_MODE: "true"
       PORT: 8000
     depends_on:
