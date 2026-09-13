@@ -5,9 +5,10 @@ interface Props {
   phase: 'idle' | 'flying' | 'crashed' | 'cashed';
   multiplier?: number;
   onReady?: () => void;
+  seed?: string;
 }
 
-export default function RocketScene({ phase, multiplier = 1 }: Props) {
+export default function RocketScene({ phase, multiplier = 1, seed = 'vault-rocket' }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const stateRef = useRef({ phase, multiplier, rocket: null as THREE.Group | null, particles: null as THREE.Points | null });
 
@@ -23,6 +24,8 @@ export default function RocketScene({ phase, multiplier = 1 }: Props) {
     const w = container.clientWidth;
     const h = container.clientHeight;
 
+    let hash=2166136261; for(const c of seed) hash=Math.imul(hash^c.charCodeAt(0),16777619);
+    const rand=()=>{ hash=(Math.imul(hash,1664525)+1013904223)>>>0; return hash/0x100000000; };
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x0a0a2a, 0.05);
 
@@ -40,9 +43,9 @@ export default function RocketScene({ phase, multiplier = 1 }: Props) {
     const starCount = 500;
     const starPos = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i++) {
-      starPos[i*3] = (Math.random() - 0.5) * 100;
-      starPos[i*3+1] = (Math.random() - 0.5) * 100;
-      starPos[i*3+2] = (Math.random() - 0.5) * 100 - 20;
+      starPos[i*3] = (rand() - 0.5) * 100;
+      starPos[i*3+1] = (rand() - 0.5) * 100;
+      starPos[i*3+2] = (rand() - 0.5) * 100 - 20;
     }
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
     const stars = new THREE.Points(
@@ -119,13 +122,13 @@ export default function RocketScene({ phase, multiplier = 1 }: Props) {
     for (let i = 0; i < 20; i++) {
       const piece = new THREE.Mesh(
         new THREE.BoxGeometry(0.2, 0.2, 0.2),
-        new THREE.MeshStandardMaterial({ color: Math.random() > 0.5 ? 0xff4444 : 0xeeeeee })
+        new THREE.MeshStandardMaterial({ color: rand() > 0.5 ? 0xff4444 : 0xeeeeee })
       );
       piece.userData = {
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: Math.random() * 0.3,
-        vz: (Math.random() - 0.5) * 0.3,
-        vr: new THREE.Vector3(Math.random() * 0.2, Math.random() * 0.2, Math.random() * 0.2)
+        vx: (rand() - 0.5) * 0.3,
+        vy: rand() * 0.3,
+        vz: (rand() - 0.5) * 0.3,
+        vr: new THREE.Vector3(rand() * 0.2, rand() * 0.2, rand() * 0.2)
       };
       piece.visible = false;
       debrisGroup.add(piece);
@@ -148,9 +151,9 @@ export default function RocketScene({ phase, multiplier = 1 }: Props) {
         const targetAlt = Math.log(1 + t * 0.6) * 4;
         altitude += (targetAlt - altitude) * 0.08;
         rocket.position.y = 0.3 + altitude;
-        flame.scale.y = 1 + Math.random() * 0.5;
+        flame.scale.y = 1 + rand() * 0.5;
         (flame.material as THREE.MeshBasicMaterial).opacity = 0.9;
-        flameLight.intensity = 2 + Math.random() * 2;
+        flameLight.intensity = 2 + rand() * 2;
 
         // Звёзды летят вниз
         stars.rotation.z = t * 0.5;
@@ -160,8 +163,8 @@ export default function RocketScene({ phase, multiplier = 1 }: Props) {
 
         // Тряска при множителе > 3
         if (stateRef.current.multiplier >= 3) {
-          rocket.position.x = (Math.random() - 0.5) * 0.1;
-          rocket.position.z = (Math.random() - 0.5) * 0.1;
+          rocket.position.x = (rand() - 0.5) * 0.1;
+          rocket.position.z = (rand() - 0.5) * 0.1;
         }
       } else if (phase === 'idle') {
         rocket.rotation.y = Math.sin(t * 0.5) * 0.2;
@@ -212,7 +215,7 @@ export default function RocketScene({ phase, multiplier = 1 }: Props) {
       renderer.dispose();
       if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [seed]);
 
   return <div ref={ref} className="three-container" />;
 }

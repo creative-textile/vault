@@ -4,6 +4,7 @@ import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
 import { roundDownClean } from '../config';
+import { randomBytes } from 'crypto';
 
 const FLIGHT_CURVE = 0.075;
 
@@ -11,11 +12,11 @@ export function getMultiplierAt(elapsedSec: number): number {
   return Math.exp(FLIGHT_CURVE * elapsedSec);
 }
 
-export function calculateCrashPoint(bet: number, bankroll: number): number {
+export function calculateCrashPoint(bet: number, bankroll: number, rng:()=>number = Math.random): number {
   // 1. Макс. по кассе
   const maxByBankroll = bankroll / bet;
   // 2. Случайная точка (10% house edge)
-  const r = Math.random();
+  const r = rng();
   const randomCrash = 0.90 / (1 - r);
   // 3. Защита кассы
   let crash = Math.min(randomCrash, maxByBankroll);
@@ -74,15 +75,17 @@ async function placeBetImpl(userId: number, betAmount: number) {
   // Точка взрыва
   const crashAt = calculateCrashPoint(betAmount, bankroll + toBankroll);
 
+  const replaySeed=randomBytes(16).toString('hex');
   const res = await query(
-    `INSERT INTO rocket_rounds (user_id, bet, crash_at, flight_curve)
-     VALUES ($1, $2, $3, $4) RETURNING id, crash_at`,
-    [userId, betAmount, crashAt, FLIGHT_CURVE]
+    `INSERT INTO rocket_rounds (user_id, bet, crash_at, flight_curve, replay_seed)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id, crash_at`,
+    [userId, betAmount, crashAt, FLIGHT_CURVE,replaySeed]
   );
 
   return {
     round_id: res.rows[0].id,
     crash_at: crashAt,
+    replay_seed: replaySeed,
     max_bet: maxBet
   };
 }

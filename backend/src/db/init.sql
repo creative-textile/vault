@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS rocket_rounds (
     profit        DECIMAL(12,2) DEFAULT 0,
     flight_curve  DECIMAL(6,4) DEFAULT 0.075,
     was_beautiful BOOLEAN DEFAULT FALSE,
+    replay_seed   VARCHAR(64),
     started_at    TIMESTAMP DEFAULT NOW(),
     created_at    TIMESTAMP DEFAULT NOW()
 );
@@ -73,6 +74,8 @@ CREATE TABLE IF NOT EXISTS duels (
     id              SERIAL PRIMARY KEY,
     creator_id      INTEGER REFERENCES users(id),
     opponent_id     INTEGER REFERENCES users(id),
+    target_user_id  INTEGER REFERENCES users(id),
+    parent_duel_id  INTEGER REFERENCES duels(id),
     amount          DECIMAL(12,2) NOT NULL,
     status          VARCHAR(16) DEFAULT 'waiting',
     result          VARCHAR(8),

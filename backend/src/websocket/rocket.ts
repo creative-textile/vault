@@ -68,7 +68,7 @@ export function startRocketRound(io: Server, roundId: number, userId: number, cr
       processCrash(roundId);
       io.to(String(roundId)).emit('crash', { crash_at: crashAt });
     }
-  }, 50); // 20 FPS
+  }, 1000 / 30); // 30 server ticks/sec; client renders/interpolates at requestAnimationFrame (60 FPS)
 
   activeRounds.set(roundId, { roundId, userId, startedAt, crashAt, interval });
   return startedAt;

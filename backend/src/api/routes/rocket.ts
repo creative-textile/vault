@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import { moneyBody } from '../middleware/security';
-import { placeBet, getRocketHistory, getRocketBankroll, processCrash } from '../../services/rocket';
+import { placeBet, getRocketHistory, getRocketBankroll } from '../../services/rocket';
+import { getReplay } from '../../services/replay';
 
 const router = Router();
 
@@ -25,6 +26,13 @@ router.get('/history', async (req, res) => {
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// GET /api/rocket/replay/:id — тот же единый публичный replay JSON.
+router.get('/replay/:id', async (req,res) => {
+  const id=Number(req.params.id); const replay=Number.isInteger(id) ? await getReplay('rocket',id) : null;
+  if(!replay) return res.status(404).json({error:'Реплей не найден'});
+  res.json(replay);
 });
 
 // GET /api/rocket/bankroll

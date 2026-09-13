@@ -110,9 +110,9 @@ const DDL = [
      max_deposit DECIMAL DEFAULT 100, distributed_at TIMESTAMPTZ)`,
   `CREATE TABLE rocket_rounds (id SERIAL PRIMARY KEY, user_id INTEGER, bet DECIMAL NOT NULL, crash_at DECIMAL NOT NULL,
      cashout_at DECIMAL, profit DECIMAL DEFAULT 0, flight_curve DECIMAL DEFAULT 0.075,
-     was_beautiful BOOLEAN DEFAULT FALSE, started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
+     was_beautiful BOOLEAN DEFAULT FALSE, replay_seed VARCHAR(64), started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE rocket_bankroll (id SERIAL PRIMARY KEY, amount DECIMAL DEFAULT 1500, updated_at TIMESTAMP DEFAULT NOW())`,
-  `CREATE TABLE duels (id SERIAL PRIMARY KEY, creator_id INTEGER, opponent_id INTEGER, amount DECIMAL,
+  `CREATE TABLE duels (id SERIAL PRIMARY KEY, creator_id INTEGER, opponent_id INTEGER, target_user_id INTEGER, parent_duel_id INTEGER, amount DECIMAL,
      status VARCHAR(16) DEFAULT 'waiting', result VARCHAR(8), winner_id INTEGER, coin_trajectory JSONB,
      created_at TIMESTAMP DEFAULT NOW(), finished_at TIMESTAMP)`,
   `CREATE TABLE user_notifications (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, type VARCHAR(50) NOT NULL,
@@ -947,6 +947,15 @@ const finish = () => {
     check('транзакция возврата при отмене одна', Number(refundTx.c) === 1, refundTx.c);
     check('отменённый раунд не держит деньги: safe_locked 0',
       (await getBalanceSnapshot(2)).safe_locked === 0, await getBalanceSnapshot(2));
+
+    // 100 000 воспроизводимых раундов: фиксированный cashout x2 должен дать
+    // RTP около 90%, то есть фактический house edge около 10%.
+    let rngSeed=0x36711, returned=0; const rounds=100000, target=2;
+    const seededRng=()=>{ rngSeed=(Math.imul(rngSeed,1664525)+1013904223)>>>0; return rngSeed/0x100000000; };
+    for(let i=0;i<rounds;i++) if(rocketSvc.calculateCrashPoint(1,1e12,seededRng)>target) returned+=target;
+    const rtp=returned/rounds, houseEdge=1-rtp;
+    check('Rocket: статистический тест 1000+ раундов подтверждает house edge около 10%',
+      rtp>0.885 && rtp<0.915,{rounds,rtp,house_edge:houseEdge});
 
     return finish();
   }

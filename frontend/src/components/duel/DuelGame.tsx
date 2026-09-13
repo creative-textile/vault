@@ -49,7 +49,6 @@ export default function DuelGame() {
         if (!mounted) return () => {};
         if (!duelId) {
           setLoadErr('Дуэль не найдена');
-          setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
         
@@ -70,7 +69,6 @@ export default function DuelGame() {
         if (!mounted) return;
         if (!res || !res.id) {
           setLoadErr('Дуэль не найдена');
-          setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
 
@@ -79,7 +77,6 @@ export default function DuelGame() {
           setLoadErr(res.status === 'waiting'
             ? 'Дуэль ещё не состоялась — ждём соперника'
             : 'Дуэль отменена');
-          setTimeout(() => nav('/duel', { replace: true }), 1500);
           return;
         }
         
@@ -160,7 +157,6 @@ export default function DuelGame() {
         if (!hasFreshDuelResults(Number(id))) releaseBalance();
         if (!mounted) return;
         setLoadErr(e?.message || 'Ошибка загрузки дуэли');
-        setTimeout(() => nav('/duel', { replace: true }), 1500);
       }
     })();
     return () => {
@@ -174,8 +170,8 @@ export default function DuelGame() {
   const rematch = async (mult = 1) => {
     if (!id) return;
     try {
-      const newAmt = Math.round(amount * mult * 100) / 100;
-      await duelApi.create(newAmt);
+      await duelApi.rematch(Number(id),mult);
+      showToast('Адресный реванш отправлен сопернику');
       nav('/duel');
     } catch {
       nav('/duel');
@@ -248,6 +244,10 @@ export default function DuelGame() {
             <button className="btn" onClick={() => rematch(1)}>⚔️ РЕВАНШ ${amount}</button>
             <button className="btn btn-secondary" onClick={() => rematch(2)}>⚔️ ×2</button>
           </div>
+          <button className="btn btn-secondary" onClick={() => {
+            const url=`${location.origin}/replay/duel/${id}`;
+            if(navigator.share) navigator.share({title:'Повтор дуэли VAULT',url}); else navigator.clipboard?.writeText(url).then(()=>showToast('Ссылка скопирована'));
+          }}>📤 ПОДЕЛИТЬСЯ РЕПЛЕЕМ</button>
           <button className="btn btn-secondary" onClick={goBack}>↩️ К ЛОББИ</button>
           <button className="btn btn-secondary mt" onClick={goHome}>🏠 НА ГЛАВНУЮ</button>
           {won && profit >= 1 && (user?.auto_safe_percent || 0) === 0 && (

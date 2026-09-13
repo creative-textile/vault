@@ -47,6 +47,8 @@ export const publicConfig = async () => {
   return _pubConfig;
 };
 
+export const replayApi = { get: (game:'rocket'|'duel'|'safe',id:number) => api(`/api/replay/${game}/${id}`) };
+
 export const authApi = {
   telegram: (initData: string, refCode?: string) =>
     api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData, refCode }) }),
@@ -93,7 +95,9 @@ export const duelApi = {
   markAllNotificationsAsRead: () => api('/api/duel/notifications/read-all', { method: 'POST' }),
   markDuelNotificationsAsRead: (duelId: number) =>
     api(`/api/duel/notifications/read-duel/${duelId}`, { method: 'POST' }),
-  getUnreadCount: () => api('/api/duel/notifications/count')
+  getUnreadCount: () => api('/api/duel/notifications/count'),
+  rematch: (id:number,multiplier=1) => api(`/api/duel/rematch/${id}`,{method:'POST',body:JSON.stringify({multiplier})}),
+  decline: (id:number) => api(`/api/duel/decline/${id}`,{method:'POST'})
 };
 
 export const safeApi = {

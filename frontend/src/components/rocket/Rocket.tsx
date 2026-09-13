@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import MoneyBreakdown from '../common/MoneyBreakdown';
 import Header from '../layout/Header';
 import RocketScene from '../../three/rocket/RocketScene';
@@ -37,7 +38,10 @@ export default function Rocket() {
   const [profit, setProfit] = useState(0);
   const [showSafePrompt, setShowSafePrompt] = useState(false);
   const [sceneKey, setSceneKey] = useState(0); // форсируем ремаунт сцены
+  const [replaySeed,setReplaySeed]=useState('vault-rocket');
   const launchTimeRef = useRef(0);
+  const renderedMultiplierRef = useRef(1);
+  const targetTickRef = useRef({multiplier:1,receivedAt:performance.now()});
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
   const [minBet, setMinBet] = useState(1);
@@ -66,7 +70,7 @@ export default function Rocket() {
     const sock = getSocket();
 
     const onTick = (data: any) => {
-      setMultiplier(data.multiplier);
+      targetTickRef.current={multiplier:Number(data.multiplier),receivedAt:performance.now()};
       // Дублируем в общий стор: бейдж «ЗАБРАТЬ» рисует этот же множитель,
       // если игрока увели с экрана ракеты во время полёта
       setFlightMultiplier(data.multiplier);
@@ -125,6 +129,22 @@ export default function Rocket() {
     };
   }, [refreshUser]);
 
+  // Socket даёт authoritative checkpoints 30 FPS; requestAnimationFrame
+  // интерполирует между ними с той же серверной кривой для плавных 60 FPS.
+  useEffect(()=>{
+    if(phase!=='flying') return;
+    let frame=0;
+    const render=()=>{
+      const t=targetTickRef.current;
+      const projected=t.multiplier*Math.exp(0.075*Math.min(100,performance.now()-t.receivedAt)/1000);
+      renderedMultiplierRef.current += (projected-renderedMultiplierRef.current)*0.45;
+      setMultiplier(renderedMultiplierRef.current);
+      frame=requestAnimationFrame(render);
+    };
+    frame=requestAnimationFrame(render);
+    return()=>cancelAnimationFrame(frame);
+  },[phase]);
+
   const start = async () => {
     const b = parseFloat(bet);
     if (!b || b < minBet) return showToast(`Мин. ставка $${minBet}`);
@@ -134,7 +154,10 @@ export default function Rocket() {
       setRoundId(res.round_id);
       setMaxBet(res.max_bet);
       setCrashAt(res.crash_at);
+      setReplaySeed(res.replay_seed || `rocket-${res.round_id}`);
       setMultiplier(1.0);
+      renderedMultiplierRef.current=1;
+      targetTickRef.current={multiplier:1,receivedAt:performance.now()};
       setPhase('flying');
       launchTimeRef.current = Date.now();
       // Полёт принадлежит серверу (тики и падение идут без клиента), поэтому
@@ -191,7 +214,7 @@ export default function Rocket() {
     <>
       <Header title="🚀 Ракета" />
 
-      <RocketScene key={sceneKey} phase={scenePhase as any} multiplier={multiplier} />
+      <RocketScene key={sceneKey} phase={scenePhase as any} multiplier={multiplier} seed={replaySeed} />
 
       <div style={{padding:'12px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
         {/* Ставка проверяется и списывается из «доступно» (баланс минус
@@ -260,7 +283,7 @@ export default function Rocket() {
         <div className="scroll-list" style={{maxHeight:220, overflowY:'auto'}}>
           {history.slice(0, 15).map(h => (
             <div key={h.round_id} className="history-item" style={{fontSize:13}}>
-              <span className="text-dim">#{h.round_id} {h.player}</span>
+              <Link className="text-dim" to={`/replay/rocket/${h.round_id}`}>📼 #{h.round_id} {h.player}</Link>
               <span>
                 ${h.bet.toFixed(0)}
                 {h.cashout_at

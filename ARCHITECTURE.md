@@ -723,3 +723,11 @@ Safe emits reminder/start/result/cancellation events to participants. Vault dist
 ### Onboarding navigation isolation
 
 The client authentication effect is guarded by an `authInFlight` ref, including under React StrictMode. This prevents the new/existing-account response race that closed onboarding. While onboarding is active, route-changing game controllers and notification modals are unmounted; data-level socket handling may continue without taking over navigation.
+
+## Stage 4: deterministic replay contract
+
+`services/replay.ts` projects immutable public data for all games into replay envelope v1. `/api/replay/:game/:id` is public and deliberately excludes Telegram IDs, balances and unfinished Safe secrets; `/api/rocket/replay/:id` is the Rocket-specific alias. Frontend `/replay/:game/:id` reconstructs scenes from stored outcome/animation parameters and exposes Web Share/clipboard links.
+
+Rocket stores a cryptographic `replay_seed`; its Three.js PRNG makes stars, debris and effects reproducible. The authoritative loop emits 30 checkpoints per second, while the client predicts the same exponential curve between checkpoints on `requestAnimationFrame` (normally 60 FPS). The seeded 100,000-round test validates the configured 0.90 RTP model.
+
+Directed Duel rematches store `target_user_id` and `parent_duel_id`. Only the target can accept/decline. Decline status and reserved-funds release share one SQL transaction. Automatic delayed Duel error redirects were removed: stale timers can no longer move a user after they leave a screen.

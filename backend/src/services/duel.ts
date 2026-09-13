@@ -3,7 +3,7 @@ import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
-import { notifyDuelResult } from './notifications';
+import { notifyDuelResult, notifyPreferred } from './notifications';
 
 async function createDuelImpl(userId: number, amount: number) {
   const user = await getUser(userId);
@@ -40,6 +40,28 @@ async function createDuelImpl(userId: number, amount: number) {
   return { duel_id: res.rows[0].id };
 }
 
+export async function createRematch(userId:number,sourceId:number,multiplier=1) {
+  const source=await getDuel(sourceId);
+  if(!source || source.status!=='finished' || ![source.creator_id,source.opponent_id].includes(userId)) throw new Error('Исходная дуэль недоступна');
+  const target=source.creator_id===userId ? source.opponent_id : source.creator_id;
+  const amount=Math.round(Number(source.amount)*Math.min(2,Math.max(1,multiplier))*100)/100;
+  const made=await createDuel(userId,amount);
+  await query(`UPDATE duels SET target_user_id=$1,parent_duel_id=$2 WHERE id=$3`,[target,sourceId,made.duel_id]);
+  await notifyPreferred(target,'notif_duel',`Вам предложен реванш на $${amount.toFixed(2)}`,'duel_rematch','Реванш',{duel_id:made.duel_id,parent_duel_id:sourceId},'duel_rematch',made.duel_id);
+  return {...made,target_user_id:target,amount};
+}
+
+async function declineRematchImpl(duelId:number,userId:number) {
+  const d=(await query(`SELECT * FROM duels WHERE id=$1`,[duelId])).rows[0];
+  if(!d || d.status!=='waiting' || d.target_user_id!==userId) throw new Error('Реванш недоступен');
+  const amount=Number(d.amount);
+  const claim=await query(`UPDATE duels SET status='declined' WHERE id=$1 AND status='waiting' RETURNING id`,[duelId]);
+  if(!claim.rows.length) throw new Error('Реванш уже обработан');
+  await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1`,[amount,d.creator_id]);
+  await notifyPreferred(d.creator_id,'notif_duel','Соперник отклонил реванш','duel_rematch_declined','Реванш отклонён',{duel_id:duelId},'duel_rematch_declined',duelId);
+  return {success:true};
+}
+
 export async function getLobby() {
   const res = await query(
     `SELECT d.*, u.username as creator_name
@@ -54,7 +76,9 @@ export async function getLobby() {
     creator_id: r.creator_id,
     creator_name: '@' + (r.creator_name || 'user'),
     amount: parseFloat(r.amount),
-    created_at: r.created_at
+    created_at: r.created_at,
+    target_user_id: r.target_user_id,
+    parent_duel_id: r.parent_duel_id
   }));
 }
 
@@ -79,6 +103,7 @@ async function acceptDuelImpl(duelId: number, opponentId: number) {
   const duel = duelRes.rows[0];
   if (duel.status !== 'waiting') throw new Error('Вызов уже принят или отменён');
   if (duel.creator_id === opponentId) throw new Error('Нельзя играть с самим собой');
+  if (duel.target_user_id && duel.target_user_id !== opponentId) throw new Error('Этот реванш адресован другому игроку');
 
   const amount = parseFloat(duel.amount);
   const available = await getAvailableBalance(opponentId);
@@ -366,5 +391,6 @@ export async function repairDoubleLockedOpenDuels(): Promise<number> {
 
 // Составные денежные операции целиком выполняются в одной SQL-транзакции.
 export const createDuel: typeof createDuelImpl = (...args: Parameters<typeof createDuelImpl>) => withTransaction(() => createDuelImpl(...args));
+export const declineRematch: typeof declineRematchImpl = (...args: Parameters<typeof declineRematchImpl>) => withTransaction(() => declineRematchImpl(...args));
 export const cancelDuel: typeof cancelDuelImpl = (...args: Parameters<typeof cancelDuelImpl>) => withTransaction(() => cancelDuelImpl(...args));
 export const acceptDuel: typeof acceptDuelImpl = (...args: Parameters<typeof acceptDuelImpl>) => withTransaction(() => acceptDuelImpl(...args));

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import MoneyBreakdown from '../common/MoneyBreakdown';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi, publicConfig } from '../../api/client';
@@ -368,6 +368,7 @@ export default function Safe() {
 
           {showLast && last.status === 'finished' && (
             <>
+              <Link className="btn btn-small btn-secondary" to={`/replay/safe/${last.id}`}>📼 Реплей и ссылка</Link>
               {/* Исход для игрока: приз и результат «чистыми» */}
               {showOutcome && (
                 <div className="card" style={{ margin: '12px 0 0', background: `${out.color}1f`, border: `1px solid ${out.color}` }}>

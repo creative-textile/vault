@@ -17,6 +17,7 @@ import safeRoutes from './api/routes/safe';
 import vaultRoutes from './api/routes/vault-deposit';
 import referralRoutes from './api/routes/referral';
 import adminRoutes from './api/routes/admin';
+import replayRoutes from './api/routes/replay';
 import { registerRocketHandlers, startRocketRound } from './websocket/rocket';
 
 const app = express();
@@ -42,6 +43,7 @@ app.use('/api/safe', safeRoutes);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/replay', replayRoutes);
 
 // WebSocket: при получении rocket round start, запустить тики
 const server = http.createServer(app);
@@ -113,6 +115,9 @@ server.listen(config.port, async () => {
   try {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`);
+    await query(`ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS replay_seed VARCHAR(64)`);
+    await query(`ALTER TABLE duels ADD COLUMN IF NOT EXISTS target_user_id INTEGER REFERENCES users(id)`);
+    await query(`ALTER TABLE duels ADD COLUMN IF NOT EXISTS parent_duel_id INTEGER REFERENCES duels(id)`);
     // Отметка старта фазы взлома сейфа (нужна существующим БД: окно взлома считается от неё)
     try {
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS crack_started_at TIMESTAMPTZ`);

@@ -31,6 +31,7 @@ import DuelResultModal from './components/common/DuelResultModal';
 import NotificationsModal from './components/common/NotificationsModal';
 import SafeCrackRedirector from './components/safe/SafeCrackRedirector';
 import RocketFlightBadge from './components/common/RocketFlightBadge';
+import Replay from './components/common/Replay';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -196,6 +197,8 @@ export default function App() {
   // Авто-вход по Telegram initData или демо
   useEffect(() => {
     if (token || loading || authInFlight.current) return;
+    // Публичный replay не создаёт скрытый demo-аккаунт и не требует входа.
+    if (window.location.pathname.startsWith('/replay/')) return;
     authInFlight.current = true;
     (async () => {
       try {
@@ -302,6 +305,7 @@ export default function App() {
               <Route path="/profile" element={<Profile />} />
               <Route path="/admin" element={<AdminPanel />} />
               <Route path="/set-pin" element={<SetPin />} />
+              <Route path="/replay/:game/:id" element={<Replay />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </div>
