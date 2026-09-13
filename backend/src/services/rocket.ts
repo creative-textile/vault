@@ -1,8 +1,10 @@
 import { query } from '../db/pool';
+import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
 import { roundDownClean } from '../config';
+import { randomBytes } from 'crypto';
 
 const FLIGHT_CURVE = 0.075;
 
@@ -10,11 +12,11 @@ export function getMultiplierAt(elapsedSec: number): number {
   return Math.exp(FLIGHT_CURVE * elapsedSec);
 }
 
-export function calculateCrashPoint(bet: number, bankroll: number): number {
+export function calculateCrashPoint(bet: number, bankroll: number, rng:()=>number = Math.random): number {
   // 1. Макс. по кассе
   const maxByBankroll = bankroll / bet;
   // 2. Случайная точка (10% house edge)
-  const r = Math.random();
+  const r = rng();
   const randomCrash = 0.90 / (1 - r);
   // 3. Защита кассы
   let crash = Math.min(randomCrash, maxByBankroll);
@@ -37,10 +39,11 @@ export async function getRocketBankroll(): Promise<number> {
 }
 
 export async function updateRocketBankroll(delta: number) {
-  await query('UPDATE rocket_bankroll SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [delta]);
+  const res=await query('UPDATE rocket_bankroll SET amount=amount+$1,updated_at=NOW() WHERE id=1 AND amount+$1 >= 0 RETURNING amount',[Math.round(delta*100)/100]);
+  if (!res.rows.length) throw new Error('Недостаточно средств в кассе Ракеты');
 }
 
-export async function placeBet(userId: number, betAmount: number) {
+async function placeBetImpl(userId: number, betAmount: number) {
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
 
@@ -52,14 +55,14 @@ export async function placeBet(userId: number, betAmount: number) {
 
   const minBet = parseFloat(await getSetting('min_bet') || '1');
   if (betAmount < minBet) throw new Error(`Минимальная ставка: $${minBet}`);
-  if (betAmount > available) throw new Error('Недостаточно средств');
+  if (Math.round(betAmount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
   if (betAmount > maxBet) throw new Error(`Максимальная ставка: $${maxBet}`);
 
   // Списать ставку
   await modifyBalance(userId, -betAmount, 'bet', { gameType: 'rocket' });
 
-  // Комиссия 10%
-  const commission = Math.round(betAmount * 0.10 * 100) / 100;
+  const commissionPercent = parseFloat(await getSetting('commission_percent') || '10');
+  const commission = Math.round(betAmount * (commissionPercent / 100) * 100) / 100;
   const toBankroll = betAmount - commission; // 90%
   const toReferrer = await payReferral(userId, betAmount, 'rocket'); // 3%
   const toPlatform = commission - toReferrer; // 7%
@@ -72,20 +75,22 @@ export async function placeBet(userId: number, betAmount: number) {
   // Точка взрыва
   const crashAt = calculateCrashPoint(betAmount, bankroll + toBankroll);
 
+  const replaySeed=randomBytes(16).toString('hex');
   const res = await query(
-    `INSERT INTO rocket_rounds (user_id, bet, crash_at, flight_curve)
-     VALUES ($1, $2, $3, $4) RETURNING id, crash_at`,
-    [userId, betAmount, crashAt, FLIGHT_CURVE]
+    `INSERT INTO rocket_rounds (user_id, bet, crash_at, flight_curve, replay_seed)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id, crash_at`,
+    [userId, betAmount, crashAt, FLIGHT_CURVE,replaySeed]
   );
 
   return {
     round_id: res.rows[0].id,
     crash_at: crashAt,
+    replay_seed: replaySeed,
     max_bet: maxBet
   };
 }
 
-export async function processCashout(roundId: number, userId: number, elapsedSec: number) {
+async function processCashoutImpl(roundId: number, userId: number, elapsedSec: number) {
   const res = await query('SELECT * FROM rocket_rounds WHERE id = $1', [roundId]);
   if (res.rows.length === 0) throw new Error('Раунд не найден');
   const round = res.rows[0];
@@ -139,7 +144,8 @@ export async function processCashout(roundId: number, userId: number, elapsedSec
     cashout_at: Math.round(currentMult * 100) / 100,
     crash_at: Math.round(finalCrash * 100) / 100,
     profit: Math.round((grossWin - bet) * 100) / 100,
-    gross_win: grossWin
+    gross_win: grossWin,
+    was_beautiful: finalCrash !== parseFloat(round.crash_at)
   };
 }
 
@@ -170,3 +176,8 @@ export async function getRocketHistory(limit = 50) {
     timestamp: r.started_at
   }));
 }
+
+
+// Составные денежные операции целиком выполняются в одной SQL-транзакции.
+export const placeBet: typeof placeBetImpl = (...args: Parameters<typeof placeBetImpl>) => withTransaction(() => placeBetImpl(...args));
+export const processCashout: typeof processCashoutImpl = (...args: Parameters<typeof processCashoutImpl>) => withTransaction(() => processCashoutImpl(...args));

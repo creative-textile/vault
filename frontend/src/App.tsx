@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import WebApp from '@twa-dev/sdk';
 import { AuthContext, User } from './stores/auth';
-import { authApi, profileApi } from './api/client';
+import { ApiError, authApi, profileApi } from './api/client';
 import { getSocket, disconnectSocket } from './api/socket';
 import {
   getStoredToken, setStoredToken, clearStoredToken,
@@ -15,6 +15,7 @@ import { holdBalance, releaseBalance, isBalanceHeld, onBalanceReleased } from '.
 
 import Onboarding from './components/onboarding/Onboarding';
 import Home from './components/layout/Home';
+import ProjectStats from './components/layout/ProjectStats';
 import Deposit from './components/wallet/Deposit';
 import Withdraw from './components/wallet/Withdraw';
 import Rocket from './components/rocket/Rocket';
@@ -31,6 +32,7 @@ import DuelResultModal from './components/common/DuelResultModal';
 import NotificationsModal from './components/common/NotificationsModal';
 import SafeCrackRedirector from './components/safe/SafeCrackRedirector';
 import RocketFlightBadge from './components/common/RocketFlightBadge';
+import Replay from './components/common/Replay';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -43,6 +45,10 @@ export default function App() {
       этом входе (`isNew`). Возврат в игру с действующим токеном в приветствие
       не выбрасывает — игрок мог быть посреди полёта ракеты или взлома сейфа. */
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // React StrictMode повторно запускает эффекты в dev. Без single-flight два
+  // одновременных запроса авторизации видели один аккаунт сначала новым, затем
+  // существующим; второй ответ закрывал только что открытый onboarding.
+  const authInFlight = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
   const { fetchNotifications, clear: clearNotifications } = useNotifications();
 
@@ -52,6 +58,8 @@ export default function App() {
   }, []);
 
   const refreshUser = useCallback(async () => {
+    const requestToken=getStoredToken();
+    if(!requestToken) return;
     try {
       const p = await profileApi.get();
       // Пока баланс «на удержании» (крутится монета в дуэли) цифры не меняем:
@@ -60,12 +68,30 @@ export default function App() {
       setUser(prev => (prev && isBalanceHeld())
         ? { ...p, balance: prev.balance, frozen_balance: prev.frozen_balance, available: prev.available }
         : p);
-    } catch {
-      setUser(null);
-      setToken(null);
-      clearStoredToken();
+    } catch (e) {
+      // Только актуальный 401 означает завершение сессии. 429, временный сбой
+      // БД/сети и запоздалый 401 старого запроса не должны запускать logout/login loop.
+      if(e instanceof ApiError && e.status===401 && getStoredToken()===requestToken) {
+        setUser(null);
+        setToken(null);
+        clearStoredToken();
+      }
     }
   }, []);
+
+  // Централизованно восстанавливаем истёкшую/сброшенную сессию. Это важно для
+  // Deposit: после 401 адрес загрузится повторно без ручного reload.
+  useEffect(() => {
+    const unauthorized=(event:Event)=>{
+      const failed=(event as CustomEvent).detail?.token;
+      if(!failed || getStoredToken()!==failed) return;
+      clearStoredToken();
+      authInFlight.current=false;
+      setUser(null); setToken(null); setLoading(false);
+    };
+    window.addEventListener('vault:unauthorized',unauthorized);
+    return()=>window.removeEventListener('vault:unauthorized',unauthorized);
+  },[]);
 
   // Баланс отпущен (досмотрели дуэль или сработала страховка по времени) —
   // подтягиваем профиль: пока цифры держались, сокет-события пропускались.
@@ -116,14 +142,10 @@ export default function App() {
 
     // События сейфа пересылаем подписчикам (Safe/SafeCrack) без перезагрузки
     // страницы: reload обрывал мини-игру взлома и ронял socket-соединение.
-    const onSafeCrackStarted = (data: any) => {
-      showToast('🔓 Начался взлом сейфа!');
-      emitSafeEvent('safe_crack_started', data);
-    };
-    const onSafeFinished = (data: any) => {
-      showToast('🏆 Сейф разыгран — итоги готовы');
-      emitSafeEvent('safe_finished', data);
-    };
+    // Broadcast обновляет экран игры, а персональные ненавязчивые сообщения
+    // приходят через persisted `notification` и учитывают настройку notif_safe.
+    const onSafeCrackStarted = (data: any) => emitSafeEvent('safe_crack_started', data);
+    const onSafeFinished = (data: any) => emitSafeEvent('safe_finished', data);
     const onSafeCancelled = (data: any) => emitSafeEvent('safe_cancelled', data);
     const onSafeCreated = (data: any) => emitSafeEvent('safe_created', data);
     const onSafeDeposit = (data: any) => emitSafeEvent('safe_deposit', data);
@@ -195,7 +217,10 @@ export default function App() {
 
   // Авто-вход по Telegram initData или демо
   useEffect(() => {
-    if (token || loading) return;
+    if (token || loading || authInFlight.current) return;
+    // Публичный replay не создаёт скрытый demo-аккаунт и не требует входа.
+    if (window.location.pathname.startsWith('/replay/')) return;
+    authInFlight.current = true;
     (async () => {
       try {
         const tg = (window as any).Telegram?.WebApp;
@@ -228,6 +253,8 @@ export default function App() {
         }
       } catch (e: any) {
         showToast('Ошибка входа: ' + e.message);
+      } finally {
+        authInFlight.current = false;
       }
     })();
   }, [token, loading, showToast]);
@@ -248,9 +275,14 @@ export default function App() {
     setShowOnboarding(false);
   };
 
-  if (loading) {
+  const publicReplay = window.location.pathname.startsWith('/replay/');
+  // Не монтируем Home и игровые pollers в коротком окне между loading=false и
+  // получением JWT: именно их 401 мог приехать позже и уничтожить новую сессию.
+  if (loading || (!token && !publicReplay)) {
     return <div className="app"><div className="container text-center" style={{paddingTop: '50vh'}}>Загрузка VAULT...</div></div>;
   }
+
+  const onboardingActive = showOnboarding && !onboardingDone;
 
   return (
     <AuthContext.Provider value={{
@@ -267,10 +299,11 @@ export default function App() {
               уведомлений в БД, переживает перезапуск приложения. От онбординга
               не зависит: флаг приветствия прежняя версия не выставляла никогда,
               а результат дуэли обязан доходить до игрока всегда. */}
-          {token && <DuelResultModal />}
-          {token && <NotificationsModal />}
-          {/* Приветственные экраны — оверлеем поверх всего приложения */}
-          {showOnboarding && !onboardingDone && (
+          {token && !onboardingActive && <DuelResultModal />}
+          {token && !onboardingActive && <NotificationsModal />}
+          {/* Пока приветствие открыто, игровые редиректы, модальные окна и
+              фоновые UI-контроллеры не монтируются и не могут сменить маршрут. */}
+          {onboardingActive && (
             <div style={{position:'fixed', inset:0, zIndex:3000, background:'#0a0a1a', overflowY:'auto'}}>
               <div className="container"><Onboarding /></div>
             </div>
@@ -279,8 +312,8 @@ export default function App() {
               ракету доступной для кэшаута, пока он не на /rocket. От онбординга
               не зависят: у нового игрока просто нет вклада в сейфе, и проверка
               состояния отрабатывает вхолостую */}
-          {token && <SafeCrackRedirector />}
-          {token && <RocketFlightBadge />}
+          {token && !onboardingActive && <SafeCrackRedirector />}
+          {token && !onboardingActive && <RocketFlightBadge />}
           <div className="container">
             <Routes>
               <Route path="/" element={<Home />} />
@@ -294,8 +327,10 @@ export default function App() {
               <Route path="/vault" element={<VaultDeposit />} />
               <Route path="/referral" element={<Referral />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/stats" element={<ProjectStats />} />
               <Route path="/admin" element={<AdminPanel />} />
               <Route path="/set-pin" element={<SetPin />} />
+              <Route path="/replay/:game/:id" element={<Replay />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </div>

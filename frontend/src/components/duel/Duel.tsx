@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import MoneyBreakdown from '../common/MoneyBreakdown';
 import { holdBalance, releaseBalance } from '../../utils/balanceHold';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import { setDuelAccepting } from '../../utils/duelTransition';
 
 interface LobbyItem {
   id: number;
@@ -13,6 +14,8 @@ interface LobbyItem {
   amount: number;
   created_at: string;
   is_mine: boolean;
+  target_user_id?: number;
+  parent_duel_id?: number;
 }
 
 const CHIPS_DEFAULTS = [5, 10, 25, 50, 100, 500];
@@ -35,7 +38,8 @@ export default function Duel() {
   const load = useCallback(async () => {
     try {
       const [lob, hist] = await Promise.all([duelApi.lobby(), duelApi.history()]);
-      setLobby(lob.map((l: any) => ({...l, is_mine: l.creator_id === user?.id})));
+      setLobby(lob.filter((l:any)=>!l.target_user_id || l.target_user_id===user?.id || l.creator_id===user?.id)
+        .map((l: any) => ({...l, is_mine: l.creator_id === user?.id})));
       setHistory(hist);
       // Завершённую дуэль лобби больше не открывает сам: результат приходит
       // модальным окном из очереди уведомлений (DuelResultModal), и игрок сам
@@ -46,7 +50,7 @@ export default function Duel() {
 
   useEffect(() => {
     load();
-    const iv = setInterval(load, 3000);
+    const iv = setInterval(load, 10000);
     return () => clearInterval(iv);
   }, [load]);
 
@@ -70,11 +74,17 @@ export default function Duel() {
     // до броска монеты. Без удержания баланс в лобби и в шапке успевал
     // измениться на глазах: цифра выдавала исход раньше анимации.
     holdBalance();
+    setDuelAccepting(true);
     try {
       const result = await duelApi.accept(id);
-      await refreshUser();
+      // Ответ уже самодостаточен: переходим к броску сразу. Ожидание profile GET
+      // оставляло лобби видимым и успевало на мгновение показать result modal.
       nav(`/duel/${id}`, { state: { result: { ...result, id } }, replace: true });
+      refreshUser().catch(()=>{});
+      // DuelGame route itself blocks the modal; transition lock is no longer needed.
+      setDuelAccepting(false);
     } catch (e: any) {
+      setDuelAccepting(false);
       releaseBalance();
       await refreshUser();
       showToast(e.message);
@@ -90,6 +100,11 @@ export default function Duel() {
     } catch (e: any) {
       showToast(e.message);
     }
+  };
+
+  const decline = async(id:number) => {
+    try { await duelApi.decline(id); showToast('Реванш отклонён'); load(); }
+    catch(e:any) { showToast(e.message); }
   };
 
   function timeAgo(iso: string) {
@@ -110,7 +125,7 @@ export default function Duel() {
         <span className="text-dim">Доступно:</span>
         <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
-      <MoneyBreakdown total={false} />
+      <MoneyBreakdown />
 
       <div className="card">
         <div className="card-title">Создать вызов</div>
@@ -132,7 +147,7 @@ export default function Duel() {
             <div key={l.id} className="lobby-item">
               <div>
                 <div style={{fontWeight:700}}>
-                  {l.is_mine ? '🟢 Ваш вызов' : l.creator_name}
+                  {l.is_mine ? '🟢 Ваш вызов' : l.parent_duel_id ? `🔁 Реванш от ${l.creator_name}` : l.creator_name}
                 </div>
                 <div className="text-dim" style={{fontSize:12}}>{timeAgo(l.created_at)} назад</div>
               </div>
@@ -141,7 +156,10 @@ export default function Duel() {
                 {l.is_mine ? (
                   <button className="btn btn-small btn-danger" onClick={() => cancel(l.id)}>✖</button>
                 ) : (
-                  <button className="btn btn-small btn-green" onClick={() => accept(l.id)}>ПРИНЯТЬ</button>
+                  <>
+                    <button className="btn btn-small btn-green" onClick={() => accept(l.id)}>ПРИНЯТЬ</button>
+                    {l.parent_duel_id && <button className="btn btn-small btn-danger" onClick={() => decline(l.id)}>✖</button>}
+                  </>
                 )}
               </div>
             </div>
@@ -154,7 +172,7 @@ export default function Duel() {
         <div className="scroll-list" style={{maxHeight:200, overflowY:'auto'}}>
           {history.slice(0, 10).map(h => (
             <div key={h.id} className="history-item" style={{fontSize:13}}>
-              <span>{h.creator} vs {h.opponent || '?'}</span>
+              <Link state={{replayFrom:'/duel'}} to={`/replay/duel/${h.id}`}>📼 {h.creator} vs {h.opponent || '?'}</Link>
               <span>${h.amount.toFixed(0)} · 🏆 {h.winner}</span>
             </div>
           ))}

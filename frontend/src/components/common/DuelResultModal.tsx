@@ -5,6 +5,7 @@ import { useAuth } from '../../stores/auth';
 import { useHasRocketFlight } from '../../utils/rocketFlight';
 import { onNotificationEvent } from '../../utils/socketEvents';
 import { holdBalance, releaseBalance } from '../../utils/balanceHold';
+import { isDuelAccepting } from '../../utils/duelTransition';
 
 /**
  * Результаты дуэлей — ОДНО модальное окно со списком.
@@ -116,7 +117,7 @@ export default function DuelResultModal() {
     || loc.pathname.startsWith('/rocket');
   // Окно не показывается на денежных экранах и на самом экране дуэли —
   // список всплывёт после возврата.
-  const blocked = moneyScreen || onReplay;
+  const blocked = moneyScreen || onReplay || isDuelAccepting();
 
   // Есть ли что прятать: непросмотренный СВЕЖИЙ результат. Старые дуэли уже
   // учтены в балансе, который игрок видел, — из-за них цифры не замораживаем.

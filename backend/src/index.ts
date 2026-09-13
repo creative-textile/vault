@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import { config } from './config';
 import { initCrons, stopCrons } from './cron';
 import { initNotifications } from './services/notifications';
+import { rateLimit, validatePayload, securityTelemetry } from './api/middleware/security';
 import { initNotificationsTable } from './services/user-notifications';
 import { startDepositListener } from './services/ton';
 
@@ -16,28 +17,54 @@ import safeRoutes from './api/routes/safe';
 import vaultRoutes from './api/routes/vault-deposit';
 import referralRoutes from './api/routes/referral';
 import adminRoutes from './api/routes/admin';
+import replayRoutes from './api/routes/replay';
 import { registerRocketHandlers, startRocketRound } from './websocket/rocket';
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1);
+app.use(cors({ origin(origin,cb) { if(!origin || config.allowedOrigins.includes(origin)) return cb(null,true); cb(new Error('Origin не разрешён')); }, credentials:true }));
+app.use(express.json({limit:'32kb'}));
+app.use(validatePayload);
+// Background state/notification polling is legitimate traffic. Per-device
+// bucket prevents two local browsers/NAT users from blocking one another.
+app.use(rateLimit('general',300,60));
+app.use(securityTelemetry);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/api', userRoutes);
+app.use('/api/wallet/withdraw', rateLimit('withdrawal',3,3600));
 app.use('/api/wallet', walletRoutes);
+app.use('/api/rocket/start', rateLimit('rocket_start',10,60));
 app.use('/api/rocket', rocketRoutes);
+app.use('/api/duel/create', rateLimit('duel_create',5,60));
+app.use('/api/duel/accept', rateLimit('duel_accept',5,60));
 app.use('/api/duel', duelRoutes);
+app.use('/api/safe/deposit', rateLimit('safe_deposit',3,60));
 app.use('/api/safe', safeRoutes);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/replay', replayRoutes);
 
 // WebSocket: при получении rocket round start, запустить тики
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' }
 });
+
+// Redis adapter synchronizes rooms/events when backend is scaled horizontally.
+(async()=>{ try {
+  const { createAdapter }=await import('@socket.io/redis-adapter');
+  const { ensureRedis }=await import('./db/redis');
+  const pub=await ensureRedis();
+  const sub=pub.duplicate({lazyConnect:true});
+  // ioredis requires an error listener on every duplicate; without it a Redis
+  // restart produced noisy "missing error handler" messages.
+  sub.on('error',(e:any)=>console.warn('[REDIS socket subscriber]',e.message));
+  await sub.connect();
+  io.adapter(createAdapter(pub,sub)); console.log('[REDIS] Socket.io adapter ready');
+} catch(e:any) { console.warn('[REDIS] Socket.io adapter fallback:',e.message); } })();
 
 initNotifications(io);
 
@@ -68,6 +95,8 @@ io.on('connection', (socket) => {
       if (res.rows.length) {
         const userId = res.rows[0].user_id;
         if (userId !== socket.data.userId) return;
+        const { ensureRedis, redis }=await import('./db/redis');
+        try { await ensureRedis(); const claimed=await redis.set(`rocket-launch:${data.round_id}`,String(userId),'PX',3600000,'NX'); if(claimed!=='OK') return; } catch { /* DB/instance guards remain fallback */ }
         startRocketRound(io, data.round_id, userId, parseFloat(res.rows[0].crash_at));
       }
     });
@@ -78,6 +107,10 @@ io.on('connection', (socket) => {
 registerRocketHandlers(io);
 
 server.listen(config.port, async () => {
+  if (!config.demoMode && (config.jwtSecret === 'vault_secret_change_me_in_prod' || config.securityPepper === 'change-me' || !config.adminPassword)) {
+    console.error('[SECURITY] JWT_SECRET, SECURITY_PEPPER и ADMIN_PASSWORD обязательны вне demo');
+    process.exit(1);
+  }
   console.log(`[VAULT] Backend running on port ${config.port}`);
   console.log(`[VAULT] Demo mode: ${config.demoMode}`);
 
@@ -94,9 +127,17 @@ server.listen(config.port, async () => {
   try {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`);
+    await query(`ALTER TABLE rocket_rounds ADD COLUMN IF NOT EXISTS replay_seed VARCHAR(64)`);
+    await query(`ALTER TABLE duels ADD COLUMN IF NOT EXISTS target_user_id INTEGER REFERENCES users(id)`);
+    await query(`ALTER TABLE duels ADD COLUMN IF NOT EXISTS parent_duel_id INTEGER REFERENCES duels(id)`);
     // Отметка старта фазы взлома сейфа (нужна существующим БД: окно взлома считается от неё)
     try {
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS crack_started_at TIMESTAMPTZ`);
+      await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS commission_settled BOOLEAN DEFAULT FALSE`);
+      await query(`ALTER TABLE vault_deposits ADD COLUMN IF NOT EXISTS unlocks_at TIMESTAMPTZ`);
+      await query(`ALTER TABLE vault_pool_daily ADD COLUMN IF NOT EXISTS distributed_at TIMESTAMPTZ`);
+      await query(`UPDATE vault_deposits SET unlocks_at=created_at + (term_days * INTERVAL '1 day') WHERE unlocks_at IS NULL`);
+      await query(`CREATE TABLE IF NOT EXISTS vault_deposit_accruals (id SERIAL PRIMARY KEY, deposit_id INTEGER REFERENCES vault_deposits(id), user_id INTEGER REFERENCES users(id), date DATE NOT NULL, pool_amount DECIMAL(12,2) NOT NULL, profit DECIMAL(12,2) NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(deposit_id,date))`);
       // Момент начала сбора: по нему планировщик понимает, не отыгран ли
       // сегодняшний слот взлома предыдущим сейфом (важно при переносе времени в админке)
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS collect_started_at TIMESTAMPTZ`);
@@ -111,18 +152,30 @@ server.listen(config.port, async () => {
         id SERIAL PRIMARY KEY, amount DECIMAL(14,2) DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW()
     )`);
     await query(`INSERT INTO platform_cashbox (id, amount) VALUES (1, 500) ON CONFLICT (id) DO NOTHING`);
+    // Инварианты real-money ledger для уже существующих БД.
+    await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_balance_nonnegative CHECK (balance >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_frozen_nonnegative CHECK (frozen_balance >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_frozen_within_balance CHECK (frozen_balance <= balance); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE platform_cashbox ADD CONSTRAINT platform_cashbox_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE safes ADD CONSTRAINT safes_money_nonnegative CHECK (bank >= 0 AND prize_pool >= 0 AND commission_amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`CREATE TABLE IF NOT EXISTS cashbox_transfers (
         id SERIAL PRIMARY KEY, from_source VARCHAR(32) NOT NULL, to_source VARCHAR(32) NOT NULL,
         amount DECIMAL(12,2) NOT NULL, note TEXT, created_at TIMESTAMP DEFAULT NOW()
     )`);
+    await query(`CREATE TABLE IF NOT EXISTS admin_audit_log (id BIGSERIAL PRIMARY KEY,actor_user_id INTEGER REFERENCES users(id),method VARCHAR(12),path TEXT,payload JSONB,status_code INTEGER,ip VARCHAR(128),user_agent TEXT,duration_ms INTEGER,created_at TIMESTAMPTZ DEFAULT NOW())`);
+    await query(`CREATE TABLE IF NOT EXISTS user_security_identifiers (id BIGSERIAL PRIMARY KEY,user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,ip_hash CHAR(64),device_hash CHAR(64),first_seen TIMESTAMPTZ DEFAULT NOW(),last_seen TIMESTAMPTZ DEFAULT NOW(),UNIQUE(user_id,ip_hash,device_hash))`);
+    await query(`CREATE TABLE IF NOT EXISTS antifraud_flags (id BIGSERIAL PRIMARY KEY,user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,kind VARCHAR(64),risk_score INTEGER DEFAULT 0,details JSONB,details_hash CHAR(64),status VARCHAR(16) DEFAULT 'open',created_at TIMESTAMPTZ DEFAULT NOW(),reviewed_at TIMESTAMPTZ,UNIQUE(user_id,kind,details_hash))`);
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS users_withdraw_address_unique ON users(withdraw_address) WHERE withdraw_address IS NOT NULL AND withdraw_address <> ''`);
     // Убедимся что настройки содержат safe_crack_hour/minute
       const defaults: Record<string,string> = {
       commission_percent:'10', withdraw_commission:'1', referral_percent:'3',
       min_bet:'1', rocket_max_bet_percent:'50', vault_pool_percent:'15',
       safe_min_bank:'25', safe_min_participants:'2', beautiful_flight_chance:'3',
-      vault_min_deposit:'10', vault_max_deposit:'100',
+      vault_min_deposit:'10', vault_max_floor:'100', vault_max_multiplier:'10', dead_balance_inactive_days:'180',
       safe_crack_hour:'21', safe_crack_minute:'0',
       safe_crack_timeout_minutes: '1',
+      safe_drum_speed_multiplier: '1',
       project_start_date: '2026-01-01'
     };
     // Принудительно обновим min_bank/safe_min_bank на корректные (на случай если в БД остались старые значения $2/$5)

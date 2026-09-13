@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import MoneyBreakdown from '../common/MoneyBreakdown';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi, publicConfig } from '../../api/client';
@@ -250,7 +250,7 @@ export default function Safe() {
           ${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}
         </span>
       </div>
-      <MoneyBreakdown total={false} />
+      <MoneyBreakdown />
 
       {/* ── Взлом идёт: короткая строка состояния ────────────────────────────
           Игрок с вкладом в этом раунде сюда просто не попадает — его уводит в
@@ -320,6 +320,11 @@ export default function Safe() {
                   <div className="text-accent" style={{ fontWeight: 700 }}>
                     Возможный приз: ${fmt(collectDeposit.amount * 1.5)}
                   </div>
+                  {collect.prize_pool + 0.001 < collectDeposit.amount * 1.5 && (
+                    <div className="text-dim" style={{ fontSize: 11, marginTop: 2 }}>
+                      В пуле пока ${fmt(collect.prize_pool)} — для полного приза нужно больше.
+                    </div>
+                  )}
                 </div>
                 <button className="btn btn-small btn-danger" onClick={cancel}>ОТМЕНА</button>
               </div>
@@ -363,6 +368,7 @@ export default function Safe() {
 
           {showLast && last.status === 'finished' && (
             <>
+              <Link className="btn btn-small btn-secondary" state={{replayFrom:'/safe'}} to={`/replay/safe/${last.id}?player=${encodeURIComponent('@'+(user?.username||'user'))}`}>📼 Реплей и ссылка</Link>
               {/* Исход для игрока: приз и результат «чистыми» */}
               {showOutcome && (
                 <div className="card" style={{ margin: '12px 0 0', background: `${out.color}1f`, border: `1px solid ${out.color}` }}>
@@ -405,8 +411,7 @@ export default function Safe() {
                   )}
                   {out.key === 'late' && (
                     <div className="text-dim" style={{ fontSize: 13, marginTop: 6 }}>
-                      Результат не был сдан до закрытия окна взлома — техническое поражение, приз $0.00.
-                      Вклад ${fmt(depAmount)} ушёл в призовой пул и достался более быстрым игрокам.
+                      Результат не был сдан вовремя. Вы поставлены в конец очереди; среди опоздавших приоритет у более раннего вклада.
                     </div>
                   )}
                 </div>
@@ -421,8 +426,7 @@ export default function Safe() {
               {results.length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <div className="text-dim" style={{ fontSize: 12, marginBottom: 8 }}>
-                    Призовой пул ${fmt(last.prize_pool)} раздаётся по порядку сдачи кода: сначала полный приз ×1.5,
-                    затем остаток пула, дальше — $0.
+                    Призовой пул ${fmt(last.prize_pool)} раздаётся по очереди: сначала завершившим взлом, затем не успевшим — по времени внесения вклада.
                   </div>
                   <div className="scroll-list" style={{ maxHeight: 260, overflowY: 'auto' }}>
                     {results.slice(0, 20).map((r, i) => {

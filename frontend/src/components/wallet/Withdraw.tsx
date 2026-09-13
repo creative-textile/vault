@@ -54,7 +54,7 @@ export default function Withdraw() {
         <div className="balance-label">Доступно</div>
         <div style={{fontSize:32, fontWeight:900, color:'#ffd700'}}>${available.toFixed(2)}</div>
         {/* Почему доступно меньше, чем на балансе */}
-        <MoneyBreakdown total={false} />
+        <MoneyBreakdown />
       </div>
 
       <div className="card">

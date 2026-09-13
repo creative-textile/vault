@@ -3,10 +3,14 @@ import {
   createDailySafe, startCracking, getTodaySafe, ensureNextDaySafe,
   finalizeCrackIfDue, resumeCracking, getCollectingSafeOrNull, getCollectStartedAt
 } from '../services/safe';
-import { dailyVaultDistribution } from '../services/vault-deposit';
+import { dailyVaultDistribution, completeMatureVaultDeposits } from '../services/vault-deposit';
 import { getSetting } from '../services/revenue';
-import { broadcast } from '../services/notifications';
+import { broadcast, notifyPreferred } from '../services/notifications';
+import { query, getClient } from '../db/pool';
 import { nowMSK, todayMSK, todaySlotMSK } from '../utils/time';
+import { getFinancialReconciliation } from '../services/financial-audit';
+import { withRedisLock } from '../services/distributed-lock';
+import { processDeadBalances } from '../services/dead-balances';
 
 /**
  * Старт взлома в настроенное время МСК.
@@ -36,6 +40,13 @@ async function maybeStartCrack(lastCrackDate: string): Promise<string> {
   }
 
   const slot = todaySlotMSK(hour, minute);
+  const untilSlot=slot.getTime()-now.getTime();
+  // Каждый lifecycle key уникален: повторные cron-тиki и несколько backend-инстансов не создают дубль.
+  if(untilSlot>0 && untilSlot<=30*60*1000) {
+    const participants=await query(`SELECT DISTINCT user_id FROM safe_deposits WHERE safe_id=$1`,[safe.id]);
+    await Promise.all(participants.rows.map((p:any)=>notifyPreferred(p.user_id,'notif_safe','До взлома Сейфа осталось не больше 30 минут',
+      'safe_reminder','Скоро взлом',{safe_id:safe.id},'safe_reminder',safe.id)));
+  }
   if (now.getTime() < slot.getTime()) return lastCrackDate; // слот ещё не наступил
 
   // Слот уже наступил. Проверяем, не отыгран ли он предыдущим сейфом
@@ -91,16 +102,39 @@ export function initCrons() {
   let lastCrackDate = '';
   tasks.push(cron.schedule('* * * * *', async () => {
     try {
-      lastCrackDate = await runSafeTick(lastCrackDate);
+      const next = await withRedisLock('safe-tick',55000,()=>runSafeTick(lastCrackDate));
+      if(next !== undefined) lastCrackDate=next;
     } catch (e: any) {
       console.error('[CRON safe] error:', e.message);
     }
   }));
 
+  // Финансовая самопроверка: нарушение инварианта попадает в production logs/alerts.
+  tasks.push(cron.schedule('7 * * * *', async () => {
+    try {
+      const audit=await getFinancialReconciliation();
+      if (!audit.ok) console.error('[FINANCIAL RECONCILIATION FAILED]', JSON.stringify(audit));
+    } catch(e:any) { console.error('[FINANCIAL RECONCILIATION ERROR]', e.message); }
+  }));
+
+  // Раз в час: предупреждения и перевод просроченных доступных остатков в Vault pool.
+  tasks.push(cron.schedule('23 * * * *', async () => {
+    try {
+      const result=await withRedisLock('dead-balances',10*60*1000,()=>processDeadBalances());
+      if(result && (result.warned || result.transferred)) console.log('[CRON dead balances]',result);
+    } catch(e:any) { console.error('[CRON dead balances]',e.message); }
+  }));
+
+  // Полные сроки вкладов завершаются независимо от полуночного начисления.
+  tasks.push(cron.schedule('* * * * *', async () => {
+    try { await completeMatureVaultDeposits(); } catch (e: any) { console.error('[CRON vault maturity]', e.message); }
+  }));
+
   // 21:00 UTC == 00:00 MSK — распределение Вклада
   tasks.push(cron.schedule('0 21 * * *', async () => {
     console.log('[CRON] Дневное распределение Вклада (полночь МСК)');
-    const res = await dailyVaultDistribution();
+    const res = await withRedisLock(`vault-distribution:${todayMSK()}`,120000,()=>dailyVaultDistribution());
+    if (!res) return;
     broadcast('vault_distributed', res);
     await createDailySafe();
   }, { timezone: 'UTC' }));

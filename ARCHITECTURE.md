@@ -699,3 +699,61 @@ function calculateCrashPoint(bet, bankroll) {
 
 ### Добавление нового уведомления
 Используйте `notify(userId, message, data)` из `services/notifications.ts` — оно автоматически дойдёт до подключённого сокета пользователя как событие `notification`. Для Telegram-уведомлений в проде расширьте эту функцию вызовом `bot.telegram.sendMessage(userId, message)`.
+
+## Security layer (stage 2)
+
+Requests pass through a 32 KB JSON limit, structural validation, a 60/minute Redis rate limiter and privacy-preserving security telemetry. Money endpoints add stricter limits and semantic validators. Redis failure degrades to an in-memory limiter; PostgreSQL constraints remain the final financial boundary.
+
+Administrator routes require JWT authentication, an allowlisted Telegram ID and a constant-time comparison of `X-Admin-Password`. Mutations are asynchronously recorded in `admin_audit_log`; PIN/password fields are redacted. `user_security_identifiers` stores only HMAC-SHA256 hashes using `SECURITY_PEPPER`, and shared identifiers produce reviewable `antifraud_flags`. Withdrawal addresses have a partial unique index.
+
+Socket.io uses the Redis adapter when available. Redis leases coordinate Safe cron ticks, Vault distribution, and Rocket launch ownership across backend replicas; database transactions and idempotency markers remain authoritative if Redis is unavailable.
+
+### Local administrator credentials
+
+`docker-compose.yml` explicitly forwards `ADMIN_PASSWORD`, `JWT_SECRET`, `SECURITY_PEPPER` and `ALLOWED_ORIGINS` to backend. Local defaults are development-only; `ADMIN_PASSWORD` defaults to `admin`. A changed root `.env` requires recreation of the backend container (`docker compose up -d --build backend frontend`).
+
+## Stage 3: notification and dormant-balance lifecycle
+
+`notifications.notifyPreferred` is the category gate for `notif_duel`, `notif_safe`, `notif_referral`, and `notif_vault`. Persisted lifecycle rows have a unique `(user_id,type,related_entity_type,related_entity_id)` key, so cron retries and multiple replicas cannot duplicate an event. Public Safe broadcasts update game state only; user-facing toasts originate from preference-filtered personal notifications.
+
+Safe emits reminder/start/result/cancellation events to participants. Vault distribution emits one accrual event per deposit/day; maturity emits a payout event containing the `/vault` repeat action. Referral registration and rewards use the same channel.
+
+`dead-balances.ts` runs hourly under a Redis lease. After `dead_balance_inactive_days` (default 180), it atomically marks a seven-day deadline and sends a critical warning. Authentication clears the marker. At expiry, a SQL transaction zeros only the available `users.balance`, writes a negative `dead_balance_vault` transaction, and adds the amount to `manual_pool_addition` for the next 💎 Vault pool distribution. Existing frozen/game/deposit funds are outside this operation.
+
+### Onboarding navigation isolation
+
+The client authentication effect is guarded by an `authInFlight` ref, including under React StrictMode. This prevents the new/existing-account response race that closed onboarding. While onboarding is active, route-changing game controllers and notification modals are unmounted; data-level socket handling may continue without taking over navigation.
+
+## Stage 4: deterministic replay contract
+
+`services/replay.ts` projects immutable public data for all games into replay envelope v1. `/api/replay/:game/:id` is public and deliberately excludes Telegram IDs, balances and unfinished Safe secrets; `/api/rocket/replay/:id` is the Rocket-specific alias. Frontend `/replay/:game/:id` reconstructs scenes from stored outcome/animation parameters and exposes Web Share/clipboard links.
+
+Rocket stores a cryptographic `replay_seed`; its Three.js PRNG makes stars, debris and effects reproducible. The authoritative loop emits 30 checkpoints per second, while the client predicts the same exponential curve between checkpoints on `requestAnimationFrame` (normally 60 FPS). The seeded 100,000-round test validates the configured 0.90 RTP model.
+
+Directed Duel rematches store `target_user_id` and `parent_duel_id`. Only the target can accept/decline. Decline status and reserved-funds release share one SQL transaction. Automatic delayed Duel error redirects were removed: stale timers can no longer move a user after they leave a screen.
+
+### Session bootstrap and request-pressure fix
+
+The authenticated React tree is not mounted during the token bootstrap gap. `refreshUser` captures the request token and clears credentials only for a 401 that still belongs to that exact token; 429 and transient infrastructure errors preserve the session. This removes the 401 → re-authenticate-as-existing → close-onboarding cycle.
+
+The pre-auth general limiter keys on `X-Device-Id` (IP fallback) and allows 300 requests/minute. Redundant notification polling was removed and slow reconciliation intervals were widened; Socket.io remains the primary update path. `acceptDuel` returns a complete result envelope so UI correctness does not depend on a second rate-limited request. Every duplicated Redis connection registers an error listener.
+
+### Share attribution and resilient UI actions
+
+Replay URLs may carry `?player=@username`; the backend still returns immutable round facts, while the public client validates the requested hero against replay participants. Monetary outcome fields (`payout`, `profit`, participant `net`, Safe rank/prize) make share cards self-explanatory. Rocket distinguishes `cashout_at` from `crash_at` and exposes `was_beautiful`, preventing a post-cashout visual extension from being mistaken for a payout discrepancy.
+
+Deposit address acquisition has bounded retries, visibility recovery and explicit retry UI. Duel acceptance sets a short client transition lock before the request, preventing its own persisted result event from flashing a modal in the lobby. Rematch notification actions call the same authoritative accept/decline endpoints and then mark the notification read.
+
+### Beautiful-flight timeline consistency
+
+Cashout clears the authoritative active-round interval immediately and settles money once. The result scene keeps the landed original rocket visible while a translucent ghost independently evaluates the stored exponential curve from `cashout_at` to `crash_at`, then explodes. `maybe_beautiful_flight` changes only that post-cashout terminal multiplier. Public replay switches from the live-flight phase to the same landed-rocket/ghost phase at the stored cashout time, so gameplay and replay share one visual model without extending the monetary round.
+
+Replay navigation origin is carried in React Router location state by internal hall links and deliberately falls back to `/` for direct public URLs. RocketScene derives the post-cashout ghost multiplier from persisted endpoints, follows it with the camera, and exposes the live ghost/final multiplier in a DOM overlay; settlement remains represented separately by the fixed cashout multiplier.
+
+Rocket history applies spoiler protection only when a row matches the locally held current `roundId`, the screen is in its `win` phase, and that round's ghost has not finished. All remote and historical rows expose `crash_at` normally; leaving the screen also clears this ephemeral protection. Replay independently gates its final value until its own ghost animation ends. Internal replay back navigation pops the existing history entry (`navigate(-1)`), while direct public entry replaces the replay route with `/`.
+
+## Stage 5 UX surfaces
+
+Project statistics have a dedicated `/stats` route backed by public `/api/stats/summary`; Home no longer owns its polling or detailed balance breakdown. `/api/vault/accruals` reads immutable per-day accrual rows for the authenticated user. Reconciliation remains admin-only and presents invariant counts with explicit refresh. API 401 responses emit a token-scoped browser event; App discards only the matching current JWT and reruns its single-flight bootstrap, remounting Deposit and other private screens safely.
+
+Home exposes the `/stats` route through one navigation tile only, avoiding duplicate calls to the same destination.

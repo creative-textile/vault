@@ -22,8 +22,11 @@ export async function getOrCreateDepositAddress(userId: number): Promise<string>
 }
 
 export async function setWithdrawAddress(userId: number, address: string) {
+  const normalized=String(address||'').trim();
+  if(!/^(UQ|EQ)[A-Za-z0-9_-]{46}$/.test(normalized) && !normalized.startsWith('demo')) throw new Error('Некорректный TON-адрес');
   const { query } = await import('../db/pool');
-  await query('UPDATE users SET withdraw_address = $1 WHERE id = $2', [address, userId]);
+  try { await query('UPDATE users SET withdraw_address=$1 WHERE id=$2',[normalized,userId]); }
+  catch(e:any) { if(e?.code==='23505'||/unique/i.test(e?.message||'')) throw new Error('Этот кошелёк уже привязан к другому аккаунту'); throw e; }
 }
 
 /**
@@ -50,19 +53,25 @@ export async function processWithdrawal(
   if (!user) throw new Error('Пользователь не найден');
 
   if (amount < 5) throw new Error('Минимум $5');
-  if (amount > user.balance - user.frozen_balance) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round((user.balance - user.frozen_balance) * 100)) throw new Error('Недостаточно средств');
 
-  // PIN
+  // PIN: пять ошибок блокируют попытки на 15 минут (Redis, с безопасным fallback rate limit на маршруте).
+  const { redis, ensureRedis } = await import('../db/redis');
+  const pinKey=`pin-fail:${userId}`;
+  try { await ensureRedis(); const ttl=await redis.ttl(pinKey); const attempts=Number(await redis.get(pinKey)||0); if(attempts>=5) throw new Error(`PIN временно заблокирован (${Math.max(ttl,1)} сек.)`); } catch(e:any) { if(/заблокирован/.test(e.message)) throw e; }
   const bcrypt = await import('bcryptjs');
   if (user.pin_hash) {
     const ok = await bcrypt.compare(pin, user.pin_hash);
-    if (!ok) throw new Error('Неверный PIN');
+    if (!ok) { try { await ensureRedis(); const n=await redis.incr(pinKey); if(n===1) await redis.expire(pinKey,900); } catch {} throw new Error('Неверный PIN'); }
   } else if (pin !== '0000') {
     // Если PIN не установлен в демо — пропускаем с 0000
     if (!config.demoMode) throw new Error('Установите PIN перед выводом');
   }
 
-  const fee = Math.round(amount * 0.01 * 100) / 100;
+  try { await ensureRedis(); await redis.del(pinKey); } catch {}
+
+  const feePercent = parseFloat((await (await import('./revenue')).getSetting('withdraw_commission')) || '1');
+  const fee = Math.round(amount * (feePercent / 100) * 100) / 100;
   const payout = Math.round((amount - fee) * 100) / 100;
 
   const balance = await modifyBalance(userId, -amount, 'withdraw', {

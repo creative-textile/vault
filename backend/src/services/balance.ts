@@ -1,4 +1,5 @@
-import { query } from '../db/pool';
+import { query, pool, currentTransactionClient } from '../db/pool';
+import type { PoolClient } from 'pg';
 import { emitToUser } from './notifications';
 
 const TX_TYPE_LABELS: Record<string, string> = {
@@ -17,46 +18,57 @@ const TX_TYPE_LABELS: Record<string, string> = {
 /**
  * Единственная функция для изменения баланса пользователя.
  */
+export async function modifyBalanceWithClient(
+  client: PoolClient,
+  userId: number,
+  amount: number,
+  type: string,
+  opts: Partial<{ gameType: string, gameId: number, description: string }> = {}
+): Promise<number> {
+  if (!Number.isFinite(amount)) throw new Error('Некорректная сумма');
+  const cents = Math.round(amount * 100);
+  if (cents === 0 && amount !== 0) throw new Error('Минимальная точность — $0.01');
+  const normalized = cents / 100;
+  const res = await client.query(
+    `UPDATE users SET balance = balance + $1, last_active = NOW()
+      WHERE id = $2 AND balance + $1::numeric >= CASE WHEN $1::numeric < 0 THEN frozen_balance ELSE 0 END
+      RETURNING balance`, [normalized, userId]
+  );
+  if (!res.rows.length) throw new Error('Недостаточно средств');
+  const newBalance = parseFloat(res.rows[0].balance);
+  const label = opts.description || TX_TYPE_LABELS[type] || type;
+  await client.query(
+    `INSERT INTO transactions (user_id, type, amount, balance_after, game_type, game_id, description)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [userId, type, normalized, newBalance, opts.gameType || null, opts.gameId || null, label]
+  );
+  return newBalance;
+}
+
+/** Единственная публичная операция изменения баланса; отрицательный результат запрещён атомарно. */
 export async function modifyBalance(
   userId: number,
   amount: number,
   type: string,
   opts: Partial<{ gameType: string, gameId: number, description: string }> = {}
 ): Promise<number> {
-  const client = await (await import('../db/pool')).pool.connect();
+  const outer = currentTransactionClient();
+  if (outer) return modifyBalanceWithClient(outer, userId, amount, type, opts);
+  const client = await pool.connect();
+  let newBalance: number;
   try {
     await client.query('BEGIN');
-    const res = await client.query(
-      'UPDATE users SET balance = balance + $1, last_active = NOW() WHERE id = $2 RETURNING balance',
-      [amount, userId]
-    );
-    const newBalance = parseFloat(res.rows[0].balance);
-    const label = opts.description || TX_TYPE_LABELS[type] || type;
-    await client.query(
-      `INSERT INTO transactions (user_id, type, amount, balance_after, game_type, game_id, description)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [userId, type, amount, newBalance, opts.gameType || null, opts.gameId || null, label]
-    );
+    newBalance = await modifyBalanceWithClient(client, userId, amount, type, opts);
     await client.query('COMMIT');
-    // Баланс на экране должен меняться сразу, а не по следующему опросу /api/profile.
-    // Вместе с цифрами отдаём и «где деньги» (заморожено в дуэлях, вложено в сейф,
-    // во вкладе): пояснение должно обновляться в тот же момент, что и баланс.
-    try {
-      const snap = await getBalanceSnapshot(userId);
-      emitToUser(userId, 'balance_updated', {
-        balance: newBalance,
-        frozen_balance: snap.frozen_balance,
-        safe_locked: snap.safe_locked,
-        vault_locked: snap.vault_locked
-      });
-    } catch { /* уведомление не должно ломать операцию с балансом */ }
-    return newBalance;
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
+  try {
+    const snap = await getBalanceSnapshot(userId);
+    emitToUser(userId, 'balance_updated', { balance: newBalance!, ...snap });
+  } catch { /* событие не влияет на committed-операцию */ }
+  return newBalance!;
 }
 
 /**
@@ -122,5 +134,5 @@ export async function getUserByTelegramId(tgId: number) {
 export async function getAvailableBalance(userId: number): Promise<number> {
   const u = await getUser(userId);
   if (!u) return 0;
-  return u.balance - u.frozen_balance;
+  return Math.round((u.balance - u.frozen_balance) * 100) / 100;
 }

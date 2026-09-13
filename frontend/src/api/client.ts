@@ -6,22 +6,43 @@ const API_URL = '';
 
 import { getStoredToken } from '../utils/tokenStorage';
 
+function getDeviceId(): string {
+  let id=localStorage.getItem('vault:device-id');
+  if(!id) { id=crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`; localStorage.setItem('vault:device-id',id); }
+  return id;
+}
+
 function getToken(): string | null {
   return getStoredToken();
 }
 
+export class ApiError extends Error {
+  constructor(message:string,public status:number,public retryAfter?:number){super(message);this.name='ApiError';}
+}
+
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
+  let adminPassword='';
+  if(path.startsWith('/api/admin')) {
+    adminPassword=sessionStorage.getItem('vault:admin-password')||'';
+    if(!adminPassword) { adminPassword=window.prompt('Пароль администратора')||''; if(adminPassword) sessionStorage.setItem('vault:admin-password',adminPassword); }
+  }
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(adminPassword ? { 'X-Admin-Password': adminPassword } : {}),
+      'X-Device-Id': getDeviceId(),
       ...options.headers
     }
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Ошибка');
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok && path.startsWith('/api/admin') && res.status===401) sessionStorage.removeItem('vault:admin-password');
+  // Любой актуальный 401 будит единый auth bootstrap. Токен кладём в detail,
+  // чтобы запоздалый ответ старой сессии не мог удалить уже выданный новый JWT.
+  if (res.status===401 && token) window.dispatchEvent(new CustomEvent('vault:unauthorized',{detail:{token}}));
+  if (!res.ok) throw new ApiError(data.error || 'Ошибка',res.status,Number(data.retry_after)||undefined);
   return data as T;
 }
 
@@ -32,6 +53,8 @@ export const publicConfig = async () => {
   _pubConfig = await api('/api/config');
   return _pubConfig;
 };
+
+export const replayApi = { get: (game:'rocket'|'duel'|'safe',id:number) => api(`/api/replay/${game}/${id}`) };
 
 export const authApi = {
   telegram: (initData: string, refCode?: string) =>
@@ -79,7 +102,9 @@ export const duelApi = {
   markAllNotificationsAsRead: () => api('/api/duel/notifications/read-all', { method: 'POST' }),
   markDuelNotificationsAsRead: (duelId: number) =>
     api(`/api/duel/notifications/read-duel/${duelId}`, { method: 'POST' }),
-  getUnreadCount: () => api('/api/duel/notifications/count')
+  getUnreadCount: () => api('/api/duel/notifications/count'),
+  rematch: (id:number,multiplier=1) => api(`/api/duel/rematch/${id}`,{method:'POST',body:JSON.stringify({multiplier})}),
+  decline: (id:number) => api(`/api/duel/decline/${id}`,{method:'POST'})
 };
 
 export const safeApi = {
@@ -104,7 +129,8 @@ export const vaultApi = {
     api('/api/vault/lock', { method: 'POST', body: JSON.stringify({ amount, term_days }) }),
   earlyUnlock: (deposit_id: number) =>
     api('/api/vault/early-unlock', { method: 'POST', body: JSON.stringify({ deposit_id }) }),
-  history: () => api('/api/vault/history')
+  history: () => api('/api/vault/history'),
+  accruals: () => api('/api/vault/accruals')
 };
 
 export const referralApi = {
@@ -112,6 +138,10 @@ export const referralApi = {
 };
 
 export const adminApi = {
+  reconciliation: () => api('/api/admin/reconciliation'),
+  antifraud: (status='open') => api(`/api/admin/antifraud?status=${status}`),
+  reviewFraud: (id:number,status:string) => api(`/api/admin/antifraud/${id}/review`,{method:'POST',body:JSON.stringify({status})}),
+  auditLog: () => api('/api/admin/audit-log'),
   stats: (from?: string, to?: string) => {
     const q = from && to ? `?from=${from}&to=${to}` : '';
     return api('/api/admin/stats' + q);

@@ -5,7 +5,10 @@
  * Также сохраняем уведомления в базе данных для отображения при следующем входе.
  */
 import { Server } from 'socket.io';
+import { query } from '../db/pool';
 import { createNotification, getUnreadNotifications } from './user-notifications';
+
+export type NotificationPreference = 'notif_duel' | 'notif_safe' | 'notif_referral' | 'notif_vault';
 
 let io: Server | null = null;
 
@@ -52,6 +55,27 @@ export async function notify(
   console.log(`[NOTIFY user ${userId}] ${type}: ${message}`);
 }
 
+/** Категорийное уведомление с учётом настройки пользователя и дедупликацией lifecycle-события. */
+export async function notifyPreferred(
+  userId: number, preference: NotificationPreference, message: string,
+  type: string, title: string, data?: any, entityType?: string, entityId?: number
+): Promise<boolean> {
+  const enabled = await query(`SELECT ${preference} AS enabled FROM users WHERE id=$1`, [userId]);
+  if (!enabled.rows[0]?.enabled) return false;
+  const notificationId = await createNotification(userId, type, title, message, data, entityType, entityId);
+  if (notificationId == null) return false;
+  if (io) io.to(`user:${userId}`).emit('notification', { id: notificationId, message, data, type, title });
+  return true;
+}
+
+/** Критическое lifecycle-уведомление без категорийного выключателя. */
+export async function notifyLifecycleOnce(userId:number,message:string,type:string,title:string,data:any,entityType:string,entityId:number) {
+  const id=await createNotification(userId,type,title,message,data,entityType,entityId);
+  if(id==null) return false;
+  if(io) io.to(`user:${userId}`).emit('notification',{id,message,data,type,title});
+  return true;
+}
+
 /**
  * Отправить уведомление о дуэли (с сохранением в базе)
  */
@@ -61,14 +85,7 @@ export async function notifyDuelResult(
   message: string,
   data?: any
 ) {
-  await notify(
-    userId,
-    message,
-    data,
-    true,
-    'duel_result',
-    'Результат дуэли'
-  );
+  await notifyPreferred(userId, 'notif_duel', message, 'duel_result', 'Результат дуэли', data, 'duel', duelId);
 }
 
 /** Отправить событие только в комнату конкретного пользователя. */

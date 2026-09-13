@@ -16,6 +16,10 @@ export interface User {
   withdraw_address?: string;
   pin_set: boolean;
   auto_safe_percent: number;
+  notif_duel: boolean;
+  notif_safe: boolean;
+  notif_referral: boolean;
+  notif_vault: boolean;
 }
 
 export interface AuthContextValue {

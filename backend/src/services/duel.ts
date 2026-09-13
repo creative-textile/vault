@@ -1,17 +1,18 @@
 import { query, getClient } from '../db/pool';
+import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
-import { notifyDuelResult } from './notifications';
+import { notifyDuelResult, notifyPreferred } from './notifications';
 
-export async function createDuel(userId: number, amount: number) {
+async function createDuelImpl(userId: number, amount: number) {
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
 
   const minBet = parseFloat(await getSetting('min_bet') || '1');
   if (amount < minBet) throw new Error(`Мин. ставка $${minBet}`);
   const available = await getAvailableBalance(userId);
-  if (amount > available) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
 
   // Проверить кол-во активных вызовов
   const activeCount = await query(
@@ -27,7 +28,8 @@ export async function createDuel(userId: number, amount: number) {
   // вдвое, и пока вызов висит в лобби, игрок не мог распоряжаться своими же
   // деньгами (при трёх вызовах available вообще уходил в минус). Деньги
   // спишутся в acceptDuel — когда дуэль действительно сыграна.
-  await query('UPDATE users SET frozen_balance = frozen_balance + $1 WHERE id = $2', [amount, userId]);
+  const frozen = await query(`UPDATE users SET frozen_balance=frozen_balance+$1 WHERE id=$2 AND balance-frozen_balance >= $1 RETURNING id`,[amount,userId]);
+  if (!frozen.rows.length) throw new Error('Недостаточно средств');
 
   const res = await query(
     `INSERT INTO duels (creator_id, amount, status)
@@ -36,6 +38,28 @@ export async function createDuel(userId: number, amount: number) {
   );
 
   return { duel_id: res.rows[0].id };
+}
+
+export async function createRematch(userId:number,sourceId:number,multiplier=1) {
+  const source=await getDuel(sourceId);
+  if(!source || source.status!=='finished' || ![source.creator_id,source.opponent_id].includes(userId)) throw new Error('Исходная дуэль недоступна');
+  const target=source.creator_id===userId ? source.opponent_id : source.creator_id;
+  const amount=Math.round(Number(source.amount)*Math.min(2,Math.max(1,multiplier))*100)/100;
+  const made=await createDuel(userId,amount);
+  await query(`UPDATE duels SET target_user_id=$1,parent_duel_id=$2 WHERE id=$3`,[target,sourceId,made.duel_id]);
+  await notifyPreferred(target,'notif_duel',`Вам предложен реванш на $${amount.toFixed(2)}`,'duel_rematch','Реванш',{duel_id:made.duel_id,parent_duel_id:sourceId},'duel_rematch',made.duel_id);
+  return {...made,target_user_id:target,amount};
+}
+
+async function declineRematchImpl(duelId:number,userId:number) {
+  const d=(await query(`SELECT * FROM duels WHERE id=$1`,[duelId])).rows[0];
+  if(!d || d.status!=='waiting' || d.target_user_id!==userId) throw new Error('Реванш недоступен');
+  const amount=Number(d.amount);
+  const claim=await query(`UPDATE duels SET status='declined' WHERE id=$1 AND status='waiting' RETURNING id`,[duelId]);
+  if(!claim.rows.length) throw new Error('Реванш уже обработан');
+  await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1`,[amount,d.creator_id]);
+  await notifyPreferred(d.creator_id,'notif_duel','Соперник отклонил реванш','duel_rematch_declined','Реванш отклонён',{duel_id:duelId},'duel_rematch_declined',duelId);
+  return {success:true};
 }
 
 export async function getLobby() {
@@ -52,11 +76,13 @@ export async function getLobby() {
     creator_id: r.creator_id,
     creator_name: '@' + (r.creator_name || 'user'),
     amount: parseFloat(r.amount),
-    created_at: r.created_at
+    created_at: r.created_at,
+    target_user_id: r.target_user_id,
+    parent_duel_id: r.parent_duel_id
   }));
 }
 
-export async function cancelDuel(duelId: number, userId: number) {
+async function cancelDuelImpl(duelId: number, userId: number) {
   const res = await query('SELECT * FROM duels WHERE id = $1', [duelId]);
   if (res.rows.length === 0) throw new Error('Дуэль не найдена');
   const duel = res.rows[0];
@@ -65,21 +91,23 @@ export async function cancelDuel(duelId: number, userId: number) {
 
   const amount = parseFloat(duel.amount);
   // Ставка не списывалась — значит и возвращать нечего, только разморозить
-  await query('UPDATE users SET frozen_balance = frozen_balance - $1 WHERE id = $2', [amount, userId]);
+  const unfrozen=await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1 RETURNING id`,[amount,userId]);
+  if (!unfrozen.rows.length) throw new Error('Средства вызова уже разморожены');
   await query("UPDATE duels SET status = 'cancelled' WHERE id = $1", [duelId]);
   return { success: true };
 }
 
-export async function acceptDuel(duelId: number, opponentId: number) {
+async function acceptDuelImpl(duelId: number, opponentId: number) {
   const duelRes = await query('SELECT * FROM duels WHERE id = $1', [duelId]);
   if (duelRes.rows.length === 0) throw new Error('Дуэль не найдена');
   const duel = duelRes.rows[0];
   if (duel.status !== 'waiting') throw new Error('Вызов уже принят или отменён');
   if (duel.creator_id === opponentId) throw new Error('Нельзя играть с самим собой');
+  if (duel.target_user_id && duel.target_user_id !== opponentId) throw new Error('Этот реванш адресован другому игроку');
 
   const amount = parseFloat(duel.amount);
   const available = await getAvailableBalance(opponentId);
-  if (amount > available) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
 
   // Атомарно занимаем вызов ДО любых операций с деньгами. Проверка статуса
   // через SELECT оставляла гонку: два одновременных «Принять» (двойной клик,
@@ -99,22 +127,23 @@ export async function acceptDuel(duelId: number, opponentId: number) {
   await modifyBalance(opponentId, -amount, 'bet', { gameType: 'duel', gameId: duelId });
   // У создателя ставка до сих пор была заморожена, а не списана: размораживаем
   // и списываем теперь, когда дуэль действительно сыграна
-  await query('UPDATE users SET frozen_balance = frozen_balance - $1 WHERE id = $2', [amount, duel.creator_id]);
+  const creatorUnfreeze=await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1 RETURNING id`,[amount,duel.creator_id]);
+  if (!creatorUnfreeze.rows.length) throw new Error('Ставка создателя не зарезервирована');
   await modifyBalance(duel.creator_id, -amount, 'bet', { gameType: 'duel', gameId: duelId });
 
   // Орёл или решка
   const result = Math.random() < 0.5 ? 'heads' : 'tails';
   const winnerId = result === 'heads' ? duel.creator_id : opponentId;
 
-  // Комиссия 10% от общего банка
   const total = amount * 2;
-  const commission = Math.round(total * 0.10 * 100) / 100;
+  const commissionPercent = parseFloat(await getSetting('commission_percent') || '10');
+  const commission = Math.round(total * (commissionPercent / 100) * 100) / 100;
   const prize = Math.round((total - commission) * 100) / 100;
 
   // Распределение комиссии для обоих игроков
   for (const pid of [duel.creator_id, opponentId]) {
     const refCut = await payReferral(pid, amount, 'duel');
-    const platformCut = Math.round((amount * 0.10 - refCut) * 100) / 100;
+    const platformCut = Math.round((amount * (commissionPercent / 100) - refCut) * 100) / 100;
     if (platformCut > 0) {
       await logPlatformRevenue(platformCut, 'duel');
     }
@@ -142,12 +171,18 @@ export async function acceptDuel(duelId: number, opponentId: number) {
   );
 
   return {
+    id: duelId,
+    status: 'finished',
     result,
     winner: winnerId,
+    winner_id: winnerId,
     prize,
+    amount,
+    i_won: winnerId === opponentId,
     coin_trajectory: coinTrajectory,
     creator_id: duel.creator_id,
-    opponent_id: opponentId
+    opponent_id: opponentId,
+    finished_at: new Date().toISOString()
   };
 }
 
@@ -358,3 +393,10 @@ export async function repairDoubleLockedOpenDuels(): Promise<number> {
   }
   return fixed;
 }
+
+
+// Составные денежные операции целиком выполняются в одной SQL-транзакции.
+export const createDuel: typeof createDuelImpl = (...args: Parameters<typeof createDuelImpl>) => withTransaction(() => createDuelImpl(...args));
+export const declineRematch: typeof declineRematchImpl = (...args: Parameters<typeof declineRematchImpl>) => withTransaction(() => declineRematchImpl(...args));
+export const cancelDuel: typeof cancelDuelImpl = (...args: Parameters<typeof cancelDuelImpl>) => withTransaction(() => cancelDuelImpl(...args));
+export const acceptDuel: typeof acceptDuelImpl = (...args: Parameters<typeof acceptDuelImpl>) => withTransaction(() => acceptDuelImpl(...args));

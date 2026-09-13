@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import MoneyBreakdown from '../common/MoneyBreakdown';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
-import { vaultApi, safeApi, statsApi } from '../../api/client';
+import { vaultApi, safeApi } from '../../api/client';
 
 function fmt(n: number) {
   return n.toFixed(2);
@@ -25,8 +24,6 @@ export default function Home() {
   const [safe, setSafe] = useState<any>(null);
   // Сейф, который принимает вклады (во время взлома и после розыгрыша — следующий)
   const [collect, setCollect] = useState<any>(null);
-  // Витрина проекта: участники / дни работы / пополнено / выплачено
-  const [stats, setStats] = useState<any>(null);
   const [timeToCrack, setTimeToCrack] = useState(0);
   // Свой вклад в сейф, который взламывают прямо сейчас: по нему видно,
   // должен ли игрок оказаться в мини-игре (и почему его туда не уводит)
@@ -65,10 +62,6 @@ export default function Home() {
   useEffect(() => {
     vaultApi.status().then(setVaultStatus).catch(() => {});
     loadSafe();
-    const loadStats = () => statsApi.summary().then(setStats).catch(() => {});
-    loadStats();
-    // Цифры проекта меняются медленно — обновляем раз в минуту
-    const statsPoll = setInterval(loadStats, 60000);
     // Карточка сейфа обновляется по socket-событиям: старт взлома, итоги, отмена
     const off = onSafeEvent(loadSafe);
     const iv = setInterval(() => {
@@ -78,8 +71,9 @@ export default function Home() {
     }, 1000);
     // Страховка на случай потерянного socket: банк не должен «застывать»
     const poll = setInterval(loadSafe, 20000);
-    const refresh = setInterval(refreshUser, 5000);
-    return () => { off(); clearInterval(iv); clearInterval(poll); clearInterval(refresh); clearInterval(statsPoll); };
+    // Balance changes arrive through Socket.io; slow reconciliation is only a fallback.
+    const refresh = setInterval(refreshUser, 30000);
+    return () => { off(); clearInterval(iv); clearInterval(poll); clearInterval(refresh); };
   }, [refreshUser, loadSafe]);
 
   if (!user) return null;
@@ -98,16 +92,8 @@ export default function Home() {
 
       <div className="balance-block">
         <div className="balance-label">БАЛАНС</div>
-        <div className="balance-amount">${fmt(user.balance)}</div>
-        <div style={{display:'flex', justifyContent:'center', gap: 16, fontSize: 13}}>
-          <span className="text-dim">доступно: <span style={{color:'#fff', fontWeight:700}}>${fmt(available)}</span></span>
-        </div>
-        {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT.
-            Без этих строк сумма просто «уменьшалась» после вклада, и игрок не
-            понимал, где она. Пустых строк компонент не рисует. */}
-        <div style={{maxWidth: 320, margin: '0 auto'}}>
-          <MoneyBreakdown />
-        </div>
+        <div className="balance-amount">${fmt(available)}</div>
+        {(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))>0&&<div className="text-dim" style={{fontSize:13}}>❄️ Заморожено: ${fmt(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))}</div>}
       </div>
 
       <div className="btn-row">
@@ -159,75 +145,10 @@ export default function Home() {
         </Link>
       </div>
 
-      {/* Сейф */}
-      <div className="card" onClick={() => nav('/safe')} style={{cursor:'pointer'}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-          <div className="card-title">🔒 Сейф</div>
-          <span className={`pill ${safe?.status === 'cracking' || collect?.status === 'collecting' ? 'pill-active' : ''}`}>
-            {safe?.status === 'cracking' ? '🔥 ВЗЛОМ' : collect?.status === 'collecting' ? 'открыт' : '—'}
-          </span>
-        </div>
-
-        {safe?.status === 'cracking' && (
-          <div className="text-red text-center" style={{fontSize:20, fontWeight:900, padding:'10px 0 0'}}>
-            🔥 ИДЁТ ВЗЛОМ СЕЙФА #{safe.id}!
-            <div className="timer" style={{fontSize:18, marginTop:4}}>⏱ {timeToStr(timeToCrack)}</div>
-            {/* Почему игрока уводит (или не уводит) в мини-игру — видно сразу */}
-            <div className="text-dim" style={{fontSize:12, fontWeight:400, marginTop:2}}>
-              {crackDeposit
-                ? ((crackDeposit.crack_time_ms ?? null) != null
-                  ? `ваш результат ${(crackDeposit.crack_time_ms / 1000).toFixed(2)} с засчитан`
-                  : 'вы участвуете в этом раунде — мини-игра откроется сама')
-                : 'вы не вносили вклад в этот раунд — взлом идёт без вас'}
-            </div>
-          </div>
-        )}
-
-        {/* Банк и отсчёт — по сейфу, который принимает вклады прямо сейчас */}
-        {collect?.status === 'collecting' ? (
-          <>
-            <div className="timer" style={{marginTop:8}}>⏰ {timeToStr(collectTimeToCrack)}</div>
-            <div className="text-center text-dim" style={{fontSize:12, marginTop:-4}}>
-              СЕЙФ #{collect.id}{collect.crack_at_msk ? ` · взлом в ${collect.crack_at_msk} МСК` : ' · до взлома'}
-            </div>
-            <div style={{display:'flex', gap:16, justifyContent:'space-between', alignItems:'center', fontSize:16, margin:'8px 0'}}>
-              <div>💰 <span className="text-accent" style={{fontWeight:900}}>${fmt(collect.bank)}</span></div>
-              <div>👥 {collect.participants_count}</div>
-              <div className="text-dim" style={{fontSize:12}}>призовой ${fmt(collect.prize_pool)}</div>
-            </div>
-            <div className="text-dim" style={{marginTop:4, fontSize:13}}>Приз: ×1.5 · мин. $1</div>
-          </>
-        ) : (
-          <div className="text-dim" style={{fontSize:13}}>Создаём сейф...</div>
-        )}
-        <button className="btn mt" style={{padding:'14px', fontSize:16}}>
-          {collect?.status === 'collecting'
-            ? (safe?.status === 'cracking' ? `💰 ВНЕСТИ В СЕЙФ #${collect.id}` : '💰 ВНЕСТИ')
-            : '🔥 УЧАСТВОВАТЬ'}
-        </button>
-      </div>
-
-      {/* Статистика VAULT */}
-      <div className="card" style={{padding:'12px 14px'}}>
-        <div className="card-title" style={{fontSize:13, marginBottom:10}}>📊 СТАТИСТИКА VAULT</div>
-        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 8px'}}>
-          <div>
-            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>УЧАСТНИКОВ</div>
-            <div style={{fontWeight:900, fontSize:19}}>{stats ? stats.users_count : '…'}</div>
-          </div>
-          <div>
-            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ДНЕЙ РАБОТАЕМ</div>
-            <div style={{fontWeight:900, fontSize:19}}>{stats ? stats.days_working : '…'}</div>
-          </div>
-          <div>
-            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ПОПОЛНЕНО ВСЕГО</div>
-            <div style={{fontWeight:900, fontSize:19, color:'#22c55e'}}>${stats ? fmt(stats.total_deposited) : '…'}</div>
-          </div>
-          <div>
-            <div className="text-dim" style={{fontSize:11, letterSpacing:1}}>ВЫПЛАЧЕНО ВСЕГО</div>
-            <div style={{fontWeight:900, fontSize:19, color:'#ffd700'}}>${stats ? fmt(stats.total_withdrawn) : '…'}</div>
-          </div>
-        </div>
+      {/* Короткий статус; внесение и детали — одно действие на экране Сейфа. */}
+      <div className="card" onClick={() => nav('/safe')} style={{cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+        <div><b>🔒 Сейф #{collect?.id || '—'}</b><div className="text-dim" style={{fontSize:12}}>{safe?.status==='cracking'?`🔥 Взлом · ${timeToStr(timeToCrack)}`:collect?.status==='collecting'?`${timeToStr(collectTimeToCrack)} · банк $${fmt(collect.bank)}`:'Подготовка'}</div></div>
+        <span className="text-accent" style={{whiteSpace:'nowrap'}}>Открыть →</span>
       </div>
 
       {/* Нижнее меню */}
@@ -236,9 +157,9 @@ export default function Home() {
           <div className="game-icon" style={{fontSize:32}}>👥</div>
           <div className="game-name" style={{fontSize:14}}>Рефералы</div>
         </Link>
-        <Link to="/profile" className="game-tile" style={{padding: '12px'}}>
+        <Link to="/stats" className="game-tile" style={{padding: '12px'}}>
           <div className="game-icon" style={{fontSize:32}}>📊</div>
-          <div className="game-name" style={{fontSize:14}}>Профиль</div>
+          <div className="game-name" style={{fontSize:14}}>Статистика</div>
         </Link>
       </div>
 

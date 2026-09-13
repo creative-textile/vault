@@ -1,6 +1,7 @@
 import { query } from '../db/pool';
 import { getUser } from './balance';
 import { logPlatformRevenue } from './revenue';
+import { notifyPreferred } from './notifications';
 
 /**
  * Начисляет 3% рефоводу от ставки. Если нет рефовода — эти 3% идут админу.
@@ -22,9 +23,11 @@ export async function payReferral(userId: number, betAmount: number, gameType: s
     'referral',
     {
       gameType,
-      description: `3% от ставки $${betAmount}`
+      description: `${refPercent}% от ставки $${betAmount}`
     }
   );
+  await notifyPreferred(user.referred_by,'notif_referral',`Реферальное начисление: +$${reward.toFixed(2)}`,
+    'referral_reward','Реферальное начисление',{reward,game_type:gameType});
 
   return reward;
 }

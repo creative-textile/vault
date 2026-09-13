@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
+import { moneyBody, pinBody } from '../middleware/security';
 import { getOrCreateDepositAddress, demoDeposit, processWithdrawal, setPin, setWithdrawAddress } from '../../services/ton';
 
 const router = Router();
@@ -16,7 +17,7 @@ router.get('/deposit-address', auth, async (req, res) => {
 });
 
 // DEMO: POST /api/wallet/demo-deposit { amount }
-router.post('/demo-deposit', auth, async (req, res) => {
+router.post('/demo-deposit', auth, moneyBody('amount',2), async (req, res) => {
   try {
     const user = (req as any).user;
     const { amount } = req.body;
@@ -28,7 +29,7 @@ router.post('/demo-deposit', auth, async (req, res) => {
 });
 
 // POST /api/wallet/withdraw
-router.post('/withdraw', auth, async (req, res) => {
+router.post('/withdraw', auth, moneyBody('amount',5), pinBody, async (req, res) => {
   try {
     const user = (req as any).user;
     const { amount, pin, address } = req.body;
@@ -41,7 +42,7 @@ router.post('/withdraw', auth, async (req, res) => {
 });
 
 // POST /api/wallet/set-pin
-router.post('/set-pin', auth, async (req, res) => {
+router.post('/set-pin', auth, pinBody, async (req, res) => {
   try {
     const user = (req as any).user;
     const { pin } = req.body;

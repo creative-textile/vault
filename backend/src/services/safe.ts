@@ -1,7 +1,8 @@
 import { query } from '../db/pool';
-import { getUser, modifyBalance, getAvailableBalance } from './balance';
-import { logPlatformRevenue, getSetting } from './revenue';
-import { broadcast } from './notifications';
+import { withTransaction } from '../db/pool';
+import { getUser, modifyBalance, getAvailableBalance, modifyBalanceWithClient } from './balance';
+import { logPlatformRevenue, getSetting, logPlatformRevenueWithClient } from './revenue';
+import { broadcast, notifyPreferred } from './notifications';
 import { payReferral } from './referral';
 import { todayMSK } from '../utils/time';
 
@@ -41,12 +42,14 @@ const DRUM_SPEED_MAX = 2.0;
 const DRUM_SPEED_FALLBACK = [1.55, 1.72, 1.9];
 
 /** Скорости на день: три разных значения, чтобы барабаны не синхронизировались. */
-export function generateDrumSpeeds(): number[] {
-  const base = 1.5 + Math.random() * 0.15;
+export async function generateDrumSpeeds(): Promise<number[]> {
+  const configured = parseFloat(await getSetting('safe_drum_speed_multiplier') || '1');
+  const factor = Number.isFinite(configured) && configured > 0 ? configured : 1;
+  const base = (1.5 + Math.random() * 0.15) * factor;
   return [
     base,
-    base + 0.13 + Math.random() * 0.07,
-    base + 0.26 + Math.random() * 0.1
+    base + (0.13 + Math.random() * 0.07) * factor,
+    base + (0.26 + Math.random() * 0.1) * factor
   ].map(v => +v.toFixed(2));
 }
 
@@ -57,7 +60,7 @@ export function generateDrumSpeeds(): number[] {
 export function clampDrumSpeeds(speeds: any): number[] {
   if (!Array.isArray(speeds) || speeds.length !== 3) return [...DRUM_SPEED_FALLBACK];
   const nums = speeds.map((x: any) => parseFloat(x));
-  if (nums.some((n: number) => !Number.isFinite(n) || n < DRUM_SPEED_MIN || n > DRUM_SPEED_MAX)) {
+  if (nums.some((n: number) => !Number.isFinite(n) || n < 0.1 || n > 10)) {
     return [...DRUM_SPEED_FALLBACK];
   }
   return nums;
@@ -244,7 +247,7 @@ export async function createDailySafe() {
 
   // Получаем одинаковые цифры для всех игроков в этот день
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
-  const drumSpeeds = generateDrumSpeeds();
+  const drumSpeeds = await generateDrumSpeeds();
 
   await query(
     `INSERT INTO safes (date, status, bonus, code, drum_speeds, collect_started_at)
@@ -254,7 +257,7 @@ export async function createDailySafe() {
   console.log(`[SAFE] Создан дневной сейф с кодом: ${code.join(',')}`);
 }
 
-export async function safeDeposit(userId: number, amount: number) {
+async function safeDepositImpl(userId: number, amount: number) {
   // Вклад всегда идёт в сейф, который сейчас собирает: во время взлома
   // сегодняшнего это сейф следующего дня (иначе деньги «зависали» бы до полуночи).
   const safe = await getCollectingSafe();
@@ -265,9 +268,9 @@ export async function safeDeposit(userId: number, amount: number) {
   const minBet = parseFloat(await getSetting('min_bet') || '1');
   if (amount < minBet) throw new Error(`Минимум $${minBet}`);
   const available = await getAvailableBalance(userId);
-  if (amount > available) throw new Error('Недостаточно средств');
+  if (Math.round(amount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
 
-  const commPercent = 10;
+  const commPercent = parseFloat(await getSetting('commission_percent') || '10');
   const commission = Math.round(amount * (commPercent / 100) * 100) / 100;
   const toSafe = Math.round((amount - commission) * 100) / 100;
 
@@ -298,17 +301,9 @@ export async function safeDeposit(userId: number, amount: number) {
     [amount, toSafe, commission, isFirstDeposit, safe.id]
   );
 
-  // Комиссия распределяется
-  const refPercent = parseInt(await getSetting('referral_percent') || '3');
-  const refCut = Math.round(amount * (refPercent / 100) * 100) / 100;
-  let platformCut = commission;
-  if (user.referred_by) {
-    await modifyBalance(user.referred_by, refCut, 'referral', {
-      gameType: 'safe', description: `3% от вклада в Сейф $${amount}`
-    });
-    platformCut = Math.round((commission - refCut) * 100) / 100;
-  }
-  await logPlatformRevenue(platformCut, 'safe');
+  // Комиссия пока только зарезервирована в safe.commission_amount.
+  // Реферал и платформа получат её атомарно при фактическом старте взлома;
+  // поэтому отменённый вклад не создаёт денег.
 
   // Получить итоговый вклад пользователя
   const depositRes = await query(
@@ -336,7 +331,7 @@ export async function safeDeposit(userId: number, amount: number) {
   };
 }
 
-export async function cancelSafeDeposit(userId: number) {
+async function cancelSafeDepositImpl(userId: number) {
   const safe = await getCollectingSafe();
   if (!safe) throw new Error('Сейф не найден');
 
@@ -351,7 +346,7 @@ export async function cancelSafeDeposit(userId: number) {
 
   const dep = depRes.rows[0];
 
-  const commPercent = 0.10;
+  const commPercent = parseFloat(await getSetting('commission_percent') || '10') / 100;
 
   // Сначала атомарно удаляем вклад и смотрим, сколько реально удалили: два
   // одновременных «Вернуть» раньше читали одну и ту же строку и возвращали
@@ -528,7 +523,7 @@ export async function getSpinStartInMs(safeId: number, windowMs?: number): Promi
   return Math.round(started.getTime() + lead - Date.now());
 }
 
-export async function calculateSafeWinners(safeId: number) {
+async function calculateSafeWinnersImpl(safeId: number) {
   const safe = await getSafeById(safeId);
   if (!safe) return;
   if (safe.status !== 'cracking') return;
@@ -549,7 +544,9 @@ export async function calculateSafeWinners(safeId: number) {
      FROM safe_deposits d
      JOIN users u ON u.id = d.user_id
      WHERE d.safe_id = $1
-     ORDER BY d.crack_time_ms NULLS LAST`,
+     ORDER BY
+       CASE WHEN d.crack_time_ms IS NULL OR d.crack_time_ms < 100 THEN 1 ELSE 0 END,
+       d.crack_time_ms ASC NULLS LAST, d.created_at ASC, d.id ASC`,
     [safeId]
   );
 
@@ -557,10 +554,6 @@ export async function calculateSafeWinners(safeId: number) {
   let winners = 0;
 
   for (const d of depRes.rows) {
-    if (d.crack_time_ms == null || d.crack_time_ms < 100) {
-      await query('UPDATE safe_deposits SET prize = 0 WHERE id = $1', [d.id]);
-      continue;
-    }
     const amount = parseFloat(d.amount);
     const needed = Math.round(amount * 1.5 * 100) / 100;
     if (remaining >= needed - 0.01) {
@@ -586,9 +579,14 @@ export async function calculateSafeWinners(safeId: number) {
     }
   }
 
+  // Любой нераспределённый остаток становится доходом платформы, а не зависает в раунде.
+  if (remaining >= 0.01) {
+    await logPlatformRevenue(remaining, 'safe_remainder');
+    remaining = 0;
+  }
   await query(
-    `UPDATE safes SET winners_count = $1, status = 'finished' WHERE id = $2`,
-    [winners, safeId]
+    `UPDATE safes SET winners_count = $1, status = 'finished', prize_pool = prize_pool - $3 WHERE id = $2`,
+    [winners, safeId, remaining]
   );
 }
 
@@ -600,7 +598,7 @@ export async function getSafeResults(safeId: number) {
      WHERE d.safe_id = $1
      ORDER BY
        CASE WHEN d.crack_time_ms IS NULL OR d.crack_time_ms < 100 THEN 1 ELSE 0 END,
-       d.crack_time_ms ASC NULLS LAST`,
+       d.crack_time_ms ASC NULLS LAST, d.created_at ASC, d.id ASC`,
     [safeId]
   );
   return depRes.rows.map(d => ({
@@ -659,7 +657,7 @@ export async function ensureNextDaySafe(): Promise<void> {
   }
 
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
-  const drumSpeeds = generateDrumSpeeds();
+  const drumSpeeds = await generateDrumSpeeds();
 
   // DO NOTHING — два параллельных вклада не должны создавать два сейфа
   const ins = await query(
@@ -711,6 +709,11 @@ export async function finalizeCracking(safeId?: number): Promise<number | null> 
     if (!finished || finished.status !== 'finished') return null;
 
     broadcast('safe_finished', { safe_id: id });
+    const participants=await query(`SELECT user_id,prize FROM safe_deposits WHERE safe_id=$1`,[id]);
+    await Promise.all(participants.rows.map((d:any)=>notifyPreferred(
+      d.user_id,'notif_safe',parseFloat(d.prize)>0 ? `Сейф завершён: ваш приз $${parseFloat(d.prize).toFixed(2)}` : 'Сейф завершён: в этот раз без приза',
+      'safe_result','Результат Сейфа',{safe_id:id,prize:parseFloat(d.prize)},'safe_result',id
+    )));
     await ensureNextDaySafe();
     console.log(`[SAFE] Взлом сейфа #${id} завершён, победителей: ${finished.winners_count}`);
     return id;
@@ -752,6 +755,7 @@ export async function resumeCracking(): Promise<void> {
   );
   const res = await query(`SELECT id FROM safes WHERE status = 'cracking'`);
   for (const row of res.rows) {
+    await settleSafeCommission(row.id);
     const remaining = await getDeadlineRemainingMs(row.id);
     if (remaining == null || remaining <= 0) {
       await finalizeCracking(row.id);
@@ -760,6 +764,44 @@ export async function resumeCracking(): Promise<void> {
       console.log(`[SAFE] Взлом сейфа #${row.id} продолжается, осталось ${Math.round(remaining / 1000)} с`);
     }
   }
+}
+
+/** Идемпотентно распределить зарезервированную комиссию в момент старта взлома. */
+async function settleSafeCommission(safeId: number): Promise<void> {
+  const { pool } = await import('../db/pool');
+  const client = await pool.connect();
+  const referralRewards:{userId:number;reward:number}[]=[];
+  try {
+    await client.query('BEGIN');
+    const claimed = await client.query(
+      `UPDATE safes SET commission_settled = TRUE
+        WHERE id = $1 AND commission_settled = FALSE RETURNING commission_amount`, [safeId]
+    );
+    if (!claimed.rows.length) { await client.query('ROLLBACK'); return; }
+    const refPercent = parseFloat(await getSetting('referral_percent') || '3');
+    const deps = await client.query(
+      `SELECT d.user_id, d.amount, u.referred_by FROM safe_deposits d
+       JOIN users u ON u.id=d.user_id WHERE d.safe_id=$1`, [safeId]
+    );
+    let referralTotal = 0;
+    for (const d of deps.rows) {
+      if (!d.referred_by) continue;
+      const reward = Math.round(parseFloat(d.amount) * refPercent) / 100;
+      if (reward <= 0) continue;
+      await modifyBalanceWithClient(client, d.referred_by, reward, 'referral', {
+        gameType: 'safe', gameId: safeId, description: `${refPercent}% от вклада в Сейф $${parseFloat(d.amount)}`
+      });
+      referralTotal += reward;
+      referralRewards.push({userId:d.referred_by,reward});
+    }
+    const commission = parseFloat(claimed.rows[0].commission_amount);
+    const platformCut = Math.round((commission - referralTotal) * 100) / 100;
+    await logPlatformRevenueWithClient(client, platformCut, 'safe');
+    await client.query('COMMIT');
+    await Promise.all(referralRewards.map(r=>notifyPreferred(r.userId,'notif_referral',`Реферальное начисление: +$${r.reward.toFixed(2)}`,
+      'referral_reward','Реферальное начисление',{reward:r.reward,game_type:'safe'})));
+  } catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
 }
 
 export async function startCracking() {
@@ -796,6 +838,10 @@ export async function startCracking() {
     [safe.id]
   );
   if (!upd.rows.length) return { cancelled: false, started: false };
+  await settleSafeCommission(safe.id);
+  const participants=await query(`SELECT DISTINCT user_id FROM safe_deposits WHERE safe_id=$1`,[safe.id]);
+  await Promise.all(participants.rows.map((p:any)=>notifyPreferred(p.user_id,'notif_safe','Взлом Сейфа начался',
+    'safe_started','Взлом начался',{safe_id:safe.id},'safe_started',safe.id)));
 
   // Следующий сейф создаём ПОСЛЕ перевода текущего во взлом: сбор не должен
   // прерываться ни на минуту (иначе ensureNextDaySafe увидел бы «сбор идёт»)
@@ -824,5 +870,13 @@ async function cancelSafeReturnDeposits(safe: any) {
     await modifyBalance(d.user_id, parseFloat(d.amount), 'safe_cancel', {
       gameType: 'safe', description: 'Сейф отменён (не набрал минимум)'
     });
+    await notifyPreferred(d.user_id,'notif_safe',`Сейф отменён, возвращено $${parseFloat(d.amount).toFixed(2)}`,
+      'safe_cancelled','Сейф отменён',{safe_id:safe.id,returned:parseFloat(d.amount)},'safe_cancelled',safe.id);
   }
 }
+
+
+// Составные денежные операции целиком выполняются в одной SQL-транзакции.
+export const safeDeposit: typeof safeDepositImpl = (...args: Parameters<typeof safeDepositImpl>) => withTransaction(() => safeDepositImpl(...args));
+export const cancelSafeDeposit: typeof cancelSafeDepositImpl = (...args: Parameters<typeof cancelSafeDepositImpl>) => withTransaction(() => cancelSafeDepositImpl(...args));
+export const calculateSafeWinners: typeof calculateSafeWinnersImpl = (...args: Parameters<typeof calculateSafeWinnersImpl>) => withTransaction(() => calculateSafeWinnersImpl(...args));

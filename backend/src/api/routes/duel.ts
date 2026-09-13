@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
+import { moneyBody } from '../middleware/security';
 import {
   createDuel, getLobby, acceptDuel, cancelDuel, getDuelHistory, getDuel,
-  notifyDuelFinished, ensureDuelResultNotifications
+  notifyDuelFinished, ensureDuelResultNotifications, createRematch, declineRematch
 } from '../../services/duel';
 import { getUnreadUserNotifications } from '../../services/notifications';
 import {
@@ -13,7 +14,7 @@ import {
 const router = Router();
 
 // POST /api/duel/create
-router.post('/create', auth, async (req, res) => {
+router.post('/create', auth, moneyBody('amount',0.01), async (req, res) => {
   try {
     const user = (req as any).user;
     const { amount } = req.body;
@@ -53,6 +54,15 @@ router.post('/accept/:id', auth, async (req, res) => {
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
+});
+
+router.post('/rematch/:id',auth,async(req,res)=>{
+  try { const user=(req as any).user; res.json(await createRematch(user.id,Number(req.params.id),Number(req.body?.multiplier)||1)); }
+  catch(e:any){ res.status(400).json({error:e.message}); }
+});
+router.post('/decline/:id',auth,async(req,res)=>{
+  try { const user=(req as any).user; res.json(await declineRematch(Number(req.params.id),user.id)); }
+  catch(e:any){ res.status(400).json({error:e.message}); }
 });
 
 // POST /api/duel/cancel/:id

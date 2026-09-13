@@ -84,13 +84,15 @@ require('ts-node').register({
 const DDL = [
   `CREATE TABLE users (id SERIAL PRIMARY KEY, telegram_id BIGINT UNIQUE NOT NULL, username VARCHAR(64),
      balance DECIMAL DEFAULT 0, frozen_balance DECIMAL DEFAULT 0, referred_by INTEGER,
-     auto_safe_percent INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), last_active TIMESTAMP DEFAULT NOW())`,
+     auto_safe_percent INTEGER DEFAULT 0, notif_duel BOOLEAN DEFAULT TRUE, notif_safe BOOLEAN DEFAULT TRUE,
+     notif_referral BOOLEAN DEFAULT TRUE, notif_vault BOOLEAN DEFAULT TRUE, notified_dead BOOLEAN DEFAULT FALSE,
+     dead_deadline TIMESTAMP, created_at TIMESTAMP DEFAULT NOW(), last_active TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE transactions (id SERIAL PRIMARY KEY, user_id INTEGER, type VARCHAR(32), amount DECIMAL,
      balance_after DECIMAL, game_type VARCHAR(32), game_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE safes (id SERIAL PRIMARY KEY, bank DECIMAL DEFAULT 0, prize_pool DECIMAL DEFAULT 0,
      commission_amount DECIMAL DEFAULT 0, code INTEGER[], drum_speeds DOUBLE PRECISION[],
      status VARCHAR(16) DEFAULT 'collecting', bonus BOOLEAN DEFAULT FALSE, participants_count INTEGER DEFAULT 0,
-     winners_count INTEGER DEFAULT 0, date DATE UNIQUE, cracked_at TIMESTAMP, crack_started_at TIMESTAMPTZ,
+     winners_count INTEGER DEFAULT 0, commission_settled BOOLEAN DEFAULT FALSE, date DATE UNIQUE, cracked_at TIMESTAMP, crack_started_at TIMESTAMPTZ,
      collect_started_at TIMESTAMPTZ)`,
   `CREATE TABLE safe_deposits (id SERIAL PRIMARY KEY, safe_id INTEGER, user_id INTEGER, amount DECIMAL NOT NULL,
      crack_time_ms INTEGER, prize DECIMAL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), UNIQUE(safe_id, user_id))`,
@@ -100,21 +102,23 @@ const DDL = [
   `CREATE TABLE platform_cashbox (id SERIAL PRIMARY KEY, amount DECIMAL DEFAULT 500, updated_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE vault_deposits (id SERIAL PRIMARY KEY, user_id INTEGER, amount DECIMAL NOT NULL, term_days INTEGER NOT NULL,
      multiplier DECIMAL NOT NULL, days_elapsed INTEGER DEFAULT 0, accumulated_profit DECIMAL DEFAULT 0,
-     status VARCHAR(16) DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW(), unlocked_at TIMESTAMP)`,
+     status VARCHAR(16) DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW(), unlocked_at TIMESTAMP, unlocks_at TIMESTAMPTZ)`,
+  `CREATE TABLE vault_deposit_accruals (id SERIAL PRIMARY KEY, deposit_id INTEGER, user_id INTEGER, date DATE, pool_amount DECIMAL, profit DECIMAL, UNIQUE(deposit_id,date))`,
   `CREATE TABLE vault_pool_daily (id SERIAL PRIMARY KEY, date DATE UNIQUE NOT NULL, platform_revenue DECIMAL DEFAULT 0,
      auto_pool DECIMAL DEFAULT 0, manual_pool DECIMAL DEFAULT 0, total_pool DECIMAL DEFAULT 0,
      total_locked DECIMAL DEFAULT 0, depositors_count INTEGER DEFAULT 0, base_rate DECIMAL DEFAULT 0,
-     max_deposit DECIMAL DEFAULT 100)`,
+     max_deposit DECIMAL DEFAULT 100, distributed_at TIMESTAMPTZ)`,
   `CREATE TABLE rocket_rounds (id SERIAL PRIMARY KEY, user_id INTEGER, bet DECIMAL NOT NULL, crash_at DECIMAL NOT NULL,
      cashout_at DECIMAL, profit DECIMAL DEFAULT 0, flight_curve DECIMAL DEFAULT 0.075,
-     was_beautiful BOOLEAN DEFAULT FALSE, started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
+     was_beautiful BOOLEAN DEFAULT FALSE, replay_seed VARCHAR(64), started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE rocket_bankroll (id SERIAL PRIMARY KEY, amount DECIMAL DEFAULT 1500, updated_at TIMESTAMP DEFAULT NOW())`,
-  `CREATE TABLE duels (id SERIAL PRIMARY KEY, creator_id INTEGER, opponent_id INTEGER, amount DECIMAL,
+  `CREATE TABLE duels (id SERIAL PRIMARY KEY, creator_id INTEGER, opponent_id INTEGER, target_user_id INTEGER, parent_duel_id INTEGER, amount DECIMAL,
      status VARCHAR(16) DEFAULT 'waiting', result VARCHAR(8), winner_id INTEGER, coin_trajectory JSONB,
      created_at TIMESTAMP DEFAULT NOW(), finished_at TIMESTAMP)`,
   `CREATE TABLE user_notifications (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, type VARCHAR(50) NOT NULL,
      title VARCHAR(255) NOT NULL, message TEXT NOT NULL, data JSONB, is_read BOOLEAN DEFAULT FALSE,
-     created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, related_entity_type VARCHAR(50), related_entity_id INTEGER)`
+     created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, related_entity_type VARCHAR(50), related_entity_id INTEGER,
+     UNIQUE(user_id,type,related_entity_type,related_entity_id))`
 ];
 
 let failed = 0;
@@ -383,7 +387,7 @@ const finish = () => {
     const call = async (method, url, body) => {
       const res = await fetch(base + url, {
         method,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-admin-password': 'admin' },
         body: body ? JSON.stringify(body) : undefined
       });
       let json = null;
@@ -545,7 +549,7 @@ const finish = () => {
     const call = async (method, url, body) => {
       const res = await fetch(base + url, {
         method,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-admin-password': 'admin' },
         body: body ? JSON.stringify(body) : undefined
       });
       let json = null;
@@ -588,6 +592,8 @@ const finish = () => {
     as(2, 'bob');
     r = await call('POST', `/api/duel/accept/${duel1}`);
     check('дуэль принята и сыграна', r.status === 200 && ['heads', 'tails'].includes(r.json?.result), r.json);
+    check('ответ принятия самодостаточен даже без дополнительного GET',
+      r.json?.id===duel1 && Number(r.json?.amount)===25 && Number(r.json?.prize)===45 && r.json?.status==='finished',r.json);
     const winnerId = r.json?.winner;
     check('победитель — создатель вызова (монета детерминированная)', winnerId === 1, winnerId);
 
@@ -782,6 +788,8 @@ const finish = () => {
     for (const d of [todayStr, yStr]) {
       await query(`INSERT INTO daily_revenue (date, source, amount) VALUES ($1, 'duel', 400)`, [d]);
     }
+    const prior=new Date(y.getTime()-86400000).toISOString().slice(0,10);
+    await query(`INSERT INTO vault_pool_daily(date,max_deposit,distributed_at) VALUES($1,500,NOW())`, [prior]);
 
     const money = async id => (await query(
       `SELECT balance, frozen_balance FROM users WHERE id = $1`, [id])).rows[0];
@@ -816,8 +824,9 @@ const finish = () => {
 
     // ── Выплата в срок ───────────────────────────────────────────────────
     const dep30 = await vaultSvc.lockVaultDeposit(1, 200, 30);
-    await query(`UPDATE vault_deposits SET days_elapsed = 29 WHERE id = $1`, [dep30.deposit_id]);
+    await query(`UPDATE vault_deposits SET days_elapsed = 29, unlocks_at=NOW()-INTERVAL '1 minute' WHERE id = $1`, [dep30.deposit_id]);
     const dist = await vaultSvc.dailyVaultDistribution();
+    const matured = await vaultSvc.completeMatureVaultDeposits();
     const m3 = await money(1);
     // пул вчера = 400 × 15% = 60, вклад один → вся прибыль ему: 200 + 60 = 260
     check('выплата в срок: 800 + (200 тело + 60 прибыль) = 1060, заморозки нет',
@@ -828,7 +837,7 @@ const finish = () => {
     const pool = (await query(`SELECT total_pool, total_locked FROM vault_pool_daily WHERE date = $1`, [yStr])).rows[0];
     check('пул дня записан: 60 распределено, 200 заблокировано',
       Number(pool.total_pool) === 60 && Number(pool.total_locked) === 200, pool);
-    check('отчёт о распределении', dist.distributed === 60 && dist.completed === 1, dist);
+    check('отчёт о распределении', dist.distributed === 60 && dist.completed === 0 && matured === 1, dist);
 
     // ── Починка вкладов, открытых прежним кодом ──────────────────────────
     await query(`INSERT INTO vault_deposits (user_id, amount, term_days, multiplier, status)
@@ -940,6 +949,15 @@ const finish = () => {
     check('транзакция возврата при отмене одна', Number(refundTx.c) === 1, refundTx.c);
     check('отменённый раунд не держит деньги: safe_locked 0',
       (await getBalanceSnapshot(2)).safe_locked === 0, await getBalanceSnapshot(2));
+
+    // 100 000 воспроизводимых раундов: фиксированный cashout x2 должен дать
+    // RTP около 90%, то есть фактический house edge около 10%.
+    let rngSeed=0x36711, returned=0; const rounds=100000, target=2;
+    const seededRng=()=>{ rngSeed=(Math.imul(rngSeed,1664525)+1013904223)>>>0; return rngSeed/0x100000000; };
+    for(let i=0;i<rounds;i++) if(rocketSvc.calculateCrashPoint(1,1e12,seededRng)>target) returned+=target;
+    const rtp=returned/rounds, houseEdge=1-rtp;
+    check('Rocket: статистический тест 1000+ раундов подтверждает house edge около 10%',
+      rtp>0.885 && rtp<0.915,{rounds,rtp,house_edge:houseEdge});
 
     return finish();
   }

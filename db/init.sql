@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS rocket_rounds (
     profit        DECIMAL(12,2) DEFAULT 0,
     flight_curve  DECIMAL(6,4) DEFAULT 0.075,
     was_beautiful BOOLEAN DEFAULT FALSE,
+    replay_seed   VARCHAR(64),
     started_at    TIMESTAMP DEFAULT NOW(),
     created_at    TIMESTAMP DEFAULT NOW()
 );
@@ -56,6 +57,8 @@ CREATE TABLE IF NOT EXISTS duels (
     id              SERIAL PRIMARY KEY,
     creator_id      INTEGER REFERENCES users(id),
     opponent_id     INTEGER REFERENCES users(id),
+    target_user_id  INTEGER REFERENCES users(id),
+    parent_duel_id  INTEGER REFERENCES duels(id),
     amount          DECIMAL(12,2) NOT NULL,
     status          VARCHAR(16) DEFAULT 'waiting',
     result          VARCHAR(8),
@@ -106,7 +109,15 @@ CREATE TABLE IF NOT EXISTS vault_deposits (
     accumulated_profit DECIMAL(12,2) DEFAULT 0,
     status             VARCHAR(16) DEFAULT 'active',
     created_at         TIMESTAMP DEFAULT NOW(),
-    unlocked_at        TIMESTAMP
+    unlocked_at        TIMESTAMP,
+    unlocks_at         TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS vault_deposit_accruals (
+    id SERIAL PRIMARY KEY, deposit_id INTEGER REFERENCES vault_deposits(id),
+    user_id INTEGER REFERENCES users(id), date DATE NOT NULL,
+    pool_amount DECIMAL(12,2) NOT NULL, profit DECIMAL(12,2) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(deposit_id,date)
 );
 
 CREATE TABLE IF NOT EXISTS vault_pool_daily (
@@ -119,7 +130,8 @@ CREATE TABLE IF NOT EXISTS vault_pool_daily (
     total_locked     DECIMAL(12,2) DEFAULT 0,
     depositors_count INTEGER DEFAULT 0,
     base_rate        DECIMAL(6,4) DEFAULT 0,
-    max_deposit      DECIMAL(12,2) DEFAULT 100
+    max_deposit      DECIMAL(12,2) DEFAULT 100,
+    distributed_at   TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS daily_revenue (
@@ -166,6 +178,50 @@ INSERT INTO settings (key, value) VALUES
     ('safe_min_participants', '2'),
     ('beautiful_flight_chance', '3'),
     ('vault_pool_percent', '15'),
-    ('vault_max_deposit', '100'),
+    ('vault_min_deposit', '10'),
+    ('vault_max_floor', '100'),
+    ('vault_max_multiplier', '10'),
+    ('dead_balance_inactive_days', '180'),
     ('manual_pool_addition', '0')
 ON CONFLICT (key) DO NOTHING;
+
+
+-- Денежные инварианты: отрицательные пользовательские средства, кассы и пулы запрещены.
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_balance_nonnegative CHECK (balance >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_frozen_nonnegative CHECK (frozen_balance >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_frozen_within_balance CHECK (frozen_balance <= balance);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE platform_cashbox ADD CONSTRAINT platform_cashbox_nonnegative CHECK (amount >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE safes ADD CONSTRAINT safes_money_nonnegative CHECK (bank >= 0 AND prize_pool >= 0 AND commission_amount >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id BIGSERIAL PRIMARY KEY, actor_user_id INTEGER REFERENCES users(id), method VARCHAR(12), path TEXT,
+  payload JSONB, status_code INTEGER, ip VARCHAR(128), user_agent TEXT, duration_ms INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS user_security_identifiers (
+  id BIGSERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  ip_hash CHAR(64) NOT NULL, device_hash CHAR(64) NOT NULL, first_seen TIMESTAMPTZ DEFAULT NOW(),
+  last_seen TIMESTAMPTZ DEFAULT NOW(), UNIQUE(user_id,ip_hash,device_hash)
+);
+CREATE TABLE IF NOT EXISTS antifraud_flags (
+  id BIGSERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, kind VARCHAR(64),
+  risk_score INTEGER DEFAULT 0, details JSONB, details_hash CHAR(64), status VARCHAR(16) DEFAULT 'open',
+  created_at TIMESTAMPTZ DEFAULT NOW(), reviewed_at TIMESTAMPTZ,
+  UNIQUE(user_id,kind,details_hash)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS users_withdraw_address_unique
+  ON users(withdraw_address) WHERE withdraw_address IS NOT NULL AND withdraw_address <> '';

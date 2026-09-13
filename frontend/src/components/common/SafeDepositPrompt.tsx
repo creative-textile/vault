@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { safeApi, profileApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import { muteSafePrompt } from '../../utils/safePrompt';
 
 interface Props {
   profit: number;
@@ -16,6 +17,7 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
   const [submitting, setSubmitting] = useState(false);
   const [safeTime, setSafeTime] = useState('21:00');
   const [autoSave, setAutoSave] = useState(false);
+  const [mutePrompts, setMutePrompts] = useState(false);
 
   useEffect(() => {
     safeApi.current().then((s: any) => {
@@ -119,7 +121,11 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
         >
           {submitting ? 'ВНОШУ...' : canDeposit ? `🔒 ВНЕСТИ $${amount.toFixed(2)}` : 'Минимум $1'}
         </button>
-        <button className="btn btn-secondary mt" onClick={onClose}>ПРОПУСТИТЬ</button>
+        <label style={{display:'flex', alignItems:'center', gap:8, marginTop:12, fontSize:12, color:'#aaa', cursor:'pointer'}}>
+          <input type="checkbox" checked={mutePrompts} onChange={e => setMutePrompts(e.target.checked)} />
+          Больше не предлагать сегодня
+        </label>
+        <button className="btn btn-secondary mt" onClick={() => { if (mutePrompts) muteSafePrompt(); onClose(); }}>ПРОПУСТИТЬ</button>
       </div>
       <style>{`
         @keyframes sdfFade { from {opacity:0} to {opacity:1} }
