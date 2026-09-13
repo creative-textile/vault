@@ -711,3 +711,11 @@ Socket.io uses the Redis adapter when available. Redis leases coordinate Safe cr
 ### Local administrator credentials
 
 `docker-compose.yml` explicitly forwards `ADMIN_PASSWORD`, `JWT_SECRET`, `SECURITY_PEPPER` and `ALLOWED_ORIGINS` to backend. Local defaults are development-only; `ADMIN_PASSWORD` defaults to `admin`. A changed root `.env` requires recreation of the backend container (`docker compose up -d --build backend frontend`).
+
+## Stage 3: notification and dormant-balance lifecycle
+
+`notifications.notifyPreferred` is the category gate for `notif_duel`, `notif_safe`, `notif_referral`, and `notif_vault`. Persisted lifecycle rows have a unique `(user_id,type,related_entity_type,related_entity_id)` key, so cron retries and multiple replicas cannot duplicate an event. Public Safe broadcasts update game state only; user-facing toasts originate from preference-filtered personal notifications.
+
+Safe emits reminder/start/result/cancellation events to participants. Vault distribution emits one accrual event per deposit/day; maturity emits a payout event containing the `/vault` repeat action. Referral registration and rewards use the same channel.
+
+`dead-balances.ts` runs hourly under a Redis lease. After `dead_balance_inactive_days` (default 180), it atomically marks a seven-day deadline and sends a critical warning. Authentication clears the marker. At expiry, a SQL transaction zeros only the available `users.balance`, writes a negative `dead_balance_vault` transaction, and adds the amount to `manual_pool_addition` for the next 💎 Vault pool distribution. Existing frozen/game/deposit funds are outside this operation.

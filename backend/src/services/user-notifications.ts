@@ -27,6 +27,10 @@ export async function initNotificationsTable() {
       CREATE INDEX IF NOT EXISTS idx_user_notifications_user_unread
         ON user_notifications(user_id, is_read)
     `);
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_user_notification_lifecycle
+        ON user_notifications(user_id, type, related_entity_type, related_entity_id)
+    `);
     console.log('[DB] user_notifications table ready');
   } catch (e: any) {
     console.error('[DB] Error creating user_notifications table:', e.message);
@@ -50,10 +54,10 @@ export async function createNotification(
     `INSERT INTO user_notifications 
      (user_id, type, title, message, data, related_entity_type, related_entity_id, expires_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id`,
+     ON CONFLICT (user_id, type, related_entity_type, related_entity_id) DO NOTHING RETURNING id`,
     [userId, type, title, message, data ?? null, relatedEntityType ?? null, relatedEntityId ?? null, expiresAt ?? null]
   );
-  return res.rows[0].id;
+  return res.rows[0]?.id ?? null;
 }
 
 /**

@@ -11,6 +11,7 @@ export default function Profile() {
   const [txs, setTxs] = useState<any[]>([]);
   const [autoSafe, setAutoSafe] = useState(0);
   const [showAdminLink, setShowAdminLink] = useState(false);
+  const [savingNotif, setSavingNotif] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -25,6 +26,17 @@ export default function Profile() {
     setAutoSafe(v);
     await profileApi.update({ auto_safe_percent: v });
     refreshUser();
+  };
+
+  const toggleNotification = async (key: 'notif_duel'|'notif_safe'|'notif_referral'|'notif_vault') => {
+    if (!user || savingNotif) return;
+    setSavingNotif(key);
+    try {
+      await profileApi.update({ [key]: !user[key] });
+      await refreshUser();
+      showToast('Настройки уведомлений сохранены');
+    } catch (e:any) { showToast(e.message || 'Не удалось сохранить'); }
+    finally { setSavingNotif(null); }
   };
 
   return (
@@ -80,7 +92,18 @@ export default function Profile() {
 
       <div className="card">
         <div className="card-title">🔔 Уведомления</div>
-        <div className="text-dim" style={{fontSize:14}}>Настроить можно в настройках Telegram-бота</div>
+        {([
+          ['notif_duel','⚔️ Дуэли'], ['notif_safe','🔒 Сейф'],
+          ['notif_referral','👥 Рефералы'], ['notif_vault','💎 Vault Вклад']
+        ] as const).map(([key,label]) => (
+          <div className="history-item" key={key}>
+            <span>{label}</span>
+            <button className={`btn btn-small ${user?.[key] ? '' : 'btn-secondary'}`}
+              disabled={savingNotif === key} onClick={() => toggleNotification(key)}>
+              {user?.[key] ? 'ВКЛ' : 'ВЫКЛ'}
+            </button>
+          </div>
+        ))}
       </div>
 
       <div className="game-grid">

@@ -2,7 +2,7 @@ import { query } from '../db/pool';
 import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance, modifyBalanceWithClient } from './balance';
 import { logPlatformRevenue, getSetting, logPlatformRevenueWithClient } from './revenue';
-import { broadcast } from './notifications';
+import { broadcast, notifyPreferred } from './notifications';
 import { payReferral } from './referral';
 import { todayMSK } from '../utils/time';
 
@@ -709,6 +709,11 @@ export async function finalizeCracking(safeId?: number): Promise<number | null> 
     if (!finished || finished.status !== 'finished') return null;
 
     broadcast('safe_finished', { safe_id: id });
+    const participants=await query(`SELECT user_id,prize FROM safe_deposits WHERE safe_id=$1`,[id]);
+    await Promise.all(participants.rows.map((d:any)=>notifyPreferred(
+      d.user_id,'notif_safe',parseFloat(d.prize)>0 ? `Сейф завершён: ваш приз $${parseFloat(d.prize).toFixed(2)}` : 'Сейф завершён: в этот раз без приза',
+      'safe_result','Результат Сейфа',{safe_id:id,prize:parseFloat(d.prize)},'safe_result',id
+    )));
     await ensureNextDaySafe();
     console.log(`[SAFE] Взлом сейфа #${id} завершён, победителей: ${finished.winners_count}`);
     return id;
@@ -765,6 +770,7 @@ export async function resumeCracking(): Promise<void> {
 async function settleSafeCommission(safeId: number): Promise<void> {
   const { pool } = await import('../db/pool');
   const client = await pool.connect();
+  const referralRewards:{userId:number;reward:number}[]=[];
   try {
     await client.query('BEGIN');
     const claimed = await client.query(
@@ -786,11 +792,14 @@ async function settleSafeCommission(safeId: number): Promise<void> {
         gameType: 'safe', gameId: safeId, description: `${refPercent}% от вклада в Сейф $${parseFloat(d.amount)}`
       });
       referralTotal += reward;
+      referralRewards.push({userId:d.referred_by,reward});
     }
     const commission = parseFloat(claimed.rows[0].commission_amount);
     const platformCut = Math.round((commission - referralTotal) * 100) / 100;
     await logPlatformRevenueWithClient(client, platformCut, 'safe');
     await client.query('COMMIT');
+    await Promise.all(referralRewards.map(r=>notifyPreferred(r.userId,'notif_referral',`Реферальное начисление: +$${r.reward.toFixed(2)}`,
+      'referral_reward','Реферальное начисление',{reward:r.reward,game_type:'safe'})));
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
 }
@@ -830,6 +839,9 @@ export async function startCracking() {
   );
   if (!upd.rows.length) return { cancelled: false, started: false };
   await settleSafeCommission(safe.id);
+  const participants=await query(`SELECT DISTINCT user_id FROM safe_deposits WHERE safe_id=$1`,[safe.id]);
+  await Promise.all(participants.rows.map((p:any)=>notifyPreferred(p.user_id,'notif_safe','Взлом Сейфа начался',
+    'safe_started','Взлом начался',{safe_id:safe.id},'safe_started',safe.id)));
 
   // Следующий сейф создаём ПОСЛЕ перевода текущего во взлом: сбор не должен
   // прерываться ни на минуту (иначе ensureNextDaySafe увидел бы «сбор идёт»)
@@ -858,6 +870,8 @@ async function cancelSafeReturnDeposits(safe: any) {
     await modifyBalance(d.user_id, parseFloat(d.amount), 'safe_cancel', {
       gameType: 'safe', description: 'Сейф отменён (не набрал минимум)'
     });
+    await notifyPreferred(d.user_id,'notif_safe',`Сейф отменён, возвращено $${parseFloat(d.amount).toFixed(2)}`,
+      'safe_cancelled','Сейф отменён',{safe_id:safe.id,returned:parseFloat(d.amount)},'safe_cancelled',safe.id);
   }
 }
 

@@ -4,6 +4,7 @@ import { getUser, modifyBalance, getAvailableBalance, modifyBalanceWithClient } 
 import { getSetting, setSetting, getPlatformRevenueForDate } from './revenue';
 import { VAULT_MULTIPLIERS, roundDownClean } from '../config';
 import { nowMSK } from '../utils/time';
+import { notifyPreferred } from './notifications';
 
 export async function getActiveDeposit(userId: number) {
   const res = await query(
@@ -145,6 +146,10 @@ export async function dailyVaultDistribution() {
       [date,revenue,autoPool,manualPool,totalPoolCents/100,totalLocked,deposits.length,+baseRate.toFixed(4),newMax]
     );
     await client.query('COMMIT');
+    await Promise.all(allocations.filter(a=>a.cents>0).map(a=>notifyPreferred(
+      a.d.user_id,'notif_vault',`Начислено $${(a.cents/100).toFixed(2)} по Vault Вкладу`,
+      'vault_daily','Начисление Vault',{deposit_id:a.d.id,profit:a.cents/100,date},`vault_accrual:${date}`,a.d.id
+    )));
     return { distributed: totalPoolCents/100, completed: 0 };
   } catch(e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
@@ -163,6 +168,8 @@ export async function completeMatureVaultDeposits(): Promise<number> {
       const d=claim.rows[0], payout=Math.round((parseFloat(d.amount)+parseFloat(d.accumulated_profit))*100)/100;
       await modifyBalanceWithClient(client,d.user_id,payout,'vault_payout',{description:`Вклад ${d.term_days} дней завершён, прибыль $${parseFloat(d.accumulated_profit).toFixed(2)}`});
       await client.query('COMMIT'); completed++;
+      await notifyPreferred(d.user_id,'notif_vault',`Vault Вклад завершён: выплачено $${payout.toFixed(2)}. Можно открыть новый вклад.`,
+        'vault_completed','Вклад выплачен',{deposit_id:d.id,payout,action:'/vault'},'vault_deposit',d.id);
     } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
   }
   return completed;

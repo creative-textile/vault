@@ -116,14 +116,10 @@ export default function App() {
 
     // События сейфа пересылаем подписчикам (Safe/SafeCrack) без перезагрузки
     // страницы: reload обрывал мини-игру взлома и ронял socket-соединение.
-    const onSafeCrackStarted = (data: any) => {
-      showToast('🔓 Начался взлом сейфа!');
-      emitSafeEvent('safe_crack_started', data);
-    };
-    const onSafeFinished = (data: any) => {
-      showToast('🏆 Сейф разыгран — итоги готовы');
-      emitSafeEvent('safe_finished', data);
-    };
+    // Broadcast обновляет экран игры, а персональные ненавязчивые сообщения
+    // приходят через persisted `notification` и учитывают настройку notif_safe.
+    const onSafeCrackStarted = (data: any) => emitSafeEvent('safe_crack_started', data);
+    const onSafeFinished = (data: any) => emitSafeEvent('safe_finished', data);
     const onSafeCancelled = (data: any) => emitSafeEvent('safe_cancelled', data);
     const onSafeCreated = (data: any) => emitSafeEvent('safe_created', data);
     const onSafeDeposit = (data: any) => emitSafeEvent('safe_deposit', data);

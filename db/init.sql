@@ -178,6 +178,7 @@ INSERT INTO settings (key, value) VALUES
     ('vault_min_deposit', '10'),
     ('vault_max_floor', '100'),
     ('vault_max_multiplier', '10'),
+    ('dead_balance_inactive_days', '180'),
     ('manual_pool_addition', '0')
 ON CONFLICT (key) DO NOTHING;
 

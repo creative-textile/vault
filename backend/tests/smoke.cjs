@@ -84,7 +84,9 @@ require('ts-node').register({
 const DDL = [
   `CREATE TABLE users (id SERIAL PRIMARY KEY, telegram_id BIGINT UNIQUE NOT NULL, username VARCHAR(64),
      balance DECIMAL DEFAULT 0, frozen_balance DECIMAL DEFAULT 0, referred_by INTEGER,
-     auto_safe_percent INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), last_active TIMESTAMP DEFAULT NOW())`,
+     auto_safe_percent INTEGER DEFAULT 0, notif_duel BOOLEAN DEFAULT TRUE, notif_safe BOOLEAN DEFAULT TRUE,
+     notif_referral BOOLEAN DEFAULT TRUE, notif_vault BOOLEAN DEFAULT TRUE, notified_dead BOOLEAN DEFAULT FALSE,
+     dead_deadline TIMESTAMP, created_at TIMESTAMP DEFAULT NOW(), last_active TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE transactions (id SERIAL PRIMARY KEY, user_id INTEGER, type VARCHAR(32), amount DECIMAL,
      balance_after DECIMAL, game_type VARCHAR(32), game_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE safes (id SERIAL PRIMARY KEY, bank DECIMAL DEFAULT 0, prize_pool DECIMAL DEFAULT 0,
@@ -115,7 +117,8 @@ const DDL = [
      created_at TIMESTAMP DEFAULT NOW(), finished_at TIMESTAMP)`,
   `CREATE TABLE user_notifications (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, type VARCHAR(50) NOT NULL,
      title VARCHAR(255) NOT NULL, message TEXT NOT NULL, data JSONB, is_read BOOLEAN DEFAULT FALSE,
-     created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, related_entity_type VARCHAR(50), related_entity_id INTEGER)`
+     created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, related_entity_type VARCHAR(50), related_entity_id INTEGER,
+     UNIQUE(user_id,type,related_entity_type,related_entity_id))`
 ];
 
 let failed = 0;

@@ -3,6 +3,7 @@ import { getUser, getUserByTelegramId, modifyBalance, getBalanceSnapshot } from 
 import { generateRefCode } from './referral';
 import { getSetting } from './revenue';
 import { config } from '../config';
+import { notifyPreferred } from './notifications';
 import jwt from 'jsonwebtoken';
 
 /**
@@ -48,8 +49,10 @@ export async function authenticateTelegram(initData: string, refCode?: string) {
     );
     user = await getUser(ins.rows[0].id);
     isNew = true;
-  } else if (username && user.username !== username) {
-    await query('UPDATE users SET username = $1, last_active = NOW() WHERE id = $2', [username, user.id]);
+    if (referrerId) await notifyPreferred(referrerId,'notif_referral',`Новый реферал: @${username || `user${telegramId}`}`,
+      'new_referral','Новый реферал',{referral_id:user!.id},'referral',user!.id);
+  } else {
+    await query('UPDATE users SET username = COALESCE($1,username), last_active = NOW(), notified_dead=FALSE, dead_deadline=NULL WHERE id = $2', [username, user.id]);
   }
 
   const token = jwt.sign({ userId: user!.id, telegramId }, config.jwtSecret, { expiresIn: '30d' });

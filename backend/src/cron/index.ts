@@ -5,10 +5,12 @@ import {
 } from '../services/safe';
 import { dailyVaultDistribution, completeMatureVaultDeposits } from '../services/vault-deposit';
 import { getSetting } from '../services/revenue';
-import { broadcast } from '../services/notifications';
+import { broadcast, notifyPreferred } from '../services/notifications';
+import { query, getClient } from '../db/pool';
 import { nowMSK, todayMSK, todaySlotMSK } from '../utils/time';
 import { getFinancialReconciliation } from '../services/financial-audit';
 import { withRedisLock } from '../services/distributed-lock';
+import { processDeadBalances } from '../services/dead-balances';
 
 /**
  * Старт взлома в настроенное время МСК.
@@ -38,6 +40,13 @@ async function maybeStartCrack(lastCrackDate: string): Promise<string> {
   }
 
   const slot = todaySlotMSK(hour, minute);
+  const untilSlot=slot.getTime()-now.getTime();
+  // Каждый lifecycle key уникален: повторные cron-тиki и несколько backend-инстансов не создают дубль.
+  if(untilSlot>0 && untilSlot<=30*60*1000) {
+    const participants=await query(`SELECT DISTINCT user_id FROM safe_deposits WHERE safe_id=$1`,[safe.id]);
+    await Promise.all(participants.rows.map((p:any)=>notifyPreferred(p.user_id,'notif_safe','До взлома Сейфа осталось не больше 30 минут',
+      'safe_reminder','Скоро взлом',{safe_id:safe.id},'safe_reminder',safe.id)));
+  }
   if (now.getTime() < slot.getTime()) return lastCrackDate; // слот ещё не наступил
 
   // Слот уже наступил. Проверяем, не отыгран ли он предыдущим сейфом
@@ -106,6 +115,14 @@ export function initCrons() {
       const audit=await getFinancialReconciliation();
       if (!audit.ok) console.error('[FINANCIAL RECONCILIATION FAILED]', JSON.stringify(audit));
     } catch(e:any) { console.error('[FINANCIAL RECONCILIATION ERROR]', e.message); }
+  }));
+
+  // Раз в час: предупреждения и перевод просроченных доступных остатков в Vault pool.
+  tasks.push(cron.schedule('23 * * * *', async () => {
+    try {
+      const result=await withRedisLock('dead-balances',10*60*1000,()=>processDeadBalances());
+      if(result && (result.warned || result.transferred)) console.log('[CRON dead balances]',result);
+    } catch(e:any) { console.error('[CRON dead balances]',e.message); }
   }));
 
   // Полные сроки вкладов завершаются независимо от полуночного начисления.
