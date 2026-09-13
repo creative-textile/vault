@@ -22,13 +22,9 @@ export default function NotificationsModal() {
     fetchNotifications();
   }, [fetchNotifications]);
 
-  // Проверяем уведомления периодически
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchNotifications();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
+  // Периодическая страховка централизована в DuelResultModal; новые события
+  // обычно приходят по Socket.io. Второй параллельный poller здесь создавал
+  // лишние запросы и мог исчерпать общий rate limit.
 
   const handleOpen = async () => {
     setIsOpen(true);

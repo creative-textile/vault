@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import WebApp from '@twa-dev/sdk';
 import { AuthContext, User } from './stores/auth';
-import { authApi, profileApi } from './api/client';
+import { ApiError, authApi, profileApi } from './api/client';
 import { getSocket, disconnectSocket } from './api/socket';
 import {
   getStoredToken, setStoredToken, clearStoredToken,
@@ -57,6 +57,8 @@ export default function App() {
   }, []);
 
   const refreshUser = useCallback(async () => {
+    const requestToken=getStoredToken();
+    if(!requestToken) return;
     try {
       const p = await profileApi.get();
       // Пока баланс «на удержании» (крутится монета в дуэли) цифры не меняем:
@@ -65,10 +67,14 @@ export default function App() {
       setUser(prev => (prev && isBalanceHeld())
         ? { ...p, balance: prev.balance, frozen_balance: prev.frozen_balance, available: prev.available }
         : p);
-    } catch {
-      setUser(null);
-      setToken(null);
-      clearStoredToken();
+    } catch (e) {
+      // Только актуальный 401 означает завершение сессии. 429, временный сбой
+      // БД/сети и запоздалый 401 старого запроса не должны запускать logout/login loop.
+      if(e instanceof ApiError && e.status===401 && getStoredToken()===requestToken) {
+        setUser(null);
+        setToken(null);
+        clearStoredToken();
+      }
     }
   }, []);
 
@@ -254,7 +260,10 @@ export default function App() {
     setShowOnboarding(false);
   };
 
-  if (loading) {
+  const publicReplay = window.location.pathname.startsWith('/replay/');
+  // Не монтируем Home и игровые pollers в коротком окне между loading=false и
+  // получением JWT: именно их 401 мог приехать позже и уничтожить новую сессию.
+  if (loading || (!token && !publicReplay)) {
     return <div className="app"><div className="container text-center" style={{paddingTop: '50vh'}}>Загрузка VAULT...</div></div>;
   }
 

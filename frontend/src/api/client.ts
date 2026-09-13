@@ -16,6 +16,10 @@ function getToken(): string | null {
   return getStoredToken();
 }
 
+export class ApiError extends Error {
+  constructor(message:string,public status:number,public retryAfter?:number){super(message);this.name='ApiError';}
+}
+
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   let adminPassword='';
@@ -33,9 +37,9 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
       ...options.headers
     }
   });
-  const data = await res.json();
+  const data = await res.json().catch(()=>({}));
   if (!res.ok && path.startsWith('/api/admin') && res.status===401) sessionStorage.removeItem('vault:admin-password');
-  if (!res.ok) throw new Error(data.error || 'Ошибка');
+  if (!res.ok) throw new ApiError(data.error || 'Ошибка',res.status,Number(data.retry_after)||undefined);
   return data as T;
 }
 

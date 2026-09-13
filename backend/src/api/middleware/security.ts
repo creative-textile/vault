@@ -5,7 +5,12 @@ import { config } from '../../config';
 import { query } from '../../db/pool';
 
 const memory = new Map<string,{count:number,reset:number}>();
-const clientKey=(req:Request) => (req as any).user?.id ? `u:${(req as any).user.id}` : `ip:${req.ip}`;
+// General limiter runs before route-level auth, so an IP-only key made every
+// browser behind one home/NAT address share one tiny bucket. Device id is a
+// privacy-safe random client identifier; IP remains the fallback.
+const clientKey=(req:Request) => (req as any).user?.id
+  ? `u:${(req as any).user.id}`
+  : req.header('x-device-id') ? `d:${req.header('x-device-id')}` : `ip:${req.ip}`;
 
 /** Fixed-window limiter in Redis; in-memory fallback keeps protection during Redis outage. */
 export function rateLimit(name:string, limit:number, windowSec:number) {

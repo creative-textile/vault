@@ -592,6 +592,8 @@ const finish = () => {
     as(2, 'bob');
     r = await call('POST', `/api/duel/accept/${duel1}`);
     check('дуэль принята и сыграна', r.status === 200 && ['heads', 'tails'].includes(r.json?.result), r.json);
+    check('ответ принятия самодостаточен даже без дополнительного GET',
+      r.json?.id===duel1 && Number(r.json?.amount)===25 && Number(r.json?.prize)===45 && r.json?.status==='finished',r.json);
     const winnerId = r.json?.winner;
     check('победитель — создатель вызова (монета детерминированная)', winnerId === 1, winnerId);
 

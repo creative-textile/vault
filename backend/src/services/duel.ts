@@ -171,12 +171,18 @@ async function acceptDuelImpl(duelId: number, opponentId: number) {
   );
 
   return {
+    id: duelId,
+    status: 'finished',
     result,
     winner: winnerId,
+    winner_id: winnerId,
     prize,
+    amount,
+    i_won: winnerId === opponentId,
     coin_trajectory: coinTrajectory,
     creator_id: duel.creator_id,
-    opponent_id: opponentId
+    opponent_id: opponentId,
+    finished_at: new Date().toISOString()
   };
 }
 

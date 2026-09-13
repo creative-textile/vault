@@ -25,7 +25,9 @@ app.set('trust proxy', 1);
 app.use(cors({ origin(origin,cb) { if(!origin || config.allowedOrigins.includes(origin)) return cb(null,true); cb(new Error('Origin не разрешён')); }, credentials:true }));
 app.use(express.json({limit:'32kb'}));
 app.use(validatePayload);
-app.use(rateLimit('general',60,60));
+// Background state/notification polling is legitimate traffic. Per-device
+// bucket prevents two local browsers/NAT users from blocking one another.
+app.use(rateLimit('general',300,60));
 app.use(securityTelemetry);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
@@ -52,7 +54,17 @@ const io = new Server(server, {
 });
 
 // Redis adapter synchronizes rooms/events when backend is scaled horizontally.
-(async()=>{ try { const { createAdapter }=await import('@socket.io/redis-adapter'); const { ensureRedis }=await import('./db/redis'); const pub=await ensureRedis(); const sub=pub.duplicate(); await sub.connect(); io.adapter(createAdapter(pub,sub)); console.log('[REDIS] Socket.io adapter ready'); } catch(e:any) { console.warn('[REDIS] Socket.io adapter fallback:',e.message); } })();
+(async()=>{ try {
+  const { createAdapter }=await import('@socket.io/redis-adapter');
+  const { ensureRedis }=await import('./db/redis');
+  const pub=await ensureRedis();
+  const sub=pub.duplicate({lazyConnect:true});
+  // ioredis requires an error listener on every duplicate; without it a Redis
+  // restart produced noisy "missing error handler" messages.
+  sub.on('error',(e:any)=>console.warn('[REDIS socket subscriber]',e.message));
+  await sub.connect();
+  io.adapter(createAdapter(pub,sub)); console.log('[REDIS] Socket.io adapter ready');
+} catch(e:any) { console.warn('[REDIS] Socket.io adapter fallback:',e.message); } })();
 
 initNotifications(io);
 

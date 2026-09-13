@@ -731,3 +731,9 @@ The client authentication effect is guarded by an `authInFlight` ref, including 
 Rocket stores a cryptographic `replay_seed`; its Three.js PRNG makes stars, debris and effects reproducible. The authoritative loop emits 30 checkpoints per second, while the client predicts the same exponential curve between checkpoints on `requestAnimationFrame` (normally 60 FPS). The seeded 100,000-round test validates the configured 0.90 RTP model.
 
 Directed Duel rematches store `target_user_id` and `parent_duel_id`. Only the target can accept/decline. Decline status and reserved-funds release share one SQL transaction. Automatic delayed Duel error redirects were removed: stale timers can no longer move a user after they leave a screen.
+
+### Session bootstrap and request-pressure fix
+
+The authenticated React tree is not mounted during the token bootstrap gap. `refreshUser` captures the request token and clears credentials only for a 401 that still belongs to that exact token; 429 and transient infrastructure errors preserve the session. This removes the 401 → re-authenticate-as-existing → close-onboarding cycle.
+
+The pre-auth general limiter keys on `X-Device-Id` (IP fallback) and allows 300 requests/minute. Redundant notification polling was removed and slow reconciliation intervals were widened; Socket.io remains the primary update path. `acceptDuel` returns a complete result envelope so UI correctness does not depend on a second rate-limited request. Every duplicated Redis connection registers an error listener.

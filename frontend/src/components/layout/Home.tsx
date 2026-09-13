@@ -78,7 +78,8 @@ export default function Home() {
     }, 1000);
     // Страховка на случай потерянного socket: банк не должен «застывать»
     const poll = setInterval(loadSafe, 20000);
-    const refresh = setInterval(refreshUser, 5000);
+    // Balance changes arrive through Socket.io; slow reconciliation is only a fallback.
+    const refresh = setInterval(refreshUser, 30000);
     return () => { off(); clearInterval(iv); clearInterval(poll); clearInterval(refresh); clearInterval(statsPoll); };
   }, [refreshUser, loadSafe]);
 
