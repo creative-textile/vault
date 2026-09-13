@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import WebApp from '@twa-dev/sdk';
 import { AuthContext, User } from './stores/auth';
@@ -43,6 +43,10 @@ export default function App() {
       этом входе (`isNew`). Возврат в игру с действующим токеном в приветствие
       не выбрасывает — игрок мог быть посреди полёта ракеты или взлома сейфа. */
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // React StrictMode повторно запускает эффекты в dev. Без single-flight два
+  // одновременных запроса авторизации видели один аккаунт сначала новым, затем
+  // существующим; второй ответ закрывал только что открытый onboarding.
+  const authInFlight = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
   const { fetchNotifications, clear: clearNotifications } = useNotifications();
 
@@ -191,7 +195,8 @@ export default function App() {
 
   // Авто-вход по Telegram initData или демо
   useEffect(() => {
-    if (token || loading) return;
+    if (token || loading || authInFlight.current) return;
+    authInFlight.current = true;
     (async () => {
       try {
         const tg = (window as any).Telegram?.WebApp;
@@ -224,6 +229,8 @@ export default function App() {
         }
       } catch (e: any) {
         showToast('Ошибка входа: ' + e.message);
+      } finally {
+        authInFlight.current = false;
       }
     })();
   }, [token, loading, showToast]);
@@ -248,6 +255,8 @@ export default function App() {
     return <div className="app"><div className="container text-center" style={{paddingTop: '50vh'}}>Загрузка VAULT...</div></div>;
   }
 
+  const onboardingActive = showOnboarding && !onboardingDone;
+
   return (
     <AuthContext.Provider value={{
       user, token, loading, onboardingDone,
@@ -263,10 +272,11 @@ export default function App() {
               уведомлений в БД, переживает перезапуск приложения. От онбординга
               не зависит: флаг приветствия прежняя версия не выставляла никогда,
               а результат дуэли обязан доходить до игрока всегда. */}
-          {token && <DuelResultModal />}
-          {token && <NotificationsModal />}
-          {/* Приветственные экраны — оверлеем поверх всего приложения */}
-          {showOnboarding && !onboardingDone && (
+          {token && !onboardingActive && <DuelResultModal />}
+          {token && !onboardingActive && <NotificationsModal />}
+          {/* Пока приветствие открыто, игровые редиректы, модальные окна и
+              фоновые UI-контроллеры не монтируются и не могут сменить маршрут. */}
+          {onboardingActive && (
             <div style={{position:'fixed', inset:0, zIndex:3000, background:'#0a0a1a', overflowY:'auto'}}>
               <div className="container"><Onboarding /></div>
             </div>
@@ -275,8 +285,8 @@ export default function App() {
               ракету доступной для кэшаута, пока он не на /rocket. От онбординга
               не зависят: у нового игрока просто нет вклада в сейфе, и проверка
               состояния отрабатывает вхолостую */}
-          {token && <SafeCrackRedirector />}
-          {token && <RocketFlightBadge />}
+          {token && !onboardingActive && <SafeCrackRedirector />}
+          {token && !onboardingActive && <RocketFlightBadge />}
           <div className="container">
             <Routes>
               <Route path="/" element={<Home />} />

@@ -719,3 +719,7 @@ Socket.io uses the Redis adapter when available. Redis leases coordinate Safe cr
 Safe emits reminder/start/result/cancellation events to participants. Vault distribution emits one accrual event per deposit/day; maturity emits a payout event containing the `/vault` repeat action. Referral registration and rewards use the same channel.
 
 `dead-balances.ts` runs hourly under a Redis lease. After `dead_balance_inactive_days` (default 180), it atomically marks a seven-day deadline and sends a critical warning. Authentication clears the marker. At expiry, a SQL transaction zeros only the available `users.balance`, writes a negative `dead_balance_vault` transaction, and adds the amount to `manual_pool_addition` for the next 💎 Vault pool distribution. Existing frozen/game/deposit funds are outside this operation.
+
+### Onboarding navigation isolation
+
+The client authentication effect is guarded by an `authInFlight` ref, including under React StrictMode. This prevents the new/existing-account response race that closed onboarding. While onboarding is active, route-changing game controllers and notification modals are unmounted; data-level socket handling may continue without taking over navigation.
