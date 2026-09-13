@@ -737,3 +737,9 @@ Directed Duel rematches store `target_user_id` and `parent_duel_id`. Only the ta
 The authenticated React tree is not mounted during the token bootstrap gap. `refreshUser` captures the request token and clears credentials only for a 401 that still belongs to that exact token; 429 and transient infrastructure errors preserve the session. This removes the 401 → re-authenticate-as-existing → close-onboarding cycle.
 
 The pre-auth general limiter keys on `X-Device-Id` (IP fallback) and allows 300 requests/minute. Redundant notification polling was removed and slow reconciliation intervals were widened; Socket.io remains the primary update path. `acceptDuel` returns a complete result envelope so UI correctness does not depend on a second rate-limited request. Every duplicated Redis connection registers an error listener.
+
+### Share attribution and resilient UI actions
+
+Replay URLs may carry `?player=@username`; the backend still returns immutable round facts, while the public client validates the requested hero against replay participants. Monetary outcome fields (`payout`, `profit`, participant `net`, Safe rank/prize) make share cards self-explanatory. Rocket distinguishes `cashout_at` from `crash_at` and exposes `was_beautiful`, preventing a post-cashout visual extension from being mistaken for a payout discrepancy.
+
+Deposit address acquisition has bounded retries, visibility recovery and explicit retry UI. Duel acceptance sets a short client transition lock before the request, preventing its own persisted result event from flashing a modal in the lobby. Rematch notification actions call the same authoritative accept/decline endpoints and then mark the notification read.

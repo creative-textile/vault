@@ -6,6 +6,7 @@ import Header from '../layout/Header';
 import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import { setDuelAccepting } from '../../utils/duelTransition';
 
 interface LobbyItem {
   id: number;
@@ -73,11 +74,17 @@ export default function Duel() {
     // до броска монеты. Без удержания баланс в лобби и в шапке успевал
     // измениться на глазах: цифра выдавала исход раньше анимации.
     holdBalance();
+    setDuelAccepting(true);
     try {
       const result = await duelApi.accept(id);
-      await refreshUser();
+      // Ответ уже самодостаточен: переходим к броску сразу. Ожидание profile GET
+      // оставляло лобби видимым и успевало на мгновение показать result modal.
       nav(`/duel/${id}`, { state: { result: { ...result, id } }, replace: true });
+      refreshUser().catch(()=>{});
+      // DuelGame route itself blocks the modal; transition lock is no longer needed.
+      setDuelAccepting(false);
     } catch (e: any) {
+      setDuelAccepting(false);
       releaseBalance();
       await refreshUser();
       showToast(e.message);

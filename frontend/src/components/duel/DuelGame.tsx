@@ -245,10 +245,10 @@ export default function DuelGame() {
             <button className="btn btn-secondary" onClick={() => rematch(2)}>⚔️ ×2</button>
           </div>
           <button className="btn btn-secondary" onClick={() => {
-            const url=`${location.origin}/replay/duel/${id}`;
+            const url=`${location.origin}/replay/duel/${id}?player=${encodeURIComponent('@'+(user?.username||'user'))}`;
             if(navigator.share) navigator.share({title:'Повтор дуэли VAULT',url}); else navigator.clipboard?.writeText(url).then(()=>showToast('Ссылка скопирована'));
           }}>📤 ПОДЕЛИТЬСЯ РЕПЛЕЕМ</button>
-          <button className="btn btn-secondary" onClick={goBack}>↩️ К ЛОББИ</button>
+          <button className="btn btn-secondary mt" onClick={goBack}>↩️ К ЛОББИ</button>
           <button className="btn btn-secondary mt" onClick={goHome}>🏠 НА ГЛАВНУЮ</button>
           {won && profit >= 1 && (user?.auto_safe_percent || 0) === 0 && (
             <button className="btn mt" style={{background:'#a855f7', color:'#fff'}} onClick={() => setShowSafe(true)}>

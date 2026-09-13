@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useNotifications, Notification } from '../../stores/notifications';
 import { useAuth } from '../../stores/auth';
+import { duelApi } from '../../api/client';
+import { setDuelAccepting } from '../../utils/duelTransition';
 
 export default function NotificationsModal() {
   const { notifications, unreadCount, fetchNotifications, markAsRead, markAllAsRead } = useNotifications();
@@ -53,6 +55,17 @@ export default function NotificationsModal() {
         } 
       });
     }
+  };
+
+  const handleRematch = async (notification:Notification,accept:boolean) => {
+    const duelId=Number(notification.data?.duel_id); if(!duelId)return;
+    setIsLoading(true); if(accept)setDuelAccepting(true);
+    try {
+      if(accept) { const result=await duelApi.accept(duelId); await markAsRead(notification.id); setIsOpen(false); nav(`/duel/${duelId}`,{state:{result:{...result,id:duelId}}}); setDuelAccepting(false); }
+      else { await duelApi.decline(duelId); await markAsRead(notification.id); showToast('Реванш отклонён'); }
+      await fetchNotifications();
+    } catch(e:any){showToast(e.message||'Не удалось обработать реванш')}
+    finally{setDuelAccepting(false);setIsLoading(false)}
   };
 
   const handleMarkAllAsRead = async () => {
@@ -240,6 +253,10 @@ export default function NotificationsModal() {
                             <div style={{ color: '#ccc', fontSize: 14, marginTop: 4 }}>
                               {notification.message}
                             </div>
+                            {notification.type==='duel_rematch' && <div style={{display:'flex',gap:8,marginTop:10}}>
+                              <button className="btn btn-small btn-green" onClick={()=>handleRematch(notification,true)}>⚔️ Принять</button>
+                              <button className="btn btn-small btn-danger" onClick={()=>handleRematch(notification,false)}>✖ Отклонить</button>
+                            </div>}
                           </div>
                         ))}
                       </div>

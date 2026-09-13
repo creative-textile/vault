@@ -1,29 +1,23 @@
-import { useEffect,useState } from 'react';
-import { Link,useParams } from 'react-router-dom';
+import { useEffect,useMemo,useState } from 'react';
+import { useParams,useSearchParams } from 'react-router-dom';
 import { replayApi } from '../../api/client';
 import DuelScene from '../../three/duel/DuelScene';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import RocketScene from '../../three/rocket/RocketScene';
-
+const money=(n:number)=>`$${Math.abs(Number(n)||0).toFixed(2)}`;
 export default function Replay(){
- const {game,id}=useParams(); const [r,setR]=useState<any>(); const [err,setErr]=useState(''); const [elapsed,setElapsed]=useState(0);
- useEffect(()=>{let live=true; if(!['rocket','duel','safe'].includes(game||'')){setErr('Неизвестный реплей');return;}
-  replayApi.get(game as any,Number(id)).then(x=>live&&setR(x)).catch(e=>live&&setErr(e.message)); return()=>{live=false};},[game,id]);
- useEffect(()=>{if(!r)return; const start=performance.now(); let frame=0; const tick=(now:number)=>{setElapsed(Math.min(r.duration_ms,now-start)); if(now-start<r.duration_ms)frame=requestAnimationFrame(tick)}; frame=requestAnimationFrame(tick); return()=>cancelAnimationFrame(frame)},[r]);
- if(err)return <div className="card text-center">{err}<br/><Link to="/">На главную</Link></div>;
- if(!r)return <div className="text-center mt">Загрузка реплея…</div>;
- const done=elapsed>=r.duration_ms, mult=r.game==='rocket'?Math.min(r.outcome.crash_at,Math.exp(r.animation.curve*elapsed/1000)):1;
- const share=async()=>{const url=location.href; if(navigator.share)await navigator.share({title:`VAULT ${r.game} replay`,url}); else {await navigator.clipboard.writeText(url);}};
- return <>
-  <div className="card text-center"><b>📼 {r.game.toUpperCase()} #{r.id}</b><div className="text-dim">Публичный детерминированный повтор</div></div>
-  {r.game==='rocket'&&<RocketScene phase={done?'crashed':'flying'} multiplier={mult} seed={r.animation.seed}/>} 
-  {r.game==='duel'&&<DuelScene phase={done?'result':'flipping'} result={r.outcome.result} trajectory={r.animation.trajectory}/>} 
-  {r.game==='safe'&&<SafeCrackScene phase={done?'result':'spinning'} code={r.animation.code} drumSpeeds={r.animation.drum_speeds}/>} 
-  <div className="card"><div>Участники: {r.participants.map((p:any)=>p.name).join(', ')}</div>
-   {r.game==='rocket'&&<div>x{mult.toFixed(2)} · взрыв x{r.outcome.crash_at.toFixed(2)}</div>}
-   {r.game==='duel'&&done&&<div>{r.outcome.result==='heads'?'Орёл':'Решка'}</div>}
-   {r.game==='safe'&&done&&<div>Победителей: {r.outcome.winners_count}</div>}
-  </div>
-  <button className="btn" onClick={share}>📤 Поделиться реплеем</button><Link className="btn btn-secondary mt" to="/">🏠 На главную</Link>
- </>;
+ const {game,id}=useParams();const [params]=useSearchParams();const[r,setR]=useState<any>();const[err,setErr]=useState('');const[elapsed,setElapsed]=useState(0);
+ useEffect(()=>{let live=true;if(!['rocket','duel','safe'].includes(game||'')){setErr('Неизвестный реплей');return}replayApi.get(game as any,Number(id)).then(x=>live&&setR(x)).catch(e=>live&&setErr(e.message));return()=>{live=false}},[game,id]);
+ useEffect(()=>{if(!r)return;const start=performance.now();let frame=0;const tick=(now:number)=>{setElapsed(Math.min(r.duration_ms,now-start));if(now-start<r.duration_ms)frame=requestAnimationFrame(tick)};frame=requestAnimationFrame(tick);return()=>cancelAnimationFrame(frame)},[r]);
+ const hero=useMemo(()=>r&&(r.participants.find((p:any)=>p.name===params.get('player'))||r.participants.find((p:any)=>p.won)||r.participants[0]),[r,params]);
+ if(err)return <div className="card text-center">{err}<br/><a href="/">Попробовать VAULT</a></div>;if(!r)return <div className="text-center mt">Загрузка реплея…</div>;
+ const done=elapsed>=r.duration_ms,mult=r.game==='rocket'?Math.min(r.outcome.crash_at,Math.exp(r.animation.curve*elapsed/1000)):1;const cashed=r.game==='rocket'&&r.outcome.cashout_at&&mult>=r.outcome.cashout_at;
+ const headline=r.game==='safe'?(hero?.won?`${hero.name} получил ${money(hero.prize)} в Сейфе`:`${hero?.name} участвовал во взломе Сейфа`):r.game==='duel'?`${hero?.name} ${hero?.won?'выиграл':'сыграл'} дуэль${hero?.won?` и заработал ${money(hero.net)}`:''}`:`${hero?.name} ${r.outcome.cashout_at?`забрал ${money(r.outcome.payout)} на x${r.outcome.cashout_at.toFixed(2)}`:`рискнул ${money(r.outcome.bet)}`}`;
+ const share=async()=>{const url=location.href,text=`${headline}. Смотри повтор в VAULT:`;if(navigator.share)await navigator.share({title:headline,text,url});else{await navigator.clipboard.writeText(`${text} ${url}`);alert('Ссылка и результат скопированы')}};
+ return <><div className="card text-center" style={{border:'2px solid #ffd700'}}><div className="text-dim">РЕАЛЬНЫЙ РЕЗУЛЬТАТ · VAULT</div><div style={{fontSize:22,fontWeight:900,marginTop:8}}>{headline}</div></div>
+ {r.game==='rocket'&&<RocketScene phase={done?'crashed':'flying'} multiplier={mult} seed={r.animation.seed}/>} {r.game==='duel'&&<DuelScene phase={done?'result':'flipping'} result={r.outcome.result} trajectory={r.animation.trajectory}/>} {r.game==='safe'&&<SafeCrackScene phase={done?'result':'spinning'} code={r.animation.code} drumSpeeds={r.animation.drum_speeds}/>}
+ <div className="card">{r.game==='rocket'&&<><div className="history-item"><span>Ставка</span><b>{money(r.outcome.bet)}</b></div><div className="history-item"><span>Кэшаут</span><b className="text-green">{r.outcome.cashout_at?`x${r.outcome.cashout_at.toFixed(2)} · ${money(r.outcome.payout)}`:'Не успел забрать'}</b></div><div className="history-item"><span>Чистый результат</span><b className={r.outcome.profit>=0?'text-green':'text-red'}>{r.outcome.profit>=0?'+':'-'}{money(r.outcome.profit)}</b></div><div className="history-item"><span>Финал полёта</span><b>x{r.outcome.crash_at.toFixed(2)}</b></div>{r.outcome.was_beautiful&&<div className="text-accent text-center mt">✨ Красивый полёт: после кэшаута ракета продолжила полёт до x{r.outcome.crash_at.toFixed(2)}. Выплата зафиксирована на x{r.outcome.cashout_at.toFixed(2)}.</div>}{cashed&&!done&&<div className="text-green text-center mt">✅ Деньги уже забраны — красивый полёт продолжается</div>}</>}
+ {r.game==='duel'&&<>{r.participants.map((p:any)=><div className="history-item" key={p.name}><span>{p.won?'🏆':'⚔️'} {p.name}</span><b className={p.won?'text-green':'text-red'}>{p.won?'+':'-'}{money(p.net)}</b></div>)}{done&&<div className="text-center mt">Выпало: <b>{r.outcome.result==='heads'?'ОРЁЛ':'РЕШКА'}</b> · приз {money(r.outcome.prize)}</div>}</>}
+ {r.game==='safe'&&r.participants.map((p:any)=><div className="history-item" key={p.name}><span>{p.won?'🏆':'▫️'} #{p.rank} {p.name}<small className="text-dim" style={{display:'block'}}>вклад {money(p.amount)}{p.time_ms?` · ${(p.time_ms/1000).toFixed(2)} сек`:' · не успел'}</small></span><b className={p.profit>=0?'text-green':'text-red'}>{p.prize>0?`${money(p.prize)} (${p.profit>=0?'+':'-'}${money(p.profit)})`:'без приза'}</b></div>)}</div>
+ <div style={{display:'grid',gap:10,marginTop:12}}><button className="btn" onClick={share}>📤 Поделиться результатом</button><a className="btn btn-green" href="/">🎮 Попробовать VAULT</a></div></>;
 }
