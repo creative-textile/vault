@@ -1,10 +1,11 @@
 import { query, getClient } from '../db/pool';
+import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
 import { notifyDuelResult } from './notifications';
 
-export async function createDuel(userId: number, amount: number) {
+async function createDuelImpl(userId: number, amount: number) {
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
 
@@ -27,7 +28,8 @@ export async function createDuel(userId: number, amount: number) {
   // вдвое, и пока вызов висит в лобби, игрок не мог распоряжаться своими же
   // деньгами (при трёх вызовах available вообще уходил в минус). Деньги
   // спишутся в acceptDuel — когда дуэль действительно сыграна.
-  await query('UPDATE users SET frozen_balance = frozen_balance + $1 WHERE id = $2', [amount, userId]);
+  const frozen = await query(`UPDATE users SET frozen_balance=frozen_balance+$1 WHERE id=$2 AND balance-frozen_balance >= $1 RETURNING id`,[amount,userId]);
+  if (!frozen.rows.length) throw new Error('Недостаточно средств');
 
   const res = await query(
     `INSERT INTO duels (creator_id, amount, status)
@@ -56,7 +58,7 @@ export async function getLobby() {
   }));
 }
 
-export async function cancelDuel(duelId: number, userId: number) {
+async function cancelDuelImpl(duelId: number, userId: number) {
   const res = await query('SELECT * FROM duels WHERE id = $1', [duelId]);
   if (res.rows.length === 0) throw new Error('Дуэль не найдена');
   const duel = res.rows[0];
@@ -65,12 +67,13 @@ export async function cancelDuel(duelId: number, userId: number) {
 
   const amount = parseFloat(duel.amount);
   // Ставка не списывалась — значит и возвращать нечего, только разморозить
-  await query('UPDATE users SET frozen_balance = frozen_balance - $1 WHERE id = $2', [amount, userId]);
+  const unfrozen=await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1 RETURNING id`,[amount,userId]);
+  if (!unfrozen.rows.length) throw new Error('Средства вызова уже разморожены');
   await query("UPDATE duels SET status = 'cancelled' WHERE id = $1", [duelId]);
   return { success: true };
 }
 
-export async function acceptDuel(duelId: number, opponentId: number) {
+async function acceptDuelImpl(duelId: number, opponentId: number) {
   const duelRes = await query('SELECT * FROM duels WHERE id = $1', [duelId]);
   if (duelRes.rows.length === 0) throw new Error('Дуэль не найдена');
   const duel = duelRes.rows[0];
@@ -99,7 +102,8 @@ export async function acceptDuel(duelId: number, opponentId: number) {
   await modifyBalance(opponentId, -amount, 'bet', { gameType: 'duel', gameId: duelId });
   // У создателя ставка до сих пор была заморожена, а не списана: размораживаем
   // и списываем теперь, когда дуэль действительно сыграна
-  await query('UPDATE users SET frozen_balance = frozen_balance - $1 WHERE id = $2', [amount, duel.creator_id]);
+  const creatorUnfreeze=await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1 RETURNING id`,[amount,duel.creator_id]);
+  if (!creatorUnfreeze.rows.length) throw new Error('Ставка создателя не зарезервирована');
   await modifyBalance(duel.creator_id, -amount, 'bet', { gameType: 'duel', gameId: duelId });
 
   // Орёл или решка
@@ -358,3 +362,9 @@ export async function repairDoubleLockedOpenDuels(): Promise<number> {
   }
   return fixed;
 }
+
+
+// Составные денежные операции целиком выполняются в одной SQL-транзакции.
+export const createDuel: typeof createDuelImpl = (...args: Parameters<typeof createDuelImpl>) => withTransaction(() => createDuelImpl(...args));
+export const cancelDuel: typeof cancelDuelImpl = (...args: Parameters<typeof cancelDuelImpl>) => withTransaction(() => cancelDuelImpl(...args));
+export const acceptDuel: typeof acceptDuelImpl = (...args: Parameters<typeof acceptDuelImpl>) => withTransaction(() => acceptDuelImpl(...args));

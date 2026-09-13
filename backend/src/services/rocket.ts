@@ -1,4 +1,5 @@
 import { query } from '../db/pool';
+import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
@@ -37,10 +38,11 @@ export async function getRocketBankroll(): Promise<number> {
 }
 
 export async function updateRocketBankroll(delta: number) {
-  await query('UPDATE rocket_bankroll SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [delta]);
+  const res=await query('UPDATE rocket_bankroll SET amount=amount+$1,updated_at=NOW() WHERE id=1 AND amount+$1 >= 0 RETURNING amount',[Math.round(delta*100)/100]);
+  if (!res.rows.length) throw new Error('Недостаточно средств в кассе Ракеты');
 }
 
-export async function placeBet(userId: number, betAmount: number) {
+async function placeBetImpl(userId: number, betAmount: number) {
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
 
@@ -85,7 +87,7 @@ export async function placeBet(userId: number, betAmount: number) {
   };
 }
 
-export async function processCashout(roundId: number, userId: number, elapsedSec: number) {
+async function processCashoutImpl(roundId: number, userId: number, elapsedSec: number) {
   const res = await query('SELECT * FROM rocket_rounds WHERE id = $1', [roundId]);
   if (res.rows.length === 0) throw new Error('Раунд не найден');
   const round = res.rows[0];
@@ -170,3 +172,8 @@ export async function getRocketHistory(limit = 50) {
     timestamp: r.started_at
   }));
 }
+
+
+// Составные денежные операции целиком выполняются в одной SQL-транзакции.
+export const placeBet: typeof placeBetImpl = (...args: Parameters<typeof placeBetImpl>) => withTransaction(() => placeBetImpl(...args));
+export const processCashout: typeof processCashoutImpl = (...args: Parameters<typeof processCashoutImpl>) => withTransaction(() => processCashoutImpl(...args));

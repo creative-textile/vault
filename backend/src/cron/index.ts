@@ -7,6 +7,7 @@ import { dailyVaultDistribution, completeMatureVaultDeposits } from '../services
 import { getSetting } from '../services/revenue';
 import { broadcast } from '../services/notifications';
 import { nowMSK, todayMSK, todaySlotMSK } from '../utils/time';
+import { getFinancialReconciliation } from '../services/financial-audit';
 
 /**
  * Старт взлома в настроенное время МСК.
@@ -95,6 +96,14 @@ export function initCrons() {
     } catch (e: any) {
       console.error('[CRON safe] error:', e.message);
     }
+  }));
+
+  // Финансовая самопроверка: нарушение инварианта попадает в production logs/alerts.
+  tasks.push(cron.schedule('7 * * * *', async () => {
+    try {
+      const audit=await getFinancialReconciliation();
+      if (!audit.ok) console.error('[FINANCIAL RECONCILIATION FAILED]', JSON.stringify(audit));
+    } catch(e:any) { console.error('[FINANCIAL RECONCILIATION ERROR]', e.message); }
   }));
 
   // Полные сроки вкладов завершаются независимо от полуночного начисления.

@@ -105,7 +105,7 @@ const DDL = [
   `CREATE TABLE vault_pool_daily (id SERIAL PRIMARY KEY, date DATE UNIQUE NOT NULL, platform_revenue DECIMAL DEFAULT 0,
      auto_pool DECIMAL DEFAULT 0, manual_pool DECIMAL DEFAULT 0, total_pool DECIMAL DEFAULT 0,
      total_locked DECIMAL DEFAULT 0, depositors_count INTEGER DEFAULT 0, base_rate DECIMAL DEFAULT 0,
-     max_deposit DECIMAL DEFAULT 100)`,
+     max_deposit DECIMAL DEFAULT 100, distributed_at TIMESTAMPTZ)`,
   `CREATE TABLE rocket_rounds (id SERIAL PRIMARY KEY, user_id INTEGER, bet DECIMAL NOT NULL, crash_at DECIMAL NOT NULL,
      cashout_at DECIMAL, profit DECIMAL DEFAULT 0, flight_curve DECIMAL DEFAULT 0.075,
      was_beautiful BOOLEAN DEFAULT FALSE, started_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW())`,
@@ -783,7 +783,8 @@ const finish = () => {
     for (const d of [todayStr, yStr]) {
       await query(`INSERT INTO daily_revenue (date, source, amount) VALUES ($1, 'duel', 400)`, [d]);
     }
-    await query(`INSERT INTO vault_pool_daily(date,max_deposit) VALUES($1,500)`, [yStr]);
+    const prior=new Date(y.getTime()-86400000).toISOString().slice(0,10);
+    await query(`INSERT INTO vault_pool_daily(date,max_deposit,distributed_at) VALUES($1,500,NOW())`, [prior]);
 
     const money = async id => (await query(
       `SELECT balance, frozen_balance FROM users WHERE id = $1`, [id])).rows[0];

@@ -1,4 +1,5 @@
 import { query } from '../db/pool';
+import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance, modifyBalanceWithClient } from './balance';
 import { logPlatformRevenue, getSetting, logPlatformRevenueWithClient } from './revenue';
 import { broadcast } from './notifications';
@@ -256,7 +257,7 @@ export async function createDailySafe() {
   console.log(`[SAFE] Создан дневной сейф с кодом: ${code.join(',')}`);
 }
 
-export async function safeDeposit(userId: number, amount: number) {
+async function safeDepositImpl(userId: number, amount: number) {
   // Вклад всегда идёт в сейф, который сейчас собирает: во время взлома
   // сегодняшнего это сейф следующего дня (иначе деньги «зависали» бы до полуночи).
   const safe = await getCollectingSafe();
@@ -330,7 +331,7 @@ export async function safeDeposit(userId: number, amount: number) {
   };
 }
 
-export async function cancelSafeDeposit(userId: number) {
+async function cancelSafeDepositImpl(userId: number) {
   const safe = await getCollectingSafe();
   if (!safe) throw new Error('Сейф не найден');
 
@@ -522,7 +523,7 @@ export async function getSpinStartInMs(safeId: number, windowMs?: number): Promi
   return Math.round(started.getTime() + lead - Date.now());
 }
 
-export async function calculateSafeWinners(safeId: number) {
+async function calculateSafeWinnersImpl(safeId: number) {
   const safe = await getSafeById(safeId);
   if (!safe) return;
   if (safe.status !== 'cracking') return;
@@ -859,3 +860,9 @@ async function cancelSafeReturnDeposits(safe: any) {
     });
   }
 }
+
+
+// Составные денежные операции целиком выполняются в одной SQL-транзакции.
+export const safeDeposit: typeof safeDepositImpl = (...args: Parameters<typeof safeDepositImpl>) => withTransaction(() => safeDepositImpl(...args));
+export const cancelSafeDeposit: typeof cancelSafeDepositImpl = (...args: Parameters<typeof cancelSafeDepositImpl>) => withTransaction(() => cancelSafeDepositImpl(...args));
+export const calculateSafeWinners: typeof calculateSafeWinnersImpl = (...args: Parameters<typeof calculateSafeWinnersImpl>) => withTransaction(() => calculateSafeWinnersImpl(...args));

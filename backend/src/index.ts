@@ -99,6 +99,7 @@ server.listen(config.port, async () => {
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS crack_started_at TIMESTAMPTZ`);
       await query(`ALTER TABLE safes ADD COLUMN IF NOT EXISTS commission_settled BOOLEAN DEFAULT FALSE`);
       await query(`ALTER TABLE vault_deposits ADD COLUMN IF NOT EXISTS unlocks_at TIMESTAMPTZ`);
+      await query(`ALTER TABLE vault_pool_daily ADD COLUMN IF NOT EXISTS distributed_at TIMESTAMPTZ`);
       await query(`UPDATE vault_deposits SET unlocks_at=created_at + (term_days * INTERVAL '1 day') WHERE unlocks_at IS NULL`);
       await query(`CREATE TABLE IF NOT EXISTS vault_deposit_accruals (id SERIAL PRIMARY KEY, deposit_id INTEGER REFERENCES vault_deposits(id), user_id INTEGER REFERENCES users(id), date DATE NOT NULL, pool_amount DECIMAL(12,2) NOT NULL, profit DECIMAL(12,2) NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(deposit_id,date))`);
       // Момент начала сбора: по нему планировщик понимает, не отыгран ли
@@ -118,6 +119,7 @@ server.listen(config.port, async () => {
     // Инварианты real-money ledger для уже существующих БД.
     await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_balance_nonnegative CHECK (balance >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_frozen_nonnegative CHECK (frozen_balance >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await query(`DO $$ BEGIN ALTER TABLE users ADD CONSTRAINT users_frozen_within_balance CHECK (frozen_balance <= balance); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`DO $$ BEGIN ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`DO $$ BEGIN ALTER TABLE platform_cashbox ADD CONSTRAINT platform_cashbox_nonnegative CHECK (amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
     await query(`DO $$ BEGIN ALTER TABLE safes ADD CONSTRAINT safes_money_nonnegative CHECK (bank >= 0 AND prize_pool >= 0 AND commission_amount >= 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$`);

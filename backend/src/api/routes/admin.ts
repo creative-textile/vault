@@ -5,6 +5,7 @@ import { getSetting, setSetting } from '../../services/revenue';
 import { getRocketBankroll, updateRocketBankroll } from '../../services/rocket';
 import { addManualPool, getVaultPool } from '../../services/vault-deposit';
 import { getBalanceSnapshot } from '../../services/balance';
+import { getFinancialReconciliation } from '../../services/financial-audit';
 
 const router = Router();
 
@@ -20,6 +21,10 @@ const defaultRange = () => {
   from.setDate(from.getDate() - 6);
   return { from, to: new Date(to.getTime()) };
 };
+
+router.get('/reconciliation', async (_req,res) => {
+  try { res.json(await getFinancialReconciliation()); } catch(e:any) { res.status(500).json({error:e.message}); }
+});
 
 // GET /api/admin/stats?from=YYYY-MM-DD&to=YYYY-MM-DD
 router.get('/stats', async (req, res) => {

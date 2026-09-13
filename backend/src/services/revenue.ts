@@ -21,7 +21,9 @@ export async function logPlatformRevenueWithClient(client: PoolClient, amount: n
 }
 
 export async function logPlatformRevenue(amount: number, source: string, date: Date = nowMSK()) {
-  const { pool } = await import('../db/pool');
+  const { pool, currentTransactionClient } = await import('../db/pool');
+  const outer=currentTransactionClient();
+  if (outer) return logPlatformRevenueWithClient(outer, amount, source, date);
   const client = await pool.connect();
   try { await client.query('BEGIN'); await logPlatformRevenueWithClient(client, amount, source, date); await client.query('COMMIT'); }
   catch (e) { await client.query('ROLLBACK'); throw e; }

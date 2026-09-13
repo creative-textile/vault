@@ -139,7 +139,8 @@ CREATE TABLE IF NOT EXISTS vault_pool_daily (
     total_locked     DECIMAL(12,2) DEFAULT 0,
     depositors_count INTEGER DEFAULT 0,
     base_rate        DECIMAL(6,4) DEFAULT 0,
-    max_deposit      DECIMAL(12,2) DEFAULT 100
+    max_deposit      DECIMAL(12,2) DEFAULT 100,
+    distributed_at   TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS daily_revenue (
@@ -188,6 +189,9 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE users ADD CONSTRAINT users_frozen_nonnegative CHECK (frozen_balance >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_frozen_within_balance CHECK (frozen_balance <= balance);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE rocket_bankroll ADD CONSTRAINT rocket_bankroll_nonnegative CHECK (amount >= 0);

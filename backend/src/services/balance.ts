@@ -1,4 +1,4 @@
-import { query, pool } from '../db/pool';
+import { query, pool, currentTransactionClient } from '../db/pool';
 import type { PoolClient } from 'pg';
 import { emitToUser } from './notifications';
 
@@ -31,7 +31,7 @@ export async function modifyBalanceWithClient(
   const normalized = cents / 100;
   const res = await client.query(
     `UPDATE users SET balance = balance + $1, last_active = NOW()
-      WHERE id = $2 AND balance + $1 >= 0
+      WHERE id = $2 AND balance + $1::numeric >= CASE WHEN $1::numeric < 0 THEN frozen_balance ELSE 0 END
       RETURNING balance`, [normalized, userId]
   );
   if (!res.rows.length) throw new Error('Недостаточно средств');
@@ -52,6 +52,8 @@ export async function modifyBalance(
   type: string,
   opts: Partial<{ gameType: string, gameId: number, description: string }> = {}
 ): Promise<number> {
+  const outer = currentTransactionClient();
+  if (outer) return modifyBalanceWithClient(outer, userId, amount, type, opts);
   const client = await pool.connect();
   let newBalance: number;
   try {

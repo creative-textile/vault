@@ -1,4 +1,5 @@
 import { query, getClient } from '../db/pool';
+import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance, modifyBalanceWithClient } from './balance';
 import { getSetting, setSetting, getPlatformRevenueForDate } from './revenue';
 import { VAULT_MULTIPLIERS, roundDownClean } from '../config';
@@ -24,11 +25,11 @@ export async function getActiveDeposit(userId: number) {
 
 async function getFixedDailyMax(): Promise<number> {
   const floor = parseFloat(await getSetting('vault_max_floor') || '100');
-  const latest = await query(`SELECT max_deposit FROM vault_pool_daily ORDER BY date DESC LIMIT 1`);
+  const latest = await query(`SELECT max_deposit FROM vault_pool_daily WHERE distributed_at IS NOT NULL ORDER BY date DESC LIMIT 1`);
   return latest.rows.length ? Math.max(floor, parseFloat(latest.rows[0].max_deposit) || floor) : floor;
 }
 
-export async function lockVaultDeposit(userId: number, amount: number, termDays: number) {
+async function lockVaultDepositImpl(userId: number, amount: number, termDays: number) {
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
 
@@ -62,7 +63,7 @@ export async function lockVaultDeposit(userId: number, amount: number, termDays:
   return { deposit_id: res.rows[0].id, unlocks_at: res.rows[0].unlocks_at };
 }
 
-export async function earlyUnlock(userId: number, depositId: number) {
+async function earlyUnlockImpl(userId: number, depositId: number) {
   const res = await query('SELECT * FROM vault_deposits WHERE id = $1', [depositId]);
   if (!res.rows.length) throw new Error('Вклад не найден');
   const d = res.rows[0];
@@ -97,6 +98,13 @@ export async function dailyVaultDistribution() {
   const client = await getClient();
   try {
     await client.query('BEGIN');
+    await client.query(`INSERT INTO vault_pool_daily(date,max_deposit) VALUES($1,$2) ON CONFLICT(date) DO NOTHING`,[date,newMax]);
+    const claimed=await client.query(`UPDATE vault_pool_daily SET distributed_at=NOW() WHERE date=$1 AND distributed_at IS NULL RETURNING id`,[date]);
+    if (!claimed.rows.length) {
+      const done=await client.query(`SELECT total_pool FROM vault_pool_daily WHERE date=$1`,[date]);
+      await client.query('ROLLBACK');
+      return { distributed: parseFloat(done.rows[0]?.total_pool || '0'), completed: 0, already_distributed: true };
+    }
     // Автопул физически переводится из кассы. Ручной пул резервируется при добавлении.
     if (autoPool > 0) {
       const cash = await client.query(
@@ -267,3 +275,8 @@ export async function repairVaultFreeze(): Promise<number> {
   }
   return fixed;
 }
+
+
+// Составные денежные операции целиком выполняются в одной SQL-транзакции.
+export const lockVaultDeposit: typeof lockVaultDepositImpl = (...args: Parameters<typeof lockVaultDepositImpl>) => withTransaction(() => lockVaultDepositImpl(...args));
+export const earlyUnlock: typeof earlyUnlockImpl = (...args: Parameters<typeof earlyUnlockImpl>) => withTransaction(() => earlyUnlockImpl(...args));
