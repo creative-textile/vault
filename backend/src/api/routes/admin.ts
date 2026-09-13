@@ -135,7 +135,7 @@ router.get('/stats', async (req, res) => {
           manual_pool: parseFloat(vaultPoolLatest.manual_pool),
           base_rate: parseFloat(vaultPoolLatest.base_rate)
         } : null,
-        max_deposit: await getSetting('vault_max_deposit')
+        max_deposit: await getSetting('vault_max_floor')
       },
       recent_transactions: recentTx.rows.map(r => ({
         id: r.id,
@@ -412,16 +412,16 @@ router.get('/settings', async (_req, res) => {
     'commission_percent', 'withdraw_commission', 'referral_percent',
     'min_bet', 'rocket_max_bet_percent', 'vault_pool_percent',
     'safe_min_bank', 'safe_min_participants', 'beautiful_flight_chance',
-    'vault_min_deposit', 'vault_max_deposit',
-    'safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes',
+    'vault_min_deposit', 'vault_max_floor', 'vault_max_multiplier',
+    'safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes', 'safe_drum_speed_multiplier',
     'project_start_date'
   ];
   const defaults: Record<string, string> = {
     commission_percent: '10', withdraw_commission: '1', referral_percent: '3',
     min_bet: '1', rocket_max_bet_percent: '50', vault_pool_percent: '15',
     safe_min_bank: '25', safe_min_participants: '2', beautiful_flight_chance: '3',
-    vault_min_deposit: '10', vault_max_deposit: '100',
-    safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '1',
+    vault_min_deposit: '10', vault_max_floor: '100', vault_max_multiplier: '10',
+    safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '1', safe_drum_speed_multiplier: '1',
     project_start_date: '2026-01-01'
   };
   const out: Record<string, string> = {};
@@ -436,17 +436,19 @@ router.get('/settings', async (_req, res) => {
     safe_min_participants: 'Мин. участников Сейфа',
     beautiful_flight_chance: 'Шанс красивого полёта (%)',
     vault_min_deposit: 'Мин. вклад ВАУЛЬТ ($)',
-    vault_max_deposit: 'Начальный макс. вклад ВАУЛЬТ ($)',
+    vault_max_floor: 'Минимальный максимум вклада ($)',
+    vault_max_multiplier: 'Максимум: множитель вчерашнего пула',
     safe_crack_hour: 'Час взлома сейфа МСК (0-23)',
     safe_crack_minute: 'Минута взлома сейфа (0-59)',
     safe_crack_timeout_minutes: 'Нужно взломать сейф за (минуты)',
+    safe_drum_speed_multiplier: 'Скорость барабанов (×, по умолчанию 1)',
     project_start_date: 'Дата старта проекта (ГГГГ-ММ-ДД)'
   };
   // Группы — чтобы настройки в админке не шли сплошным списком
   const groups = [
-    { title: '🔒 Сейф', keys: ['safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes', 'safe_min_bank', 'safe_min_participants'] },
+    { title: '🔒 Сейф', keys: ['safe_crack_hour', 'safe_crack_minute', 'safe_crack_timeout_minutes', 'safe_drum_speed_multiplier', 'safe_min_bank', 'safe_min_participants'] },
     { title: '🚀 Ракета', keys: ['rocket_max_bet_percent', 'beautiful_flight_chance', 'min_bet'] },
-    { title: '💎 Вклад (VAULT)', keys: ['vault_pool_percent', 'vault_min_deposit', 'vault_max_deposit'] },
+    { title: '💎 Вклад (VAULT)', keys: ['vault_pool_percent', 'vault_min_deposit', 'vault_max_floor', 'vault_max_multiplier'] },
     { title: '💰 Комиссии и рефералы', keys: ['commission_percent', 'withdraw_commission', 'referral_percent'] },
     { title: '📊 Проект', keys: ['project_start_date'] }
   ];

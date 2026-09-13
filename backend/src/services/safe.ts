@@ -41,12 +41,14 @@ const DRUM_SPEED_MAX = 2.0;
 const DRUM_SPEED_FALLBACK = [1.55, 1.72, 1.9];
 
 /** Скорости на день: три разных значения, чтобы барабаны не синхронизировались. */
-export function generateDrumSpeeds(): number[] {
-  const base = 1.5 + Math.random() * 0.15;
+export async function generateDrumSpeeds(): Promise<number[]> {
+  const configured = parseFloat(await getSetting('safe_drum_speed_multiplier') || '1');
+  const factor = Number.isFinite(configured) && configured > 0 ? configured : 1;
+  const base = (1.5 + Math.random() * 0.15) * factor;
   return [
     base,
-    base + 0.13 + Math.random() * 0.07,
-    base + 0.26 + Math.random() * 0.1
+    base + (0.13 + Math.random() * 0.07) * factor,
+    base + (0.26 + Math.random() * 0.1) * factor
   ].map(v => +v.toFixed(2));
 }
 
@@ -57,7 +59,7 @@ export function generateDrumSpeeds(): number[] {
 export function clampDrumSpeeds(speeds: any): number[] {
   if (!Array.isArray(speeds) || speeds.length !== 3) return [...DRUM_SPEED_FALLBACK];
   const nums = speeds.map((x: any) => parseFloat(x));
-  if (nums.some((n: number) => !Number.isFinite(n) || n < DRUM_SPEED_MIN || n > DRUM_SPEED_MAX)) {
+  if (nums.some((n: number) => !Number.isFinite(n) || n < 0.1 || n > 10)) {
     return [...DRUM_SPEED_FALLBACK];
   }
   return nums;
@@ -244,7 +246,7 @@ export async function createDailySafe() {
 
   // Получаем одинаковые цифры для всех игроков в этот день
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
-  const drumSpeeds = generateDrumSpeeds();
+  const drumSpeeds = await generateDrumSpeeds();
 
   await query(
     `INSERT INTO safes (date, status, bonus, code, drum_speeds, collect_started_at)
@@ -549,7 +551,9 @@ export async function calculateSafeWinners(safeId: number) {
      FROM safe_deposits d
      JOIN users u ON u.id = d.user_id
      WHERE d.safe_id = $1
-     ORDER BY d.crack_time_ms NULLS LAST`,
+     ORDER BY
+       CASE WHEN d.crack_time_ms IS NULL OR d.crack_time_ms < 100 THEN 1 ELSE 0 END,
+       d.crack_time_ms ASC NULLS LAST, d.created_at ASC, d.id ASC`,
     [safeId]
   );
 
@@ -557,10 +561,6 @@ export async function calculateSafeWinners(safeId: number) {
   let winners = 0;
 
   for (const d of depRes.rows) {
-    if (d.crack_time_ms == null || d.crack_time_ms < 100) {
-      await query('UPDATE safe_deposits SET prize = 0 WHERE id = $1', [d.id]);
-      continue;
-    }
     const amount = parseFloat(d.amount);
     const needed = Math.round(amount * 1.5 * 100) / 100;
     if (remaining >= needed - 0.01) {
@@ -600,7 +600,7 @@ export async function getSafeResults(safeId: number) {
      WHERE d.safe_id = $1
      ORDER BY
        CASE WHEN d.crack_time_ms IS NULL OR d.crack_time_ms < 100 THEN 1 ELSE 0 END,
-       d.crack_time_ms ASC NULLS LAST`,
+       d.crack_time_ms ASC NULLS LAST, d.created_at ASC, d.id ASC`,
     [safeId]
   );
   return depRes.rows.map(d => ({
@@ -659,7 +659,7 @@ export async function ensureNextDaySafe(): Promise<void> {
   }
 
   const code = [0, 1, 2].map(() => Math.floor(Math.random() * 10));
-  const drumSpeeds = generateDrumSpeeds();
+  const drumSpeeds = await generateDrumSpeeds();
 
   // DO NOTHING — два параллельных вклада не должны создавать два сейфа
   const ins = await query(

@@ -250,7 +250,7 @@ export default function Safe() {
           ${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}
         </span>
       </div>
-      <MoneyBreakdown total={false} />
+      <MoneyBreakdown />
 
       {/* ── Взлом идёт: короткая строка состояния ────────────────────────────
           Игрок с вкладом в этом раунде сюда просто не попадает — его уводит в
@@ -405,8 +405,7 @@ export default function Safe() {
                   )}
                   {out.key === 'late' && (
                     <div className="text-dim" style={{ fontSize: 13, marginTop: 6 }}>
-                      Результат не был сдан до закрытия окна взлома — техническое поражение, приз $0.00.
-                      Вклад ${fmt(depAmount)} ушёл в призовой пул и достался более быстрым игрокам.
+                      Результат не был сдан вовремя. Вы поставлены в конец очереди; среди опоздавших приоритет у более раннего вклада.
                     </div>
                   )}
                 </div>
@@ -421,8 +420,7 @@ export default function Safe() {
               {results.length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <div className="text-dim" style={{ fontSize: 12, marginBottom: 8 }}>
-                    Призовой пул ${fmt(last.prize_pool)} раздаётся по порядку сдачи кода: сначала полный приз ×1.5,
-                    затем остаток пула, дальше — $0.
+                    Призовой пул ${fmt(last.prize_pool)} раздаётся по очереди: сначала завершившим взлом, затем не успевшим — по времени внесения вклада.
                   </div>
                   <div className="scroll-list" style={{ maxHeight: 260, overflowY: 'auto' }}>
                     {results.slice(0, 20).map((r, i) => {

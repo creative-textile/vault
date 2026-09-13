@@ -6,6 +6,7 @@ import { rocketApi, safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { getSocket } from '../../api/socket';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
+import { isSafePromptMuted } from '../../utils/safePrompt';
 import {
   setFlight, setFlightMultiplier, clearFlight, getFlight, setRocketScreenActive
 } from '../../utils/rocketFlight';
@@ -108,7 +109,7 @@ export default function Rocket() {
             }
           }
         } else {
-          setShowSafePrompt(true);
+          if (!isSafePromptMuted()) setShowSafePrompt(true);
         }
       }
     };
@@ -199,7 +200,7 @@ export default function Rocket() {
         <span className="text-dim">Доступно:</span>
         <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
-      <MoneyBreakdown total={false} />
+      <MoneyBreakdown />
 
       {phase === 'betting' && (
         <>

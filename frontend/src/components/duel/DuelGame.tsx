@@ -8,6 +8,7 @@ import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import SafeDepositPrompt from '../common/SafeDepositPrompt';
+import { isSafePromptMuted } from '../../utils/safePrompt';
 import { useNotifications } from '../../stores/notifications';
 import { tabStore, duelSeenKey } from '../../utils/tabStore';
 
@@ -142,6 +143,8 @@ export default function DuelGame() {
                     console.warn('[safe] автовклад не прошёл:', e?.message || e);
                   }
                 }
+              } else if (!isSafePromptMuted() && mounted) {
+                setShowSafe(true);
               }
             }
           }, 2800);
@@ -239,7 +242,7 @@ export default function DuelGame() {
             )}
           </div>
           {/* Куда делись деньги, если их не видно в балансе: сейф, вклад, другие дуэли */}
-          <MoneyBreakdown total={false} />
+          <MoneyBreakdown />
 
           <div className="btn-row">
             <button className="btn" onClick={() => rematch(1)}>⚔️ РЕВАНШ ${amount}</button>

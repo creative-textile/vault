@@ -163,10 +163,12 @@ INSERT INTO settings (key, value) VALUES
     ('safe_min_participants', '2'),
     ('safe_crack_hour', '21'),
     ('safe_crack_minute', '0'),
+    ('safe_drum_speed_multiplier', '1'),
     ('beautiful_flight_chance', '3'),
     ('vault_pool_percent', '15'),
     ('vault_min_deposit', '10'),
-    ('vault_max_deposit', '100'),
+    ('vault_max_floor', '100'),
+    ('vault_max_multiplier', '10'),
     ('project_start_date', '2026-01-01'),
     ('manual_pool_addition', '0')
 ON CONFLICT (key) DO NOTHING;

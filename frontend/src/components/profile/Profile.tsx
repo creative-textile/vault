@@ -46,7 +46,7 @@ export default function Profile() {
           </span>
         </div>
         {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT */}
-        <MoneyBreakdown />
+        <MoneyBreakdown detailed />
         <div className="btn-row">
           <Link to="/deposit" className="btn btn-secondary">📥 Пополнить</Link>
           <Link to="/withdraw" className="btn btn-secondary">📤 Вывести</Link>

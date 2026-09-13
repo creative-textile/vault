@@ -1,9 +1,10 @@
 import { query } from '../db/pool';
+import { nowMSK } from '../utils/time';
 
 /**
  * Записывает доход платформы для расчёта пула Вклада И пополняет главную кассу.
  */
-export async function logPlatformRevenue(amount: number, source: string, date: Date = new Date()) {
+export async function logPlatformRevenue(amount: number, source: string, date: Date = nowMSK()) {
   if (amount <= 0) return;
   const dateStr = date.toISOString().slice(0, 10);
   await query(

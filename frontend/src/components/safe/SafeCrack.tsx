@@ -393,7 +393,7 @@ export default function SafeCrack() {
       {phase === 'spinning' && (
         <>
           <div className="text-center mt" style={{ fontSize: 18 }}>
-            Остановите барабаны на цифрах кода — <span className="text-dim">код был показан перед стартом</span>
+            Остановите барабаны на цифрах кода
           </div>
           <div className="drums">
             {[0, 1, 2].map(i => {
@@ -432,12 +432,7 @@ export default function SafeCrack() {
             })}
           </div>
           <div className="text-dim text-center" style={{ fontSize: 14 }}>
-            Собрано {stoppedCount} из 3
-          </div>
-          <div className="text-dim text-center" style={{ fontSize: 13, marginTop: 6 }}>
-            Барабан останавливается только на нужной цифре — сервер проверяет каждый тап.
-            Промах временем не штрафуется, но барабан крутится дальше.
-            Побеждает тот, кто собрал код раньше остальных.
+            {stoppedCount}/3
           </div>
         </>
       )}

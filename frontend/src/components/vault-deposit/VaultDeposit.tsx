@@ -81,7 +81,7 @@ export default function VaultDeposit() {
         <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
       {/* Куда делись деньги, которых не хватает для нового вклада */}
-      <MoneyBreakdown total={false} />
+      <MoneyBreakdown />
 
       {active ? (
         <>

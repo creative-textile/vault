@@ -110,7 +110,7 @@ export default function Duel() {
         <span className="text-dim">Доступно:</span>
         <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
       </div>
-      <MoneyBreakdown total={false} />
+      <MoneyBreakdown />
 
       <div className="card">
         <div className="card-title">Создать вызов</div>

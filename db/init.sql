@@ -166,6 +166,8 @@ INSERT INTO settings (key, value) VALUES
     ('safe_min_participants', '2'),
     ('beautiful_flight_chance', '3'),
     ('vault_pool_percent', '15'),
-    ('vault_max_deposit', '100'),
+    ('vault_min_deposit', '10'),
+    ('vault_max_floor', '100'),
+    ('vault_max_multiplier', '10'),
     ('manual_pool_addition', '0')
 ON CONFLICT (key) DO NOTHING;

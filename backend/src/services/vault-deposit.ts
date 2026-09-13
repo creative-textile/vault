@@ -28,11 +28,12 @@ export async function lockVaultDeposit(userId: number, amount: number, termDays:
 
   const available = await getAvailableBalance(userId);
   const baseMin = parseFloat(await getSetting('vault_min_deposit') || '10');
-  const baseMax = parseFloat(await getSetting('vault_max_deposit') || '100');
-  // Динамический максимум = пул на сегодня × 10; минимум = max(база, макс/100)
+  const maxFloor = parseFloat(await getSetting('vault_max_floor') || '100');
+  const maxMultiplier = parseFloat(await getSetting('vault_max_multiplier') || '10');
+  // Минимум фиксирован. Максимум зависит от реального пула, но не падает ниже floor.
   const pendingPool = await getVaultPool();
-  const dynMax = Math.max(baseMax, roundDownClean(Math.max(pendingPool * 10, baseMax)));
-  const dynMin = Math.max(baseMin, roundDownClean(dynMax / 100));
+  const dynMax = Math.max(maxFloor, roundDownClean(pendingPool * maxMultiplier));
+  const dynMin = baseMin;
 
   if (amount < dynMin) throw new Error(`Минимум $${dynMin}`);
   if (amount > dynMax) throw new Error(`Максимум $${dynMax}`);
@@ -95,8 +96,9 @@ export async function dailyVaultDistribution() {
   const depRes = await query(`SELECT * FROM vault_deposits WHERE status = 'active'`);
   const deposits = depRes.rows;
 
-  const baseMaxCfg = parseFloat(await getSetting('vault_max_deposit') || '100');
-  let newMax = roundDownClean(Math.max(totalPool * 10, baseMaxCfg));
+  const maxFloor = parseFloat(await getSetting('vault_max_floor') || '100');
+  const maxMultiplier = parseFloat(await getSetting('vault_max_multiplier') || '10');
+  const newMax = Math.max(maxFloor, roundDownClean(totalPool * maxMultiplier));
   // Не перезаписываем пользовательское значение «начального максимума»;
   // сохраняем рассчитанный максимум как текущий для UI
   // (храним отдельно в pool_daily.max_deposit)
@@ -180,9 +182,10 @@ export async function getPoolInfo() {
   const res = await query('SELECT * FROM vault_pool_daily WHERE date = $1', [yesterday]);
   const pendingPool = await getVaultPool();
   const baseMin = parseFloat(await getSetting('vault_min_deposit') || '10');
-  const baseMax = parseFloat(await getSetting('vault_max_deposit') || '100');
-  const dynMax = Math.max(baseMax, roundDownClean(Math.max(pendingPool * 10, baseMax)));
-  const dynMin = Math.max(baseMin, roundDownClean(dynMax / 100));
+  const maxFloor = parseFloat(await getSetting('vault_max_floor') || '100');
+  const maxMultiplier = parseFloat(await getSetting('vault_max_multiplier') || '10');
+  const dynMax = Math.max(maxFloor, roundDownClean(pendingPool * maxMultiplier));
+  const dynMin = baseMin;
   return {
     yesterday: res.rows[0] ? {
       base_rate: parseFloat(res.rows[0].base_rate),

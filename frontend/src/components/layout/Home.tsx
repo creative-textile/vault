@@ -98,9 +98,9 @@ export default function Home() {
 
       <div className="balance-block">
         <div className="balance-label">БАЛАНС</div>
-        <div className="balance-amount">${fmt(user.balance)}</div>
+        <div className="balance-amount">${fmt(available)}</div>
         <div style={{display:'flex', justifyContent:'center', gap: 16, fontSize: 13}}>
-          <span className="text-dim">доступно: <span style={{color:'#fff', fontWeight:700}}>${fmt(available)}</span></span>
+          <span className="text-dim">доступный баланс</span>
         </div>
         {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT.
             Без этих строк сумма просто «уменьшалась» после вклада, и игрок не

@@ -34,7 +34,7 @@ export default function Deposit() {
         <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${(user?.balance || 0).toFixed(2)}</span>
       </div>
       {/* Куда делись деньги: заморозка дуэлей, вклад в сейф, вклад VAULT */}
-      <MoneyBreakdown total={false} />
+      <MoneyBreakdown />
       <div className="card">
         <div className="card-title text-center">Отправьте USDT (сеть TON):</div>
         <div style={{

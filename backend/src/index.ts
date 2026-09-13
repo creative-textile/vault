@@ -120,9 +120,10 @@ server.listen(config.port, async () => {
       commission_percent:'10', withdraw_commission:'1', referral_percent:'3',
       min_bet:'1', rocket_max_bet_percent:'50', vault_pool_percent:'15',
       safe_min_bank:'25', safe_min_participants:'2', beautiful_flight_chance:'3',
-      vault_min_deposit:'10', vault_max_deposit:'100',
+      vault_min_deposit:'10', vault_max_floor:'100', vault_max_multiplier:'10',
       safe_crack_hour:'21', safe_crack_minute:'0',
       safe_crack_timeout_minutes: '1',
+      safe_drum_speed_multiplier: '1',
       project_start_date: '2026-01-01'
     };
     // Принудительно обновим min_bank/safe_min_bank на корректные (на случай если в БД остались старые значения $2/$5)
