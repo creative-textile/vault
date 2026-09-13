@@ -283,7 +283,7 @@ export default function Rocket() {
         <div className="scroll-list" style={{maxHeight:220, overflowY:'auto'}}>
           {history.slice(0, 15).map(h => (
             <div key={h.round_id} className="history-item" style={{fontSize:13}}>
-              <Link className="text-dim" to={`/replay/rocket/${h.round_id}?player=${encodeURIComponent(h.player)}`}>📼 #{h.round_id} {h.player}</Link>
+              <Link className="text-dim" state={{replayFrom:'/rocket'}} to={`/replay/rocket/${h.round_id}?player=${encodeURIComponent(h.player)}`}>📼 #{h.round_id} {h.player}</Link>
               <span>
                 ${h.bet.toFixed(0)}
                 {h.cashout_at

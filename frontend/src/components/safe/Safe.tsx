@@ -368,7 +368,7 @@ export default function Safe() {
 
           {showLast && last.status === 'finished' && (
             <>
-              <Link className="btn btn-small btn-secondary" to={`/replay/safe/${last.id}?player=${encodeURIComponent('@'+(user?.username||'user'))}`}>📼 Реплей и ссылка</Link>
+              <Link className="btn btn-small btn-secondary" state={{replayFrom:'/safe'}} to={`/replay/safe/${last.id}?player=${encodeURIComponent('@'+(user?.username||'user'))}`}>📼 Реплей и ссылка</Link>
               {/* Исход для игрока: приз и результат «чистыми» */}
               {showOutcome && (
                 <div className="card" style={{ margin: '12px 0 0', background: `${out.color}1f`, border: `1px solid ${out.color}` }}>

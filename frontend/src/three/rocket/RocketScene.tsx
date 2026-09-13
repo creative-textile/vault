@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 
 interface Props {
@@ -12,6 +12,8 @@ interface Props {
 
 export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, crashAt = 1, seed = 'vault-rocket' }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const [ghostMultiplier, setGhostMultiplier] = useState<number | null>(null);
+  const lastGhostUiRef = useRef(0);
   const stateRef = useRef({ phase, multiplier, cashoutAt, crashAt, cashedStarted: phase === 'cashed' ? performance.now() : 0, rocket: null as THREE.Group | null, particles: null as THREE.Points | null });
 
   useEffect(() => {
@@ -20,6 +22,7 @@ export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, cras
     stateRef.current.multiplier = multiplier;
     stateRef.current.cashoutAt = cashoutAt;
     stateRef.current.crashAt = crashAt;
+    if (phase !== 'cashed') setGhostMultiplier(null);
   }, [phase, multiplier, cashoutAt, crashAt]);
 
   useEffect(() => {
@@ -227,6 +230,13 @@ export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, cras
         const ghostAlt = Math.log(1 + Math.max(0, Math.log(ghostMult) / 0.075) * 0.6) * 4;
         ghost.position.set(0, 0.3 + ghostAlt, 0);
         ghost.visible = passed < fullMs;
+        // Камера следует за призраком, иначе длинный красивый полёт уходит за кадр.
+        camera.position.y += ((1.5 + ghostAlt) - camera.position.y) * 0.08;
+        camera.position.z = 8;
+        if (performance.now() - lastGhostUiRef.current > 80 || passed >= fullMs) {
+          lastGhostUiRef.current = performance.now();
+          setGhostMultiplier(ghostMult);
+        }
         if (passed >= fullMs) {
           debrisGroup.position.copy(ghost.position);
           debrisGroup.children.forEach(c => {
@@ -260,5 +270,12 @@ export default function RocketScene({ phase, multiplier = 1, cashoutAt = 1, cras
     };
   }, [seed]);
 
-  return <div ref={ref} className="three-container" />;
+  return <div style={{position:'relative'}}>
+    <div ref={ref} className="three-container" />
+    {phase === 'cashed' && ghostMultiplier !== null && <div style={{position:'absolute',top:12,left:'50%',transform:'translateX(-50%)',textAlign:'center',padding:'8px 14px',borderRadius:12,background:'rgba(5,7,20,.78)',whiteSpace:'nowrap',pointerEvents:'none'}}>
+      <div className="text-green" style={{fontWeight:900}}>✅ Кэшаут зафиксирован x{cashoutAt.toFixed(2)}</div>
+      <div className="text-accent" style={{fontSize:22,fontWeight:900}}>{ghostMultiplier >= crashAt ? '💥' : '👻'} x{ghostMultiplier.toFixed(2)}</div>
+      <small className="text-dim">{ghostMultiplier >= crashAt ? 'Финальная точка' : 'Призрак летит дальше'}</small>
+    </div>}
+  </div>;
 }

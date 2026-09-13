@@ -747,3 +747,5 @@ Deposit address acquisition has bounded retries, visibility recovery and explici
 ### Beautiful-flight timeline consistency
 
 Cashout clears the authoritative active-round interval immediately and settles money once. The result scene keeps the landed original rocket visible while a translucent ghost independently evaluates the stored exponential curve from `cashout_at` to `crash_at`, then explodes. `maybe_beautiful_flight` changes only that post-cashout terminal multiplier. Public replay switches from the live-flight phase to the same landed-rocket/ghost phase at the stored cashout time, so gameplay and replay share one visual model without extending the monetary round.
+
+Replay navigation origin is carried in React Router location state by internal hall links and deliberately falls back to `/` for direct public URLs. RocketScene derives the post-cashout ghost multiplier from persisted endpoints, follows it with the camera, and exposes the live ghost/final multiplier in a DOM overlay; settlement remains represented separately by the fixed cashout multiplier.

@@ -172,7 +172,7 @@ export default function Duel() {
         <div className="scroll-list" style={{maxHeight:200, overflowY:'auto'}}>
           {history.slice(0, 10).map(h => (
             <div key={h.id} className="history-item" style={{fontSize:13}}>
-              <Link to={`/replay/duel/${h.id}`}>📼 {h.creator} vs {h.opponent || '?'}</Link>
+              <Link state={{replayFrom:'/duel'}} to={`/replay/duel/${h.id}`}>📼 {h.creator} vs {h.opponent || '?'}</Link>
               <span>${h.amount.toFixed(0)} · 🏆 {h.winner}</span>
             </div>
           ))}
