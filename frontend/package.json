@@ -6,9 +6,17 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "test": "npm run test:scene && npm run test:shaders",
+    "test:shaders": "node tests/shader-lint.mjs",
+    "test:scene": "esbuild tests/scene-math.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/scene-math.mjs --log-level=warning && node node_modules/.cache/scene-math.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/orbitron": "^5.3.0",
+    "@fontsource/russo-one": "^5.3.0",
+    "@pmndrs/assets": "^1.7.0",
     "@twa-dev/sdk": "^7.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

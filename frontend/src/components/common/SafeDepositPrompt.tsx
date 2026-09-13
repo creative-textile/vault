@@ -66,23 +66,23 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
       padding: 16, animation: 'sdfFade 0.2s'
     }} onClick={onClose}>
       <div style={{
-        background: 'linear-gradient(135deg, #1a0a3e, #2a1a5a)',
-        border: '2px solid #ffd700', borderRadius: 16, padding: 24,
+        background: 'var(--grad-violet)',
+        border: '2px solid var(--gold)', borderRadius: 16, padding: 24,
         width: '100%', maxWidth: 420, animation: 'sdfPop 0.25s'
       }} onClick={(e) => e.stopPropagation()}>
         <div style={{fontSize:48, textAlign:'center', marginBottom:8}}>🔒💎</div>
-        <div style={{fontSize:22, fontWeight:900, textAlign:'center', color:'#ffd700', marginBottom:8}}>
+        <div style={{fontSize:22, fontWeight:900, textAlign:'center', color:'var(--gold)', marginBottom:8}}>
           В СЕЙФ?
         </div>
-        <div style={{fontSize:13, textAlign:'center', color:'#8888aa', marginBottom:16}}>
-          Взлом в <b style={{color:'#fff'}}>{safeTime}</b> МСК. Вложите часть выигрыша —
-          получите <span style={{color:'#22c55e', fontWeight:700}}>×1.5</span>, если соберёте код раньше других!
+        <div style={{fontSize:13, textAlign:'center', color:'var(--text-dim)', marginBottom:16}}>
+          Взлом в <b style={{color:'var(--text)'}}>{safeTime}</b> МСК. Вложите часть выигрыша —
+          получите <span style={{color:'var(--green)', fontWeight:700}}>×1.5</span>, если соберёте код раньше других!
         </div>
 
-        <div style={{textAlign:'center', fontSize:32, fontWeight:900, color:'#ffd700', marginBottom:4}}>
+        <div style={{textAlign:'center', fontSize:32, fontWeight:900, color:'var(--gold)', marginBottom:4}}>
           ${amount.toFixed(2)}
         </div>
-        <div style={{textAlign:'center', color:'#8888aa', fontSize:12, marginBottom:14}}>
+        <div style={{textAlign:'center', color:'var(--text-dim)', fontSize:12, marginBottom:14}}>
           Возможный приз: ${(amount * 1.5).toFixed(2)}
         </div>
 
@@ -93,8 +93,8 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
               onClick={() => setPercent(p)}
               style={{
                 flex:1, padding:'10px 0', borderRadius:12, border:'1px solid rgba(255,255,255,0.1)',
-                background: p === percent ? '#ffd700' : '#1a1a3a',
-                color: p === percent ? '#000' : '#fff',
+                background: p === percent ? 'var(--gold)' : 'var(--bg-3)',
+                color: p === percent ? 'var(--bg)' : 'var(--text)',
                 fontWeight:700, fontSize:15, cursor:'pointer'
               }}
             >
@@ -103,12 +103,12 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
           ))}
         </div>
 
-        <label style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:'#fff', marginBottom:14, cursor:'pointer'}}>
+        <label style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:'var(--text)', marginBottom:14, cursor:'pointer'}}>
           <input
             type="checkbox"
             checked={autoSave}
             onChange={e => setAutoSave(e.target.checked)}
-            style={{width:18, height:18, accentColor:'#ffd700'}}
+            style={{width:18, height:18, accentColor:'var(--gold)'}}
           />
           Вкладывать автоматически ({percent}% от каждого выигрыша)
         </label>
@@ -117,11 +117,11 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
           className="btn"
           onClick={deposit}
           disabled={!canDeposit || submitting}
-          style={{background:'#ffd700', color:'#000'}}
+          style={{background:'var(--gold)', color:'var(--bg)'}}
         >
           {submitting ? 'ВНОШУ...' : canDeposit ? `🔒 ВНЕСТИ $${amount.toFixed(2)}` : 'Минимум $1'}
         </button>
-        <label style={{display:'flex', alignItems:'center', gap:8, marginTop:12, fontSize:12, color:'#aaa', cursor:'pointer'}}>
+        <label style={{display:'flex', alignItems:'center', gap:8, marginTop:12, fontSize:12, color:'var(--text-dim)', cursor:'pointer'}}>
           <input type="checkbox" checked={mutePrompts} onChange={e => setMutePrompts(e.target.checked)} />
           Больше не предлагать сегодня
         </label>

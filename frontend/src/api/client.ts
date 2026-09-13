@@ -164,6 +164,15 @@ export const adminApi = {
   unbanUser: (id: number) => api(`/api/admin/users/${id}/unban`, { method: 'POST' }),
   adjustUser: (id: number, delta: number, reason?: string) =>
     api(`/api/admin/users/${id}/adjust`, { method: 'POST', body: JSON.stringify({ delta, reason }) }),
+  // Выплаты пользователям: в реальном режиме вывод создаёт заявку pending,
+  // а оператор отправляет USDT вручную и вносит tx_hash (или отклоняет — деньги
+  // возвращаются на баланс).
+  withdrawals: (status?: 'pending' | 'paid' | 'rejected') =>
+    api('/api/admin/withdrawals' + (status ? `?status=${status}` : '')),
+  payWithdrawal: (id: number, tx_hash: string) =>
+    api(`/api/admin/withdrawals/${id}/pay`, { method: 'POST', body: JSON.stringify({ tx_hash }) }),
+  rejectWithdrawal: (id: number, reason?: string) =>
+    api(`/api/admin/withdrawals/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   transactions: (params: any = {}) => {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)); });

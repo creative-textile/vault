@@ -55,30 +55,55 @@ async function lockVaultDepositImpl(userId: number, amount: number, termDays: nu
   // или выплате в срок.
   await modifyBalance(userId, -amount, 'vault_lock', { description: `Вклад на ${termDays} дней` });
 
-  const res = await query(
-    `INSERT INTO vault_deposits (user_id, amount, term_days, multiplier, status, unlocks_at)
-     VALUES ($1, $2, $3, $4, 'active', $5) RETURNING id, unlocks_at`,
-    [userId, amount, termDays, VAULT_MULTIPLIERS[termDays], new Date(Date.now() + termDays * 86400000)]
-  );
-
-  return { deposit_id: res.rows[0].id, unlocks_at: res.rows[0].unlocks_at };
+  // Проверка «уже есть активный вклад» выше — это TOCTOU: два одновременных
+  // запроса проходили её оба. Окончательную гарантию даёт частичный уникальный
+  // индекс vault_deposits_one_active (user_id) WHERE status='active': второй
+  // INSERT падает с 23505, транзакция откатывается вместе со списанием.
+  try {
+    const res = await query(
+      `INSERT INTO vault_deposits (user_id, amount, term_days, multiplier, status, unlocks_at)
+       VALUES ($1, $2, $3, $4, 'active', $5) RETURNING id, unlocks_at`,
+      [userId, amount, termDays, VAULT_MULTIPLIERS[termDays], new Date(Date.now() + termDays * 86400000)]
+    );
+    return { deposit_id: res.rows[0].id, unlocks_at: res.rows[0].unlocks_at };
+  } catch (e: any) {
+    if (e?.code === '23505' && /vault_deposits_one_active/.test(String(e?.constraint || e?.message || ''))) {
+      throw new Error('У вас уже есть активный вклад');
+    }
+    throw e;
+  }
 }
 
 async function earlyUnlockImpl(userId: number, depositId: number) {
-  const res = await query('SELECT * FROM vault_deposits WHERE id = $1', [depositId]);
-  if (!res.rows.length) throw new Error('Вклад не найден');
-  const d = res.rows[0];
-  if (d.user_id !== userId) throw new Error('Не ваш вклад');
-  if (d.status !== 'active') throw new Error('Вклад не активен');
-  if (d.term_days === 1) throw new Error('Однодневный нельзя разблокировать');
+  // СНАЧАЛА атомарно закрываем вклад, ПОТОМ возвращаем тело.
+  //
+  // Прежний порядок (SELECT → проверка status='active' → выплата → UPDATE)
+  // воспроизводимо выплачивал тело ДВАЖДЫ при двух одновременных запросах:
+  // обе транзакции читали status='active' до того, как первая его меняла, и обе
+  // начисляли возврат. `UPDATE ... WHERE status='active' RETURNING` выполняет
+  // ровно одна из них — вторая получает 0 строк.
+  const claim = await query(
+    `UPDATE vault_deposits SET status = 'early_unlock'
+      WHERE id = $1 AND user_id = $2 AND status = 'active'
+      RETURNING amount, accumulated_profit, term_days`,
+    [depositId, userId]
+  );
+  if (!claim.rows.length) {
+    const exists = await query('SELECT id, user_id, status FROM vault_deposits WHERE id = $1', [depositId]);
+    if (!exists.rows.length) throw new Error('Вклад не найден');
+    if (Number(exists.rows[0].user_id) !== Number(userId)) throw new Error('Не ваш вклад');
+    throw new Error('Вклад не активен');
+  }
+  const d = claim.rows[0];
+  // Однодневный вклад расторгнуть нельзя: ошибка откатывает транзакцию,
+  // поэтому статус вклада не меняется.
+  if (Number(d.term_days) === 1) throw new Error('Однодневный нельзя разблокировать');
 
   const burned = parseFloat(d.accumulated_profit);
   const amount = parseFloat(d.amount);
 
   // Вернуть тело (одна операция: при блокировке деньги списаны, не заморожены)
   await modifyBalance(userId, amount, 'vault_return', { description: 'Досрочный возврат тела вклада' });
-
-  await query("UPDATE vault_deposits SET status = 'early_unlock' WHERE id = $1", [depositId]);
 
   return { returned: amount, burned };
 }

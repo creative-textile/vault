@@ -5,7 +5,7 @@ import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
 import { notifyDuelResult, notifyPreferred } from './notifications';
 
-async function createDuelImpl(userId: number, amount: number) {
+async function createDuelImpl(userId: number, amount: number, opts: { targetUserId?: number | null; parentDuelId?: number | null } = {}) {
   const user = await getUser(userId);
   if (!user) throw new Error('Пользователь не найден');
 
@@ -31,10 +31,13 @@ async function createDuelImpl(userId: number, amount: number) {
   const frozen = await query(`UPDATE users SET frozen_balance=frozen_balance+$1 WHERE id=$2 AND balance-frozen_balance >= $1 RETURNING id`,[amount,userId]);
   if (!frozen.rows.length) throw new Error('Недостаточно средств');
 
+  // target_user_id / parent_duel_id пишутся СРАЗУ: раньше реванш создавался
+  // обычным вызовом, а адресат проставлялся отдельным UPDATE — в этом окне
+  // адресный реванш был виден всему лобби и его мог принять любой игрок.
   const res = await query(
-    `INSERT INTO duels (creator_id, amount, status)
-     VALUES ($1, $2, 'waiting') RETURNING id`,
-    [userId, amount]
+    `INSERT INTO duels (creator_id, amount, status, target_user_id, parent_duel_id)
+     VALUES ($1, $2, 'waiting', $3, $4) RETURNING id`,
+    [userId, amount, opts.targetUserId ?? null, opts.parentDuelId ?? null]
   );
 
   return { duel_id: res.rows[0].id };
@@ -42,34 +45,49 @@ async function createDuelImpl(userId: number, amount: number) {
 
 export async function createRematch(userId:number,sourceId:number,multiplier=1) {
   const source=await getDuel(sourceId);
-  if(!source || source.status!=='finished' || ![source.creator_id,source.opponent_id].includes(userId)) throw new Error('Исходная дуэль недоступна');
-  const target=source.creator_id===userId ? source.opponent_id : source.creator_id;
+  if(!source || source.status!=='finished' || ![Number(source.creator_id),Number(source.opponent_id)].includes(Number(userId))) throw new Error('Исходная дуэль недоступна');
+  const target=Number(source.creator_id)===Number(userId) ? Number(source.opponent_id) : Number(source.creator_id);
   const amount=Math.round(Number(source.amount)*Math.min(2,Math.max(1,multiplier))*100)/100;
-  const made=await createDuel(userId,amount);
-  await query(`UPDATE duels SET target_user_id=$1,parent_duel_id=$2 WHERE id=$3`,[target,sourceId,made.duel_id]);
+  // Одна операция: вызов создаётся уже адресным (см. createDuelImpl)
+  const made=await createDuel(userId,amount,{targetUserId:target,parentDuelId:sourceId});
   await notifyPreferred(target,'notif_duel',`Вам предложен реванш на $${amount.toFixed(2)}`,'duel_rematch','Реванш',{duel_id:made.duel_id,parent_duel_id:sourceId},'duel_rematch',made.duel_id);
   return {...made,target_user_id:target,amount};
 }
 
 async function declineRematchImpl(duelId:number,userId:number) {
   const d=(await query(`SELECT * FROM duels WHERE id=$1`,[duelId])).rows[0];
-  if(!d || d.status!=='waiting' || d.target_user_id!==userId) throw new Error('Реванш недоступен');
+  if(!d || d.status!=='waiting' || Number(d.target_user_id)!==Number(userId)) throw new Error('Реванш недоступен');
   const amount=Number(d.amount);
-  const claim=await query(`UPDATE duels SET status='declined' WHERE id=$1 AND status='waiting' RETURNING id`,[duelId]);
+  // Атомарный захват: статус, адресат и сумма возвращаются одним UPDATE,
+  // поэтому второй «отклонить» не пройдёт и не разморозит ставку повторно.
+  const claim=await query(`UPDATE duels SET status='declined'
+                            WHERE id=$1 AND status='waiting' AND target_user_id=$2
+                            RETURNING id, amount, creator_id`,[duelId,userId]);
   if(!claim.rows.length) throw new Error('Реванш уже обработан');
-  await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1`,[amount,d.creator_id]);
+  const unfrozen=await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1 RETURNING id`,[Number(claim.rows[0].amount),Number(claim.rows[0].creator_id)]);
+  if(!unfrozen.rows.length) throw new Error('Ставка вызова уже разморожена');
   await notifyPreferred(d.creator_id,'notif_duel','Соперник отклонил реванш','duel_rematch_declined','Реванш отклонён',{duel_id:duelId},'duel_rematch_declined',duelId);
   return {success:true};
 }
 
-export async function getLobby() {
+/**
+ * Лобби вызовов.
+ *
+ * Адресный реванш (`target_user_id`) виден только адресату и создателю
+ * (создателю — чтобы отменить свой вызов). Раньше этот фильтр жил исключительно
+ * в клиенте (Duel.tsx), поэтому запрос к API напрямую показывал чужие приватные
+ * реванши; acceptDuel не давал их принять, но сам факт утечки лишним не был.
+ * Анонимный запрос (без токена) получает только открытые вызовы.
+ */
+export async function getLobby(viewerId?: number | null) {
   const res = await query(
     `SELECT d.*, u.username as creator_name
      FROM duels d
      JOIN users u ON u.id = d.creator_id
      WHERE d.status = 'waiting'
+       AND (d.target_user_id IS NULL OR d.target_user_id = $1 OR d.creator_id = $1)
      ORDER BY d.created_at DESC`,
-    []
+    [Number.isFinite(Number(viewerId)) && Number(viewerId) > 0 ? Number(viewerId) : -1]
   );
   return res.rows.map(r => ({
     id: r.id,
@@ -86,14 +104,26 @@ async function cancelDuelImpl(duelId: number, userId: number) {
   const res = await query('SELECT * FROM duels WHERE id = $1', [duelId]);
   if (res.rows.length === 0) throw new Error('Дуэль не найдена');
   const duel = res.rows[0];
-  if (duel.creator_id !== userId) throw new Error('Не ваш вызов');
+  if (Number(duel.creator_id) !== Number(userId)) throw new Error('Не ваш вызов');
   if (duel.status !== 'waiting') throw new Error('Нельзя отменить');
 
-  const amount = parseFloat(duel.amount);
+  // СНАЧАЛА атомарный захват строки, ПОТОМ разморозка. Прежний порядок
+  // (проверка статуса отдельным SELECT → разморозка → UPDATE статуса) давал
+  // воспроизводимую на реальном PostgreSQL гонку: два одновременных «Отменить»
+  // (двойной клик / два устройства) оба проходили проверку и размораживали
+  // ставку дважды, завышая доступный баланс. `WHERE status='waiting'` во втором
+  // запросе не пройдёт — одна из двух транзакций получит 0 строк.
+  const claim = await query(
+    `UPDATE duels SET status = 'cancelled'
+      WHERE id = $1 AND creator_id = $2 AND status = 'waiting'
+      RETURNING amount`,
+    [duelId, userId]
+  );
+  if (claim.rows.length === 0) throw new Error('Нельзя отменить');
+  const amount = parseFloat(claim.rows[0].amount);
   // Ставка не списывалась — значит и возвращать нечего, только разморозить
   const unfrozen=await query(`UPDATE users SET frozen_balance=frozen_balance-$1 WHERE id=$2 AND frozen_balance >= $1 RETURNING id`,[amount,userId]);
   if (!unfrozen.rows.length) throw new Error('Средства вызова уже разморожены');
-  await query("UPDATE duels SET status = 'cancelled' WHERE id = $1", [duelId]);
   return { success: true };
 }
 
@@ -229,9 +259,16 @@ export async function getDuel(id: number) {
 // несколько окон по очереди, каждое с кнопками «смотреть реплей» / «закрыть».
 // ════════════════════════════════════════════════════════════════════════
 
-/** Приз победителю: банк 2×ставка минус 10% комиссии. */
-function duelPrize(amount: number): number {
-  return Math.round(amount * 2 * 0.9 * 100) / 100;
+/**
+ * Приз победителю: банк 2×ставка минус комиссия платформы.
+ *
+ * Процент читается из `commission_percent`, а не захардкожен: при изменении
+ * комиссии в админке уведомления показывали бы приз, рассчитанный по прежним
+ * 10%, тогда как acceptDuel платил по новым.
+ */
+export async function computeDuelPrize(amount: number): Promise<number> {
+  const commissionPercent = parseFloat(await getSetting('commission_percent') || '10');
+  return Math.round(amount * 2 * (1 - commissionPercent / 100) * 100) / 100;
 }
 
 async function getDuelWithNames(duelId: number) {
@@ -279,7 +316,7 @@ export async function notifyDuelParticipant(duelId: number, userId: number): Pro
   await notifyDuelResult(userId, duelId, message, {
     duel_id: duelId,
     amount,
-    prize: duelPrize(amount),
+    prize: await computeDuelPrize(amount),
     result: d.result,
     winner_id: d.winner_id,
     i_won: d.winner_id === userId,

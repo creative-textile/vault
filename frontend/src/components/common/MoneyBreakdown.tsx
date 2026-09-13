@@ -18,7 +18,7 @@ export default function MoneyBreakdown({ detailed = false }: { detailed?: boolea
     const locked = frozen + safe + vault;
     return locked > 0 ? (
       <div className="text-dim" style={{ marginTop: 6, fontSize: 12 }}>
-        ❄️ Заморожено: <b style={{ color: '#fff' }}>${locked.toFixed(2)}</b>
+        ❄️ Заморожено: <b style={{ color: 'var(--text)' }}>${locked.toFixed(2)}</b>
       </div>
     ) : null;
   }
@@ -35,12 +35,12 @@ export default function MoneyBreakdown({ detailed = false }: { detailed?: boolea
       {rows.map(r => (
         <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '3px 0' }}>
           <span className="text-dim">{r.label}</span>
-          <b style={{ color: '#fff', whiteSpace: 'nowrap' }}>${r.value.toFixed(2)}</b>
+          <b style={{ color: 'var(--text)', whiteSpace: 'nowrap' }}>${r.value.toFixed(2)}</b>
         </div>
       ))}
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 6, paddingTop: 6, borderTop: '1px solid #2a2a4a' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--bg-4)' }}>
         <span className="text-dim">Всего средств</span>
-        <b style={{ color: '#ffd700', whiteSpace: 'nowrap' }}>${(balance + safe + vault).toFixed(2)}</b>
+        <b style={{ color: 'var(--gold)', whiteSpace: 'nowrap' }}>${(balance + safe + vault).toFixed(2)}</b>
       </div>
     </div>
   );

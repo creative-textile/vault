@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#05060f" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>VAULT · галерея 3D-сцен (dev)</title>
+  <!--
+    Отладочный вход для просмотра 3D-сцен без бэкенда, базы и авторизации.
+    Намеренно НЕ добавлен в build.rollupOptions.input — прод-сборка его не
+    собирает, в бандл игрока он не попадает.
+  -->
+  <style>
+    html, body, #root { margin: 0; padding: 0; min-height: 100%; background: #05060f; color: #fff; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/dev/scenes.tsx"></script>
+</body>
+</html>

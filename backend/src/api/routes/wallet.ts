@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { auth } from '../middleware/auth';
 import { moneyBody, pinBody } from '../middleware/security';
+import { config } from '../../config';
 import { getOrCreateDepositAddress, demoDeposit, processWithdrawal, setPin, setWithdrawAddress } from '../../services/ton';
 
 const router = Router();
@@ -16,8 +17,16 @@ router.get('/deposit-address', auth, async (req, res) => {
   }
 });
 
-// DEMO: POST /api/wallet/demo-deposit { amount }
+/**
+ * DEMO: POST /api/wallet/demo-deposit { amount }
+ *
+ * Эндпоинт существует ТОЛЬКО при DEMO_MODE=true — в реальном режиме отвечает
+ * 403 и не трогает баланс. Прежде режим не проверялся ни здесь, ни в сервисе,
+ * поэтому любой залогиненный пользователь мог начислить себе до $10 000 000
+ * одним запросом.
+ */
 router.post('/demo-deposit', auth, moneyBody('amount',2), async (req, res) => {
+  if (!config.demoMode) return res.status(403).json({ error: 'Демо-пополнение отключено' });
   try {
     const user = (req as any).user;
     const { amount } = req.body;

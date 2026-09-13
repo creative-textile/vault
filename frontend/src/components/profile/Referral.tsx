@@ -41,7 +41,7 @@ export default function Referral() {
       <div className="card card-hl text-center">
         <div className="card-title">Ваша ссылка</div>
         <div style={{
-          background:'#0a0a1a',
+          background:'var(--bg-2)',
           padding:14,
           borderRadius:12,
           fontFamily:'monospace',
@@ -69,11 +69,11 @@ export default function Referral() {
         <div style={{display:'flex', justifyContent:'space-around'}}>
           <div className="text-center">
             <div className="text-dim" style={{fontSize:12}}>Рефералов</div>
-            <div style={{fontSize:32, fontWeight:900, color:'#ffd700'}}>{stats?.total_referrals || 0}</div>
+            <div style={{fontSize:32, fontWeight:900, color:'var(--gold)'}}>{stats?.total_referrals || 0}</div>
           </div>
           <div className="text-center">
             <div className="text-dim" style={{fontSize:12}}>Заработано</div>
-            <div style={{fontSize:32, fontWeight:900, color:'#22c55e'}}>${(stats?.total_earned || 0).toFixed(2)}</div>
+            <div style={{fontSize:32, fontWeight:900, color:'var(--green)'}}>${(stats?.total_earned || 0).toFixed(2)}</div>
           </div>
         </div>
       </div>

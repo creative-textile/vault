@@ -6,5 +6,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build || true
-CMD ["sh", "-c", "if [ -f dist/index.js ]; then node dist/index.js; else npx ts-node src/index.ts; fi"]
+# Сборка больше НЕ «|| true»: раньше ошибка компиляции молча проглатывалась,
+# а CMD падал в ветку `npx ts-node src/index.ts` — ts-node в зависимостях бота
+# нет (только ts-node-dev), поэтому контейнер либо уходил в сеть за пакетом,
+# либо не запускался вовсе. Провалилась сборка — образ не собирается.
+RUN npm run build
+ENV NODE_ENV=production
+CMD ["node", "dist/index.js"]

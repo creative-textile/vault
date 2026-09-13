@@ -29,10 +29,12 @@ import Profile from './components/profile/Profile';
 import AdminPanel from './components/profile/AdminPanel';
 import SetPin from './components/wallet/SetPin';
 import DuelResultModal from './components/common/DuelResultModal';
+import { sfx } from './audio';
 import NotificationsModal from './components/common/NotificationsModal';
 import SafeCrackRedirector from './components/safe/SafeCrackRedirector';
 import RocketFlightBadge from './components/common/RocketFlightBadge';
 import Replay from './components/common/Replay';
+import Ambient from './components/layout/Ambient';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -129,8 +131,12 @@ export default function App() {
       // Подделывать уведомление на клиенте (id: Date.now()) нельзя: такой id
       // не существует в БД, и «отметить прочитанным» по нему не сработает.
       if (data?.type !== 'duel_result') {
+        // Сигнал «пришло уведомление»: игрок мог уйти в другую вкладку
+        sfx.notify();
         showToast(data.message);
       } else {
+        // Исход дуэли озвучит сам экран броска (клинок → подброс → приземление),
+        // второй звук поверх только смазал бы момент
         // Соперник принял вызов: деньги сервер уже двинул, а броска ещё не было.
         // Держим баланс до показа результата — иначе исход виден на главной.
         holdBalance();
@@ -210,8 +216,8 @@ export default function App() {
     try {
       WebApp.ready();
       WebApp.expand();
-      WebApp.setHeaderColor('#0a0a1a');
-      WebApp.setBackgroundColor('#0a0a1a');
+      WebApp.setHeaderColor('#05060f');
+      WebApp.setBackgroundColor('#05060f');
     } catch {}
   }, []);
 
@@ -279,7 +285,22 @@ export default function App() {
   // Не монтируем Home и игровые pollers в коротком окне между loading=false и
   // получением JWT: именно их 401 мог приехать позже и уничтожить новую сессию.
   if (loading || (!token && !publicReplay)) {
-    return <div className="app"><div className="container text-center" style={{paddingTop: '50vh'}}>Загрузка VAULT...</div></div>;
+    return (
+      <div className="app">
+        <div className="container text-center" style={{ paddingTop: '38vh' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+            <div className="spinner" style={{ width: 34, height: 34, borderWidth: 3 }} />
+          </div>
+          <div className="gold-text" style={{
+            fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 900,
+            letterSpacing: '.3em', paddingLeft: '.3em'
+          }}>VAULT</div>
+          <div className="text-faint" style={{ marginTop: 10, letterSpacing: '.16em', textTransform: 'uppercase', fontSize: 10 }}>
+            Открываем хранилище…
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const onboardingActive = showOnboarding && !onboardingDone;
@@ -293,6 +314,7 @@ export default function App() {
       showToast, toast
     }}>
       <BrowserRouter>
+        <Ambient />
         <div className="app">
           {toast && <div className="toast">{toast}</div>}
           {/* Очередь результатов дуэлей: модальное окно из непрочитанных
@@ -304,7 +326,7 @@ export default function App() {
           {/* Пока приветствие открыто, игровые редиректы, модальные окна и
               фоновые UI-контроллеры не монтируются и не могут сменить маршрут. */}
           {onboardingActive && (
-            <div style={{position:'fixed', inset:0, zIndex:3000, background:'#0a0a1a', overflowY:'auto'}}>
+            <div style={{position:'fixed', inset:0, zIndex:3000, background:'rgba(5,6,15,.96)', overflowY:'auto'}}>
               <div className="container"><Onboarding /></div>
             </div>
           )}

@@ -29,6 +29,14 @@ const SPIN_LEAD_MS = 6_000;
 export const SPIN_CODE_LEAD_MS = 3_000;
 
 /**
+ * Допуск на расхождение часов клиента и сервера при проверке тапов.
+ * Клиент считает тапы от своего момента старта вращения, который может быть
+ * сдвинут относительно серверного на величину skew; допуск в 1 с покрывает
+ * обычную рассинхронизацию, но не позволяет заявить тап «в будущем».
+ */
+const TAP_SKEW_TOLERANCE_MS = 1_000;
+
+/**
  * Скорость барабана определяет, сколько миллисекунд видна каждая цифра:
  *     время цифры = 1000 / (speed × 1.3) мс
  * Диапазон 1.45–2.00 → 385–530 мс на цифру. Это калибровано под живого
@@ -387,6 +395,17 @@ async function cancelSafeDepositImpl(userId: number) {
  * а засчитанное время никогда не может оказаться лучше честно пересчитанного.
  * Штрафного времени за промах нет: промах и так стоит повторного тапа.
  */
+/**
+ * Засчитать результат взлома.
+ *
+ * Время считается ИСКЛЮЧИТЕЛЬНО по серверным часам:
+ *   recorded = spinLead + max(последний валидный тап, сколько реально прошло
+ *                             от общего старта вращения)
+ * Заявленное клиентом `time_ms` в ранжировании не участвует (оно нужно только
+ * для диагностики). Отправить результат до общего старта вращения нельзя —
+ * раньше такой запрос засчитывал время ~0.5 с и гарантированно выигрывал пул,
+ * а код сейфа был виден всё время до старта (см. isCodeRevealed).
+ */
 export async function submitCrackTime(userId: number, timeMs: number, taps?: any) {
   const clientMs = Math.round(Number(timeMs));
   if (!Number.isFinite(clientMs)) throw new Error('Некорректное время');
@@ -413,12 +432,17 @@ export async function submitCrackTime(userId: number, timeMs: number, taps?: any
   }
 
   const deadlineMs = await getCrackDeadlineMs();
+  const spinLeadMs = await getSpinLeadMs();
 
   // Сколько времени реально прошло с начала взлома (по серверным часам).
   // Защита от подкрутки клиентского времени и от ввода после закрытия окна.
   const startedAt = await getCrackStartedAt(safe.id);
   const elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt.getTime()) : 0;
   if (elapsedMs > deadlineMs) throw new Error('Окно взлома закрыто');
+  // До общего старта вращения результата быть не может: барабаны ещё стоят,
+  // а «время взлома» в этот момент меньше SPIN_LEAD_MS и давало бы первое место.
+  if (elapsedMs < spinLeadMs) throw new Error('Вращение барабанов ещё не началось');
+  const spinElapsedMs = elapsedMs - spinLeadMs;
 
   const timeoutMinutes = Math.round((await getCrackTimeoutMs()) / 60000);
 
@@ -428,7 +452,7 @@ export async function submitCrackTime(userId: number, timeMs: number, taps?: any
   const tapList = Array.isArray(taps) ? taps.map((x: any) => Math.round(Number(x))) : null;
   let verifiedMs = 0;
   const tapsOk = !!speeds && !!code && code.length === 3 && !!tapList && tapList.length === 3
-    && tapList.every((t: number) => Number.isFinite(t) && t >= 0 && t <= 24 * 3600 * 1000);
+    && tapList.every((t: number) => Number.isFinite(t) && t >= 0 && t <= spinElapsedMs + TAP_SKEW_TOLERANCE_MS);
   if (tapsOk) {
     const mismatched = tapList!.filter((t: number, i: number) => digitAt(speeds![i], t) !== code![i]);
     if (mismatched.length) {
@@ -439,18 +463,17 @@ export async function submitCrackTime(userId: number, timeMs: number, taps?: any
     }
     verifiedMs = Math.max(...tapList!);
   } else if (Array.isArray(taps)) {
-    console.log(`[SAFE] user ${userId}: прислан некорректный список тапов — считаем только время клиента`);
+    console.log(`[SAFE] user ${userId}: прислан некорректный список тапов — считаем только по серверным часам`);
   }
-  // Заявленное клиентом время не может быть лучше пересчитанного сервером.
-  // Штрафы за промахи не начисляются: промахнувшемуся игроку приходится тапать
-  // снова, и он теряет время сам.
-  const honestMs = Math.max(clientMs, verifiedMs);
 
-  // Клиент считает время от старта барабанов, сервер — от старта фазы взлома,
-  // поэтому берём большее из двух значений (честный порядок "кто раньше").
-  const recordedMs = Math.max(honestMs, elapsedMs);
-  if (recordedMs < 500) throw new Error('Слишком быстро');
+  // Засчитанное время: серверный пол (сколько реально прошло от общего старта)
+  // и последний валидный тап — берём большее. Меньше честного оно не выйдет ни
+  // при каком clientMs, а промах по цифрам стоит игроку повторного тапа.
+  const recordedMs = spinLeadMs + Math.max(verifiedMs, spinElapsedMs);
   if (recordedMs > deadlineMs) throw new Error(`Таймаут: ${timeoutMinutes} мин`);
+  if (Math.abs(clientMs - Math.max(verifiedMs, spinElapsedMs)) > 60_000) {
+    console.log(`[SAFE] user ${userId}: клиент заявил ${clientMs} мс, сервер насчитал ${Math.max(verifiedMs, spinElapsedMs)} мс`);
+  }
 
   await query(
     'UPDATE safe_deposits SET crack_time_ms = $1 WHERE id = $2',
@@ -523,6 +546,33 @@ export async function getSpinStartInMs(safeId: number, windowMs?: number): Promi
   return Math.round(started.getTime() + lead - Date.now());
 }
 
+/**
+ * Можно ли уже показывать код сейфа.
+ *
+ * Код открывается за SPIN_CODE_LEAD_MS до общего старта вращения (крупный
+ * отсчёт 3-2-1) и после завершения раунда. Раньше `/api/safe/current` отдавал
+ * код весь статус `cracking`, включая шесть секунд обратного отсчёта, а
+ * результат принимался с любого момента фазы: скрипт читал код заранее,
+ * отправлял его на первой же миллисекунде и забирал весь пул.
+ */
+export async function isCodeRevealed(safe: any, windowMs?: number): Promise<boolean> {
+  if (!safe) return false;
+  if (safe.status === 'finished') return true;
+  if (safe.status !== 'cracking') return false;
+  const started = await getCrackStartedAt(safe.id);
+  if (!started) return false;
+  const lead = await getSpinLeadMs(windowMs);
+  return Date.now() >= started.getTime() + lead - SPIN_CODE_LEAD_MS;
+}
+
+/** Через сколько миллисекунд код станет виден (0 — уже виден, null — не в фазе взлома). */
+export async function getCodeRevealInMs(safeId: number, windowMs?: number): Promise<number | null> {
+  const started = await getCrackStartedAt(safeId);
+  if (!started) return null;
+  const lead = await getSpinLeadMs(windowMs);
+  return Math.max(0, Math.round(started.getTime() + lead - SPIN_CODE_LEAD_MS - Date.now()));
+}
+
 async function calculateSafeWinnersImpl(safeId: number) {
   const safe = await getSafeById(safeId);
   if (!safe) return;
@@ -590,7 +640,14 @@ async function calculateSafeWinnersImpl(safeId: number) {
   );
 }
 
+/**
+ * Итоги розыгрыша. Доступны только для ЗАВЕРШЁННОГО сейфа: пока окно взлома
+ * открыто, список показывает чужие времена (то есть кто уже сдал результат и
+ * насколько быстро) — этой информации достаточно, чтобы подстроиться под лидеров.
+ */
 export async function getSafeResults(safeId: number) {
+  const finished = await query(`SELECT id FROM safes WHERE id = $1 AND status = 'finished'`, [safeId]);
+  if (!finished.rows.length) throw new Error('Итоги доступны после завершения розыгрыша');
   const depRes = await query(
     `SELECT d.*, u.username
      FROM safe_deposits d
@@ -859,8 +916,13 @@ async function cancelSafeReturnDeposits(safe: any) {
   // Сначала атомарно занимаем сейф (тот же приём, что и при старте взлома):
   // два параллельных вызова — например, cron и действие админа — вернули бы
   // вклады дважды.
+  // Банк и пул обнуляются вместе со статусом: отменённый раунд не должен
+  // показывать деньги (в админке и в статистике), хотя обязательства по нему
+  // и так считаются только для status IN ('collecting','cracking').
   const claimed = await query(
-    `UPDATE safes SET status = 'cancelled' WHERE id = $1 AND status = 'collecting' RETURNING id`,
+    `UPDATE safes
+        SET status = 'cancelled', bank = 0, prize_pool = 0, participants_count = 0
+      WHERE id = $1 AND status = 'collecting' RETURNING id`,
     [safe.id]
   );
   if (!claimed.rows.length) return;

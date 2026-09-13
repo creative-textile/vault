@@ -114,7 +114,7 @@ export default function RocketFlightBadge() {
         borderRadius: 14, boxShadow: '0 6px 20px rgba(0,0,0,0.55)', maxWidth: '94vw'
       }}
     >
-      <span style={{ fontWeight: 900, color: '#ffd700', fontSize: 16, whiteSpace: 'nowrap' }}>
+      <span style={{ fontWeight: 900, color: 'var(--gold)', fontSize: 16, whiteSpace: 'nowrap' }}>
         🚀 x{mult.toFixed(2)}
       </span>
       <span className="text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>в полёте</span>

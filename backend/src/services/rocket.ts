@@ -3,7 +3,7 @@ import { withTransaction } from '../db/pool';
 import { getUser, modifyBalance, getAvailableBalance } from './balance';
 import { logPlatformRevenue, getSetting } from './revenue';
 import { payReferral } from './referral';
-import { roundDownClean } from '../config';
+import { roundDownClean, CRASH_HARD_CAP } from '../config';
 import { randomBytes } from 'crypto';
 
 const FLIGHT_CURVE = 0.075;
@@ -12,14 +12,24 @@ export function getMultiplierAt(elapsedSec: number): number {
   return Math.exp(FLIGHT_CURVE * elapsedSec);
 }
 
+/**
+ * Точка взрыва раунда.
+ *
+ * Ограничение сверху по кассе (`bankroll / bet`) не совпадает с ограничением
+ * колонки: при кассе $10 000+ и ставке $1 значение уходило за потолок
+ * DECIMAL(8,4) = 9999.9999, INSERT падал с `22003 numeric field overflow`, и
+ * игрок получал ошибку вместо раунда (проверено на реальном PostgreSQL).
+ * Колонка расширена до DECIMAL(12,4), а CRASH_HARD_CAP гарантирует, что сервис
+ * не сгенерирует значение вне её диапазона.
+ */
 export function calculateCrashPoint(bet: number, bankroll: number, rng:()=>number = Math.random): number {
   // 1. Макс. по кассе
   const maxByBankroll = bankroll / bet;
   // 2. Случайная точка (10% house edge)
   const r = rng();
   const randomCrash = 0.90 / (1 - r);
-  // 3. Защита кассы
-  let crash = Math.min(randomCrash, maxByBankroll);
+  // 3. Защита кассы + защита от переполнения типа колонки
+  let crash = Math.min(randomCrash, maxByBankroll, CRASH_HARD_CAP);
   crash = Math.round(crash * 100) / 100;
   return Math.max(crash, 1.01);
 }
@@ -82,22 +92,39 @@ async function placeBetImpl(userId: number, betAmount: number) {
     [userId, betAmount, crashAt, FLIGHT_CURVE,replaySeed]
   );
 
+  // `crash_at` в ответ НЕ отдаётся. Раньше сервер сообщал точку взрыва до
+  // начала полёта, поэтому достаточно было открыть DevTools (или сделать тот
+  // же запрос скриптом) и забирать выигрыш на x<crash_at всегда: преимущество
+  // казино превращалось в гарантированный плюс игрока. Точка взрыва уходит
+  // клиенту только вместе с событием `crash` (когда раунд уже завершён) и в
+  // `cashout_result` — там она нужна лишь для анимации «призрака».
   return {
     round_id: res.rows[0].id,
-    crash_at: crashAt,
     replay_seed: replaySeed,
     max_bet: maxBet
   };
 }
 
-async function processCashoutImpl(roundId: number, userId: number, elapsedSec: number) {
+async function processCashoutImpl(roundId: number, userId: number, elapsedSec?: number) {
   const res = await query('SELECT * FROM rocket_rounds WHERE id = $1', [roundId]);
   if (res.rows.length === 0) throw new Error('Раунд не найден');
   const round = res.rows[0];
-  if (round.user_id !== userId) throw new Error('Не ваш раунд');
+  if (Number(round.user_id) !== Number(userId)) throw new Error('Не ваш раунд');
   if (round.cashout_at) throw new Error('Уже забрали');
 
-  const currentMult = getMultiplierAt(elapsedSec);
+  // Время полёта берём из БД, а не из памяти процесса: `activeRounds` живёт на
+  // том экземпляре backend, который запустил тики, поэтому при горизонтальном
+  // масштабировании кэшаут на другом инстансе раньше просто терялся (раунд
+  // оставался незакрытым, ставка сгорала без шанса забрать).
+  let elapsed: number;
+  if (Number.isFinite(elapsedSec) && (elapsedSec as number) >= 0) {
+    elapsed = elapsedSec as number;
+  } else {
+    if (!round.tick_started_at) throw new Error('Раунд ещё не стартовал');
+    elapsed = (Date.now() - new Date(round.tick_started_at).getTime()) / 1000;
+  }
+  if (!Number.isFinite(elapsed) || elapsed < 0) throw new Error('Некорректное время полёта');
+  const currentMult = getMultiplierAt(elapsed);
   if (currentMult >= parseFloat(round.crash_at)) {
     return { result: 'too_late' as const };
   }
@@ -156,11 +183,20 @@ export async function processCrash(roundId: number) {
   );
 }
 
+/**
+ * Раунд считается НЕзавершённым, пока не проставлен результат: у проигравшего
+ * `profit = -bet` (< 0), у забравшего — `cashout_at` не null. Такой раунд
+ * хранить в публичной истории нельзя: вместе со строкой уезжает и `crash_at`,
+ * то есть точка взрыва текущего полёта.
+ */
+export const UNSETTLED_ROUND_SQL = `(cashout_at IS NULL AND COALESCE(profit, 0) = 0)`;
+
 export async function getRocketHistory(limit = 50) {
   const res = await query(
     `SELECT r.*, u.username
      FROM rocket_rounds r
      JOIN users u ON u.id = r.user_id
+     WHERE NOT ${UNSETTLED_ROUND_SQL}
      ORDER BY r.id DESC
      LIMIT $1`,
     [limit]
@@ -177,6 +213,57 @@ export async function getRocketHistory(limit = 50) {
   }));
 }
 
+
+/**
+ * Атомарно занять раунд для серверных тиков.
+ *
+ * `UPDATE ... WHERE tick_started_at IS NULL ... RETURNING` гарантирует, что
+ * тики запустит ровно один экземпляр backend (при двух — второй получит null),
+ * и записывает серверный якорь времени, по которому cashout считается на любом
+ * инстансе.
+ */
+export async function claimRocketTick(roundId: number, userId: number): Promise<{ crashAt: number; startedAt: number } | null> {
+  const res = await query(
+    `UPDATE rocket_rounds
+        SET tick_started_at = NOW()
+      WHERE id = $1 AND user_id = $2 AND tick_started_at IS NULL AND cashout_at IS NULL
+        AND COALESCE(profit, 0) = 0
+      RETURNING crash_at, tick_started_at`,
+    [roundId, userId]
+  );
+  if (!res.rows.length) return null;
+  return { crashAt: parseFloat(res.rows[0].crash_at), startedAt: new Date(res.rows[0].tick_started_at).getTime() };
+}
+
+/**
+ * Дорасчёт раундов, зависших без результата.
+ *
+ * Если backend перезапустили в середине полёта, интервал тиков исчезает вместе
+ * с процессом: раунд остаётся незавершённым навсегда, ставка не списана, а
+ * `crash_at` продолжает лежать в БД (и утекать в историю/реплей, если их не
+ * фильтровать). Cron закрывает такие раунды как проигрыш — ровно тем же
+ * `processCrash`, которым это сделал бы тик.
+ *
+ * Порог: время, за которое раунд гарантированно достиг бы CRASH_HARD_CAP.
+ */
+export const STALE_ROUND_GRACE_SEC = Math.ceil(Math.log(CRASH_HARD_CAP) / FLIGHT_CURVE) + 30;
+
+export async function settleStaleRounds(): Promise<number> {
+  // Порог считаем на стороне JS и сравниваем метки: арифметика интервалов
+  // timestamptz в разных движках ведёт себя по-разному (в pg-mem, на котором
+  // живут смоук-тесты, её просто нет).
+  const cutoff = new Date(Date.now() - STALE_ROUND_GRACE_SEC * 1000);
+  const res = await query(
+    `UPDATE rocket_rounds
+        SET profit = -bet
+      WHERE ${UNSETTLED_ROUND_SQL}
+        AND tick_started_at IS NOT NULL
+        AND tick_started_at < $1
+      RETURNING id`,
+    [cutoff]
+  );
+  return res.rowCount || 0;
+}
 
 // Составные денежные операции целиком выполняются в одной SQL-транзакции.
 export const placeBet: typeof placeBetImpl = (...args: Parameters<typeof placeBetImpl>) => withTransaction(() => placeBetImpl(...args));

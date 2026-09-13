@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { auth, adminOnly } from '../middleware/auth';
 import { adminPassword, adminAudit, validId, validMoney } from '../middleware/security';
-import { query } from '../../db/pool';
+import { query, withTransaction } from '../../db/pool';
 import { getSetting, setSetting } from '../../services/revenue';
 import { getRocketBankroll, updateRocketBankroll } from '../../services/rocket';
 import { addManualPool, getVaultPool } from '../../services/vault-deposit';
 import { getBalanceSnapshot } from '../../services/balance';
 import { getFinancialReconciliation } from '../../services/financial-audit';
+import { listWithdrawals, payWithdrawal, rejectWithdrawal } from '../../services/ton';
 
 const router = Router();
 
@@ -176,31 +177,40 @@ router.get('/stats', async (req, res) => {
 router.post('/rocket-bankroll', async (req, res) => {
   try {
     const { add, withdraw } = req.body;
+    // Переводы между кассами — одна транзакция на операцию. Раньше каждый
+    // `SELECT ... FOR UPDATE` выполнялся в autocommit: блокировка снималась
+    // сразу после SELECT, поэтому два параллельных перевода читали одну и ту же
+    // сумму и касса уходила в минус (CHECK-ограничение роняло второй UPDATE,
+    // оставляя половину перевода выполненной).
     if (add) {
       const amt = parseFloat(add);
       if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
-      // перевод platform -> rocket
-      const plat = await query('SELECT amount FROM platform_cashbox WHERE id = 1 FOR UPDATE');
-      if (parseFloat(plat.rows[0].amount) < amt) throw new Error('В главной кассе недостаточно');
-      await query('UPDATE platform_cashbox SET amount = amount - $1, updated_at = NOW() WHERE id = 1', [amt]);
-      await updateRocketBankroll(amt);
-      await query(
-        `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
-         VALUES ('platform', 'rocket', $1, 'Ручное пополнение кассы Ракеты')`,
-        [amt]
-      );
+      await withTransaction(async (client) => {
+        const plat = await client.query('SELECT amount FROM platform_cashbox WHERE id = 1 FOR UPDATE');
+        if (parseFloat(plat.rows[0].amount) < amt) throw new Error('В главной кассе недостаточно');
+        await client.query('UPDATE platform_cashbox SET amount = amount - $1, updated_at = NOW() WHERE id = 1', [amt]);
+        await updateRocketBankroll(amt);
+        await client.query(
+          `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
+           VALUES ('platform', 'rocket', $1, 'Ручное пополнение кассы Ракеты')`,
+          [amt]
+        );
+      });
     }
     if (withdraw) {
       const amt = parseFloat(withdraw);
       if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
-      if (await getRocketBankroll() < amt) throw new Error('В кассе Ракеты недостаточно');
-      await updateRocketBankroll(-amt);
-      await query('UPDATE platform_cashbox SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [amt]);
-      await query(
-        `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
-         VALUES ('rocket', 'platform', $1, 'Изъятие из кассы Ракеты в главную')`,
-        [amt]
-      );
+      await withTransaction(async (client) => {
+        const rocket = await client.query('SELECT amount FROM rocket_bankroll WHERE id = 1 FOR UPDATE');
+        if (parseFloat(rocket.rows[0].amount) < amt) throw new Error('В кассе Ракеты недостаточно');
+        await updateRocketBankroll(-amt);
+        await client.query('UPDATE platform_cashbox SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [amt]);
+        await client.query(
+          `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
+           VALUES ('rocket', 'platform', $1, 'Изъятие из кассы Ракеты в главную')`,
+          [amt]
+        );
+      });
     }
     res.json({
       bankroll: await getRocketBankroll(),
@@ -217,13 +227,17 @@ router.post('/add-pool', async (req, res) => {
     const { amount } = req.body;
     const amt = parseFloat(amount);
     if (!validMoney(amt, 0.01)) throw new Error('Некорректная сумма');
-    // addManualPool атомарно резервирует сумму из platform_cashbox.
-    await addManualPool(amt);
-    await query(
-      `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
-       VALUES ('platform', 'vault', $1, 'Ручное пополнение ПУЛ ВКЛАДА')`,
-      [amt]
-    );
+    // addManualPool атомарно резервирует сумму из platform_cashbox; запись
+    // в журнал переводов обязана быть в той же транзакции, иначе при откате
+    // резерва в журнале оставался несуществующий перевод.
+    await withTransaction(async (client) => {
+      await addManualPool(amt);
+      await client.query(
+        `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
+         VALUES ('platform', 'vault', $1, 'Ручное пополнение ПУЛ ВКЛАДА')`,
+        [amt]
+      );
+    });
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -236,14 +250,16 @@ router.post('/withdraw-platform', async (req, res) => {
     const { amount, note } = req.body;
     const amt = parseFloat(amount);
     if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
-    const plat = await query('SELECT amount FROM platform_cashbox WHERE id = 1 FOR UPDATE');
-    if (parseFloat(plat.rows[0].amount) < amt) throw new Error('В главной кассе недостаточно');
-    await query('UPDATE platform_cashbox SET amount = amount - $1, updated_at = NOW() WHERE id = 1', [amt]);
-    await query(
-      `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
-       VALUES ('platform', 'external', $1, $2)`,
-      [amt, note || 'Вывод из проекта']
-    );
+    await withTransaction(async (client) => {
+      const plat = await client.query('SELECT amount FROM platform_cashbox WHERE id = 1 FOR UPDATE');
+      if (parseFloat(plat.rows[0].amount) < amt) throw new Error('В главной кассе недостаточно');
+      await client.query('UPDATE platform_cashbox SET amount = amount - $1, updated_at = NOW() WHERE id = 1', [amt]);
+      await client.query(
+        `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
+         VALUES ('platform', 'external', $1, $2)`,
+        [amt, note || 'Вывод из проекта']
+      );
+    });
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -256,13 +272,59 @@ router.post('/seed-platform', async (req, res) => {
     const { amount } = req.body;
     const amt = parseFloat(amount);
     if (!validMoney(amt,0.01)) throw new Error('Некорректная сумма');
-    await query('UPDATE platform_cashbox SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [amt]);
-    await query(
-      `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
-       VALUES ('seed', 'platform', $1, 'Демо-пополнение')`,
-      [amt]
-    );
+    await withTransaction(async (client) => {
+      await client.query('UPDATE platform_cashbox SET amount = amount + $1, updated_at = NOW() WHERE id = 1', [amt]);
+      await client.query(
+        `INSERT INTO cashbox_transfers (from_source, to_source, amount, note)
+         VALUES ('seed', 'platform', $1, 'Демо-пополнение')`,
+        [amt]
+      );
+    });
     res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════
+// Выплаты пользователям.
+//
+// В реальном режиме вывод создаёт заявку со статусом pending (деньги списаны с
+// баланса), а оператор отправляет USDT вручную и вносит tx_hash — прежде
+// процесс отвечал выдуманным «demo_tx_...» и деньги просто исчезали.
+// Статус меняется только из pending одной транзакцией, поэтому ни двойная
+// выплата, ни двойной возврат невозможны.
+// ════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/withdrawals?status=pending
+router.get('/withdrawals', async (req, res) => {
+  try {
+    const status = ['pending', 'paid', 'rejected'].includes(String(req.query.status))
+      ? String(req.query.status) as 'pending' | 'paid' | 'rejected'
+      : undefined;
+    res.json(await listWithdrawals(status));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/withdrawals/:id/pay { tx_hash }
+router.post('/withdrawals/:id/pay', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!validId(id)) throw new Error('Некорректный ID заявки');
+    res.json(await payWithdrawal(id, String(req.body?.tx_hash || '')));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/withdrawals/:id/reject { reason }
+router.post('/withdrawals/:id/reject', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!validId(id)) throw new Error('Некорректный ID заявки');
+    res.json(await rejectWithdrawal(id, req.body?.reason ? String(req.body.reason) : undefined));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
@@ -286,7 +348,7 @@ router.get('/users', async (req, res) => {
               (SELECT COUNT(*) FROM rocket_rounds WHERE user_id = u.id) AS rocket_games,
               (SELECT COALESCE(SUM(bet),0) FROM rocket_rounds WHERE user_id = u.id) AS rocket_bet_sum,
               (SELECT COUNT(*) FROM transactions WHERE user_id = u.id AND type = 'bet' AND game_type='duel') AS duel_games,
-              (SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE user_id = u.id AND type='deposit') AS deposits_sum,
+              (SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE user_id = u.id AND type IN ('deposit','demo_deposit')) AS deposits_sum,
               (SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE user_id = u.id AND type='withdraw') AS withdraws_sum
          FROM users u ${where}
          ORDER BY u.last_active DESC NULLS LAST LIMIT ${limit}`,

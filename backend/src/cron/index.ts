@@ -4,6 +4,7 @@ import {
   finalizeCrackIfDue, resumeCracking, getCollectingSafeOrNull, getCollectStartedAt
 } from '../services/safe';
 import { dailyVaultDistribution, completeMatureVaultDeposits } from '../services/vault-deposit';
+import { settleStaleRounds } from '../services/rocket';
 import { getSetting } from '../services/revenue';
 import { broadcast, notifyPreferred } from '../services/notifications';
 import { query, getClient } from '../db/pool';
@@ -123,6 +124,20 @@ export function initCrons() {
       const result=await withRedisLock('dead-balances',10*60*1000,()=>processDeadBalances());
       if(result && (result.warned || result.transferred)) console.log('[CRON dead balances]',result);
     } catch(e:any) { console.error('[CRON dead balances]',e.message); }
+  }));
+
+  // Каждую минуту: дорасчёт ракетных раундов, зависших без результата.
+  // Тики живут в памяти процесса (setInterval), поэтому рестарт backend в
+  // середине полёта оставлял раунд незакрытым навсегда: ставка не списывалась,
+  // а строка с crash_at продолжала существовать. Закрытие — тот же processCrash,
+  // которым раунд закрыл бы тик (profit = -bet).
+  tasks.push(cron.schedule('* * * * *', async () => {
+    try {
+      const settled = await withRedisLock('rocket-stale', 55_000, () => settleStaleRounds());
+      if (settled) console.log(`[CRON rocket] Дорасчитано зависших раундов: ${settled}`);
+    } catch (e: any) {
+      console.error('[CRON rocket] error:', e.message);
+    }
   }));
 
   // Полные сроки вкладов завершаются независимо от полуночного начисления.

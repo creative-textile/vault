@@ -1,0 +1,359 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   VAULT — design system «Neon Vault Luxury»
+   Токены, типографика, фоновая атмосфера, базовые анимации.
+   Компонентные стили — в app.css (подключается после этого файла).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Шрифты: локальные woff2 из @fontsource (внешние CDN недоступны в TMA) ──
+   Orbitron  — дисплейный: логотип, множители, заголовки игр
+   Inter     — основной текст
+   JetBrains Mono — табличные числа: таймеры, баланс, время взлома            */
+/* Orbitron — только латиница и цифры (кириллицы в шрифте НЕТ), поэтому он идёт
+   на логотип, множители и таймеры. Русские заголовки и кнопки — Russo One
+   (кириллица есть, «техногенный» характер тот же). Деньги и время в списках —
+   JetBrains Mono (табличные цифры, кириллица есть). */
+@import '@fontsource/orbitron/500.css';
+@import '@fontsource/orbitron/700.css';
+@import '@fontsource/orbitron/900.css';
+@import '@fontsource/russo-one/400.css';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/800.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/700.css';
+
+:root {
+  /* ── Поверхности: глубокий космический индиго, а не плоский чёрный ─────── */
+  --bg:            #05060f;
+  --bg-2:          #0b0d1f;
+  --bg-3:          #131634;
+  --bg-4:          #1b1f45;
+
+  /* Стекло: полупрозрачные слои поверх фонового свечения */
+  --glass:         rgba(255, 255, 255, 0.045);
+  --glass-2:       rgba(255, 255, 255, 0.075);
+  --glass-border:  rgba(255, 255, 255, 0.09);
+  --glass-hi:      rgba(255, 255, 255, 0.16); /* верхняя кромка-блик */
+
+  /* ── Акценты ─────────────────────────────────────────────────────────── */
+  --gold:          #f5c542;
+  --gold-hi:       #fff3c4;
+  --gold-lo:       #b8860b;
+  --accent:        #f5c542;   /* совместимость со старыми правилами */
+  --accent-2:      #ff7a3d;
+
+  --violet:        #a855f7;
+  --violet-hi:     #d8b4fe;
+  --cyan:          #22d3ee;
+  --green:         #22e07a;
+  --green-lo:      #0f9d58;
+  --red:           #ff3b5c;
+  --red-lo:        #b3122f;
+  --blue:          #4f8dff;
+  --purple:        #a855f7;
+
+  /* Градиенты денег/победы — то, что продаёт */
+  --grad-gold:     linear-gradient(135deg, #fff3c4 0%, #f5c542 42%, #d99a12 72%, #8c5a06 100%);
+  --grad-gold-soft:linear-gradient(135deg, rgba(255,243,196,.22), rgba(245,197,66,.08));
+  --grad-violet:   linear-gradient(135deg, #c084fc 0%, #8b5cf6 55%, #5b21b6 100%);
+  --grad-green:    linear-gradient(135deg, #6ef7a8 0%, #22e07a 48%, #0f9d58 100%);
+  --grad-red:      linear-gradient(135deg, #ff8fa3 0%, #ff3b5c 50%, #b3122f 100%);
+  --grad-cyan:     linear-gradient(135deg, #a5f3fc 0%, #22d3ee 50%, #0e7490 100%);
+
+  /* ── Текст ───────────────────────────────────────────────────────────── */
+  --text:          #ffffff;
+  --text-2:        #c9cbe4;
+  --text-dim:      #8a8db0;
+  --text-faint:    #5f628a;
+
+  /* ── Свечение (glow) — главный инструмент «дорогого» вида ─────────────── */
+  --glow-gold:     0 0 18px rgba(245,197,66,.38), 0 0 46px rgba(245,197,66,.16);
+  --glow-gold-sm:  0 0 10px rgba(245,197,66,.34);
+  --glow-green:    0 0 18px rgba(34,224,122,.40), 0 0 44px rgba(34,224,122,.16);
+  --glow-red:      0 0 18px rgba(255,59,92,.42), 0 0 44px rgba(255,59,92,.18);
+  --glow-violet:   0 0 18px rgba(168,85,247,.40), 0 0 44px rgba(168,85,247,.16);
+  --glow-cyan:     0 0 18px rgba(34,211,238,.38), 0 0 44px rgba(34,211,238,.15);
+
+  /* ── Тени: мягкие и глубокие, lifts content off the background ───────── */
+  --shadow-1:      0 2px 8px rgba(0,0,0,.35);
+  --shadow-2:      0 8px 26px rgba(0,0,0,.45);
+  --shadow-3:      0 18px 48px rgba(0,0,0,.55);
+  --shadow-inset:  inset 0 1px 0 var(--glass-hi);
+
+  /* ── Геометрия ───────────────────────────────────────────────────────── */
+  --radius:        16px;
+  --radius-sm:     12px;
+  --radius-lg:     22px;
+  --radius-pill:   999px;
+
+  /* ── Движение: пружинистые кривые вместо линейных ────────────────────── */
+  --ease-out:      cubic-bezier(.22,1,.36,1);
+  --ease-spring:   cubic-bezier(.34,1.56,.64,1);
+  --ease-in-out:   cubic-bezier(.65,0,.35,1);
+  --t-fast:        .14s;
+  --t-mid:         .26s;
+  --t-slow:        .5s;
+
+  /* ── Типографика ─────────────────────────────────────────────────────── */
+  --font-display:  'Orbitron', 'Russo One', 'Inter', system-ui, sans-serif; /* цифры/латиница */
+  --font-head:     'Russo One', 'Orbitron', 'Inter', system-ui, sans-serif;  /* русский дисплей */
+  --font-body:     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-num:      'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; /* деньги/время */
+
+  --safe-top:      env(safe-area-inset-top, 0);
+  --safe-bottom:   env(safe-area-inset-bottom, 0);
+
+  color-scheme: dark;
+}
+
+/* ── Базовая типографика ─────────────────────────────────────────────────── */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+h1, h2, h3, h4 { font-family: var(--font-head); letter-spacing: .02em; margin: 0; font-weight: 400; }
+
+/* Числа, которые игрок читает как деньги/время — всегда табличные */
+.num, .balance-amount, .pin-digit, .input, .chip, .stat-value, .mult-pill {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+/* Игровые числа (множитель, отсчёт, таймер взлома) — дисплейный Orbitron */
+.timer, .mult, .countdown-big, .bigwin__amount, .drum {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ФОНОВАЯ АТМОСФЕРА
+   Три слоя: статичный градиент, «северное сияние» (медленные цветные пятна)
+   и зерно/виньетка. Дёшево по GPU (transform+opacity), даёт глубину, которой
+   не было у плоского #0a0a1a.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 80% at 50% -10%, #1a1147 0%, rgba(26,17,71,0) 58%),
+    radial-gradient(90% 60% at 100% 100%, #062033 0%, rgba(6,32,51,0) 60%),
+    linear-gradient(178deg, #05060f 0%, #080a1c 46%, #05060f 100%);
+}
+
+.ambient__aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: .5;
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+.ambient__aurora--1 {
+  width: 78vw; height: 78vw; left: -22vw; top: -18vh;
+  background: radial-gradient(circle, rgba(168,85,247,.55), rgba(168,85,247,0) 66%);
+  animation: aurora-a 26s var(--ease-in-out) infinite alternate;
+}
+.ambient__aurora--2 {
+  width: 70vw; height: 70vw; right: -24vw; top: 14vh;
+  background: radial-gradient(circle, rgba(34,211,238,.40), rgba(34,211,238,0) 66%);
+  animation: aurora-b 32s var(--ease-in-out) infinite alternate;
+}
+.ambient__aurora--3 {
+  width: 88vw; height: 62vw; left: 6vw; bottom: -22vh;
+  background: radial-gradient(circle, rgba(245,197,66,.26), rgba(245,197,66,0) 68%);
+  animation: aurora-c 38s var(--ease-in-out) infinite alternate;
+}
+
+@keyframes aurora-a {
+  0%   { transform: translate3d(0,0,0) scale(1); }
+  100% { transform: translate3d(14vw,10vh,0) scale(1.18); }
+}
+@keyframes aurora-b {
+  0%   { transform: translate3d(0,0,0) scale(1.1); }
+  100% { transform: translate3d(-12vw,16vh,0) scale(.92); }
+}
+@keyframes aurora-c {
+  0%   { transform: translate3d(0,0,0) scale(.95); }
+  100% { transform: translate3d(-10vw,-8vh,0) scale(1.14); }
+}
+
+/* Тонкая сетка «хранилища» + виньетка: собирают композицию к центру */
+.ambient__grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 0%, transparent 72%);
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 0%, transparent 72%);
+  opacity: .7;
+}
+.ambient__vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(105% 78% at 50% 42%, transparent 42%, rgba(0,0,0,.62) 100%);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   УТИЛИТАРНЫЕ АНИМАЦИИ
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Блик, пробегающий по поверхности (кнопки, карточки, баланс) */
+@keyframes sheen {
+  0%   { transform: translateX(-130%) skewX(-18deg); }
+  100% { transform: translateX(240%) skewX(-18deg); }
+}
+.sheen::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.34), transparent);
+  transform: translateX(-130%) skewX(-18deg);
+  pointer-events: none;
+}
+.sheen:hover::after, .sheen:active::after { animation: sheen .82s var(--ease-out); }
+
+/* Мягкое дыхание свечения — для главных CTA и «живых» карточек */
+@keyframes glow-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,197,66,.42), var(--shadow-2); }
+  50%      { box-shadow: 0 0 26px 6px rgba(245,197,66,.20), var(--shadow-2); }
+}
+@keyframes glow-breathe-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,224,122,.45), var(--shadow-2); }
+  50%      { box-shadow: 0 0 26px 6px rgba(34,224,122,.22), var(--shadow-2); }
+}
+
+/* Появление контента: экраны не «включаются», а въезжают */
+@keyframes rise-in {
+  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(.82); }
+  62%  { opacity: 1; transform: scale(1.045); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes pop-in-sm {
+  from { opacity: 0; transform: scale(.94) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Пульс-кольцо (ожидание, «живой» индикатор) */
+@keyframes ring-pulse {
+  0%   { box-shadow: 0 0 0 0 currentColor; opacity: .85; }
+  70%  { box-shadow: 0 0 0 14px transparent; opacity: .35; }
+  100% { box-shadow: 0 0 0 0 transparent; opacity: .85; }
+}
+
+/* Бегущая строка (лента выигрышей) */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Мерцание неона */
+@keyframes neon-flicker {
+  0%, 100% { opacity: 1; }
+  42%      { opacity: 1; }
+  44%      { opacity: .62; }
+  46%      { opacity: 1; }
+  70%      { opacity: .84; }
+  72%      { opacity: 1; }
+}
+
+/* Вращение (загрузка, индикаторы) */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Счётчик вверх при смене значения баланса */
+@keyframes value-bump {
+  0%   { transform: scale(1); }
+  34%  { transform: scale(1.075); }
+  100% { transform: scale(1); }
+}
+.value-bump { animation: value-bump .42s var(--ease-spring); }
+
+/* Тряска экрана/элемента (взрыв, ошибка) */
+@keyframes shake-hard {
+  0%,100% { transform: translate3d(0,0,0); }
+  12%     { transform: translate3d(-7px, 3px, 0) rotate(-.5deg); }
+  26%     { transform: translate3d(6px, -4px, 0) rotate(.5deg); }
+  40%     { transform: translate3d(-5px, 2px, 0); }
+  56%     { transform: translate3d(4px, -2px, 0); }
+  72%     { transform: translate3d(-2px, 1px, 0); }
+  88%     { transform: translate3d(1px, 0, 0); }
+}
+.shake { animation: shake-hard .52s var(--ease-out); }
+
+@keyframes shake-soft {
+  0%,100% { transform: translateX(0); }
+  25%     { transform: translateX(-4px); }
+  75%     { transform: translateX(4px); }
+}
+
+/* Золотой текст с градиентом и бликом — для сумм выигрыша */
+.gold-text {
+  background: var(--grad-gold);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(245,197,66,.35));
+}
+.green-text {
+  background: var(--grad-green);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(34,224,122,.32));
+}
+.red-text {
+  background: var(--grad-red);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(255,59,92,.30));
+}
+.violet-text {
+  background: var(--grad-violet);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(168,85,247,.32));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ЗАГРУЗОЧНЫЙ ЭКРАН (рисуется в index.html до монтирования React)
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes splash-ring {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes splash-glow {
+  0%,100% { opacity: .55; transform: scale(1); }
+  50%     { opacity: 1;   transform: scale(1.06); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ДОСТУПНОСТЬ И ЭКОНОМИЯ РЕСУРСОВ
+   Пользователь, попросивший меньше движения, получает статичный интерфейс:
+   анимации гасятся, но дизайн (градиенты, свечение, стекло) остаётся.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+  .ambient__aurora { animation: none !important; }
+}

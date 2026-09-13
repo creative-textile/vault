@@ -11,8 +11,16 @@ import SafeDepositPrompt from '../common/SafeDepositPrompt';
 import { isSafePromptMuted } from '../../utils/safePrompt';
 import { useNotifications } from '../../stores/notifications';
 import { tabStore, duelSeenKey } from '../../utils/tabStore';
+import { sfx } from '../../audio';
 
 type DuelPhase = 'flipping' | 'result';
+
+/** Крупная победа: выигрыш удвоил ставку или больше (порог как в ракете). */
+function bigWin(prize: number, amount: number): boolean {
+  const p = Number(prize) || 0;
+  const a = Number(amount) || 0;
+  return p - a >= Math.max(1, a);
+}
 
 export default function DuelGame() {
   const { id } = useParams();
@@ -85,6 +93,9 @@ export default function DuelGame() {
           setPhase('result');
         } else {
           setPhase('flipping');
+          // Подброс и скрещивание клинков: дуэль началась
+          sfx.sword();
+          sfx.coinFlip();
         }
         
         setResult(res.result || 'heads');
@@ -120,6 +131,10 @@ export default function DuelGame() {
           setTimeout(async () => {
             if (!mounted) return;
             setPhase('result');
+            // Исход: победа звучит иначе, чем поражение, и дублируется
+            // вибрацией — в Telegram WebView звук часто выключен
+            if (iWon) sfx.win(bigWin(prz, amt));
+            else { sfx.lose(); sfx.haptic('error'); }
             // Исход этой дуэли показан — баланс можно обновить, но только если
             // непросмотренных свежих результатов больше нет: цифра суммарная, и
             // по ней игрок понял бы исход остальных дуэлей из списка
@@ -169,6 +184,7 @@ export default function DuelGame() {
 
   const rematch = async (mult = 1) => {
     if (!id) return;
+    sfx.sword();
     try {
       await duelApi.rematch(Number(id),mult);
       showToast('Адресный реванш отправлен сопернику');
@@ -202,22 +218,36 @@ export default function DuelGame() {
   return (
     <>
       <Header title="⚔️ Дуэль" />
-      <DuelScene phase={phase as any} result={result} trajectory={traj} />
+      {/* onFinish срабатывает в момент касания пола (не по таймеру экрана),
+          поэтому звон монеты совпадает с картинкой даже на 120 Гц */}
+      <DuelScene phase={phase as any} result={result} trajectory={traj} onFinish={() => sfx.coinLand()} />
 
       {phase === 'result' && (
         <>
-          <div className={`result-text ${won ? 'win' : 'lose'}`}>
-            {won ? '🏆 ВЫ ПОБЕДИЛИ!' : '❌ ВЫ ПРОИГРАЛИ'}
-          </div>
-          <div className="text-center" style={{fontSize:22}}>🪙 {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}</div>
+          {/* Победа — блок .bigwin (вращающийся луч, сумма золотым градиентом):
+              это момент, ради которого игрок пришёл, и он должен выглядеть
+              дорого. Поражение остаётся строгим .result-text.lose — «дорого»
+              оформленный проигрыш читался бы как издевательство. */}
+          {won ? (
+            <div className="bigwin">
+              <div className="bigwin__label">🏆 вы победили · {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}</div>
+              <div className="bigwin__amount">+${profit.toFixed(2)}</div>
+              <div className="text-dim" style={{ fontSize: 13 }}>банк ${prize.toFixed(2)} · ставка ${amount.toFixed(2)}</div>
+            </div>
+          ) : (
+            <>
+              <div className="result-text lose">❌ ВЫ ПРОИГРАЛИ</div>
+              <div className="text-center" style={{ fontSize: 20 }}>
+                🪙 {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}
+              </div>
+              <div className="result-text lose">-${amount.toFixed(2)}</div>
+            </>
+          )}
           {replayOf && (
             <div className="text-dim text-center" style={{fontSize:12, marginBottom:6}}>
               📼 Повтор дуэли от {replayOf} МСК
             </div>
           )}
-          <div className={`result-text ${won ? 'win' : 'lose'}`}>
-            {won ? `+$${profit.toFixed(2)}` : `-$${amount.toFixed(2)}`}
-          </div>
           {autoDeposited > 0 && (
             <div className="text-center text-green" style={{fontSize:14, marginTop:-8, marginBottom:8}}>
               🔒 ${autoDeposited.toFixed(2)} автоматически переведено в Сейф
@@ -251,7 +281,7 @@ export default function DuelGame() {
           <button className="btn btn-secondary mt" onClick={goBack}>↩️ К ЛОББИ</button>
           <button className="btn btn-secondary mt" onClick={goHome}>🏠 НА ГЛАВНУЮ</button>
           {won && profit >= 1 && (user?.auto_safe_percent || 0) === 0 && (
-            <button className="btn mt" style={{background:'#a855f7', color:'#fff'}} onClick={() => setShowSafe(true)}>
+            <button className="btn mt" style={{background:'var(--violet)', color:'var(--text)'}} onClick={() => setShowSafe(true)}>
               🔒 ВЛОЖИТЬ ВЫИГРЫШ В СЕЙФ
             </button>
           )}

@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { getMultiplierAt, processCashout, processCrash } from '../services/rocket';
+import { getMultiplierAt, processCashout, processCrash, claimRocketTick } from '../services/rocket';
 import { query } from '../db/pool';
 
 interface ActiveRound {
@@ -19,22 +19,26 @@ export function registerRocketHandlers(io: Server) {
     });
 
     socket.on('cashout', async (data: { round_id: number }) => {
-      const roundId = data?.round_id;
-      if (!roundId) return;
-      const r = activeRounds.get(roundId);
-      if (!r) return;
+      const roundId = Number(data?.round_id);
+      if (!Number.isInteger(roundId) || roundId <= 0) return;
+      const userId = Number(socket.data.userId);
+      if (!userId) return;
 
       const res = await query('SELECT user_id, crash_at FROM rocket_rounds WHERE id = $1', [roundId]);
-      if (!res.rows.length) return;
-      const userId = res.rows[0].user_id;
+      if (!res.rows.length) return socket.emit('error', { message: 'Раунд не найден' });
       // Проверить что текущий пользователь — владелец раунда
-      if (socket.data.userId !== userId) return;
+      if (Number(res.rows[0].user_id) !== userId) return socket.emit('error', { message: 'Не ваш раунд' });
 
       try {
-        const elapsed = (Date.now() - r.startedAt) / 1000;
+        // Время полёта: локальный интервал, если раунд тикает на этом же
+        // экземпляре, иначе серверный якорь из БД (`tick_started_at`).
+        // Прежний код при отсутствии записи в activeRounds просто возвращался
+        // без ответа — игрок нажимал «ЗАБРАТЬ» и не получал ничего, а раунд
+        // продолжал лететь (на другом инстансе или после рестарта контейнера).
+        const local = activeRounds.get(roundId);
+        const elapsed = local ? (Date.now() - local.startedAt) / 1000 : undefined;
         const result = await processCashout(roundId, userId, elapsed);
-        clearInterval(r.interval);
-        activeRounds.delete(roundId);
+        if (local) { clearInterval(local.interval); activeRounds.delete(roundId); }
         socket.emit('cashout_result', result);
         io.to(String(roundId)).emit('crash', {
           crash_at: result.result === 'win' ? result.crash_at : parseFloat(res.rows[0].crash_at)
@@ -50,8 +54,18 @@ export function registerRocketHandlers(io: Server) {
   });
 }
 
-export function startRocketRound(io: Server, roundId: number, userId: number, crashAt: number) {
-  const startedAt = Date.now();
+/**
+ * Запустить серверные тики раунда.
+ *
+ * Раунд сначала атомарно «занимается» в БД (`claimRocketTick`): если тики уже
+ * идут на другом экземпляре backend или раунд завершён, функция вернёт null и
+ * второй интервал не появится. Якорь `tick_started_at` пишется в БД, поэтому
+ * кэшаут работает и на другом инстансе, а cron может дорасчитать зависшие раунды.
+ */
+export async function startRocketRound(io: Server, roundId: number, userId: number): Promise<number | null> {
+  const claimed = await claimRocketTick(roundId, userId);
+  if (!claimed) return null;
+  const { crashAt, startedAt } = claimed;
 
   const interval = setInterval(() => {
     const elapsed = (Date.now() - startedAt) / 1000;
