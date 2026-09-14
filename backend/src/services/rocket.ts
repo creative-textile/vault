@@ -89,6 +89,23 @@ export async function getRocketLimits(bankrollOverride?: number): Promise<Rocket
   };
 }
 
+/**
+ * Лимиты ставки БЕЗ кассы — то, что разрешено отдавать игроку.
+ *
+ * `getRocketLimits()` возвращает `bankroll`, потому что он нужен серверу для
+ * проверки ставки и расчёта точки взрыва. В публичный ответ его класть нельзя:
+ * размер кассы Ракеты — внутренняя (админская) цифра, и её раскрытие позволяло
+ * игроку оценивать запас стола. Все маршруты, отвечающие клиенту, обязаны
+ * прогонять лимиты через эту функцию.
+ */
+export function publicRocketLimits(limits: RocketLimits): Omit<RocketLimits, 'bankroll'> {
+  return {
+    min_bet: limits.min_bet,
+    max_bet: limits.max_bet,
+    max_bet_percent: limits.max_bet_percent
+  };
+}
+
 export async function updateRocketBankroll(delta: number) {
   const res=await query('UPDATE rocket_bankroll SET amount=amount+$1,updated_at=NOW() WHERE id=1 AND amount+$1 >= 0 RETURNING amount',[Math.round(delta*100)/100]);
   if (!res.rows.length) throw new Error('Недостаточно средств в кассе Ракеты');
@@ -141,14 +158,18 @@ async function placeBetImpl(userId: number, betAmount: number) {
   // казино превращалось в гарантированный плюс игрока. Точка взрыва уходит
   // клиенту только вместе с событием `crash` (когда раунд уже завершён) и в
   // `cashout_result` — там она нужна лишь для анимации «призрака».
+  // Кассы в ответе НЕТ намеренно: это админская цифра. Раньше она уходила
+  // клиенту вместе с лимитами, и экран Ракеты подписывал «Лимит одной ставки:
+  // 100% кассы Ракеты ($1 837,50)» — то есть любой игрок видел размер кассы
+  // (а по нему ещё и оценивал, насколько «толстый» стол). Клиенту достаточно
+  // готового `max_bet`: он уже посчитан от кассы на сервере.
   return {
     round_id: res.rows[0].id,
     replay_seed: replaySeed,
     // `null` — лимита нет (настройка 0%): клиент рисует «Макс: без лимита»
     max_bet: maxBet,
     max_bet_unlimited: maxBet == null,
-    min_bet: minBet,
-    bankroll: Math.round((bankroll + toBankroll) * 100) / 100
+    min_bet: minBet
   };
 }
 

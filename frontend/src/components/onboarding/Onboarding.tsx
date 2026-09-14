@@ -31,7 +31,9 @@ export default function Onboarding() {
       </div>
 
       {step < screens.length - 1 ? (
-        <button className="btn" onClick={() => setStep(step + 1)}>ДАЛЕЕ →</button>
+        <button className="btn" onClick={() => setStep(step + 1)}>
+          ДАЛЕЕ <Icon name="chevronRight" size={16} strokeWidth={2.4} />
+        </button>
       ) : (
         <button className="btn btn-green btn-big" onClick={setOnboardingDone}>
           <Icon name="rocket" size={18} strokeWidth={2} /> Начать игру

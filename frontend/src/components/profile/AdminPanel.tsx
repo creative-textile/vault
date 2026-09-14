@@ -131,7 +131,7 @@ export default function AdminPanel() {
             <div style={{fontSize:12,marginTop:6}}>Пользователи ${fmt(reconciliation.user_accounts?.balance)} · Сейф ${fmt(reconciliation.obligations?.safe)} · Vault ${fmt(reconciliation.obligations?.vault_principal)}</div>
             <div style={{fontSize:12,marginTop:6}}>Нарушения: баланс {reconciliation.violations?.negative_or_over_reserved||0} · резервы дуэлей {reconciliation.violations?.duel_reserve_mismatch||0} · журнал {reconciliation.violations?.transaction_tail_mismatch||0}</div>
             <div className="text-dim" style={{fontSize:11,marginTop:6}}>Проверено {new Date(reconciliation.checked_at).toLocaleString('ru-RU')}</div>
-            <button className="btn btn-small btn-secondary mt" onClick={()=>adminApi.reconciliation().then(setReconciliation).catch((e:any)=>showToast(e.message))}>↻ Проверить снова</button>
+            <button className="btn btn-small btn-secondary mt" onClick={()=>adminApi.reconciliation().then(setReconciliation).catch((e:any)=>showToast(e.message))}><Icon name="refresh" size={13} strokeWidth={2.2} /> Проверить снова</button>
           </div>}
           <div className="card">
             <div className="card-title"><Icon name="calendar" size={16} /> Период: {rangeFrom} — {rangeTo}</div>
@@ -149,7 +149,7 @@ export default function AdminPanel() {
           <div className="card">
             <h3 className="admin-h admin-h--gold"><Icon name="chart" size={15} /> Статистика</h3>
             <div className="history-item"><span>Всего пользователей:</span><b>{stats.users_count}</b></div>
-            <div className="history-item"><span>🆕 Новых за период:</span><span className="text-green">+{stats.new_users_range}</span></div>
+            <div className="history-item"><span className="row-label"><Icon name="sparkles" size={14} /> Новых за период:</span><span className="text-green">+{stats.new_users_range}</span></div>
             <div className="history-item"><span>Активных за период:</span><span>{stats.active_range}</span></div>
             <div className="history-item"><span className="row-label"><Icon name="dice" size={14} /> Оборот (ставки)</span><span>${fmt(stats.total_turnover)}</span></div>
           </div>
@@ -574,7 +574,7 @@ export default function AdminPanel() {
                 style={{background: payoutFilter === v ? 'var(--gold)' : 'var(--bg-3)', color: payoutFilter === v ? 'var(--bg)' : 'var(--text)'}}
                 onClick={() => setPayoutFilter(v as any)}>{label}</button>
             ))}
-            <button className="btn btn-small btn-secondary" onClick={loadPayouts}>↻ Обновить</button>
+            <button className="btn btn-small btn-secondary" onClick={loadPayouts}><Icon name="refresh" size={13} strokeWidth={2.2} /> Обновить</button>
           </div>
           <div className="scroll-list" style={{maxHeight:520, overflowY:'auto'}}>
             {payouts.map((w: any) => (

@@ -1194,10 +1194,21 @@ const finish = () => {
       bigBet);
     await setSettingLocal('rocket_max_bet_percent', '100');
     const limBack = await rocketSvc.getRocketLimits();
-    check('лимиты отдаются вместе с кассой одним ответом (для подписи «Макс:»)',
+    check('серверные лимиты содержат кассу (нужна для проверки ставки и точки взрыва)',
       typeof limBack.bankroll === 'number' && typeof limBack.min_bet === 'number'
         && (limBack.max_bet === null || limBack.max_bet > 0),
       limBack);
+
+    // Касса — админская цифра: в ответ игроку она попадать не должна. Раньше
+    // `/api/rocket/bankroll` и `/api/rocket/start` отдавали её целиком, и экран
+    // Ракеты подписывал «Лимит одной ставки: 100% кассы Ракеты ($1 837,50)».
+    const publicLim = rocketSvc.publicRocketLimits(limBack);
+    check('публичные лимиты НЕ раскрывают кассу Ракеты',
+      !('bankroll' in publicLim) && typeof publicLim.min_bet === 'number'
+        && 'max_bet' in publicLim && 'max_bet_percent' in publicLim,
+      publicLim);
+    check('ответ ставки тоже без кассы',
+      !('bankroll' in bigBet) && Number.isInteger(bigBet.round_id), Object.keys(bigBet));
 
     // ── Демо-пополнение: вне демо-режима денег не печатает ───────────────
     const tonSvc = require(path.join(BACKEND, 'src/services/ton.ts'));

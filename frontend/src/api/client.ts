@@ -158,7 +158,12 @@ export const walletApi = {
 export const rocketApi = {
   start: (bet: number) => api('/api/rocket/start', { method: 'POST', body: JSON.stringify({ bet }) }),
   history: (limit = 50) => api(`/api/rocket/history?limit=${limit}`),
-  bankroll: () => api('/api/rocket/bankroll')
+  /**
+   * Лимиты ставки Ракеты. Путь исторически называется `/bankroll`, но кассу он
+   * больше не отдаёт (это админская цифра) — только `min_bet`, `max_bet`
+   * (`null` = без лимита) и `max_bet_percent`.
+   */
+  limits: () => api('/api/rocket/bankroll')
 };
 
 export const duelApi = {

@@ -399,12 +399,12 @@ export default function SafeCrack() {
 
       {showWindow && phase !== 'done' && (
         <div className="timer" style={{ color: (windowLeft as number) < 15000 ? 'var(--red)' : undefined }}>
-          ⏱ Нужно взломать сейф за: {fmtWindow(windowLeft as number)}
+          <Icon name="timer" size={14} strokeWidth={2.1} /> Нужно взломать сейф за: {fmtWindow(windowLeft as number)}
         </div>
       )}
       {windowClosed && phase !== 'done' && (
         <div className="timer" style={{ color: 'var(--red)' }}>
-          ⏱ Время вышло — результат не будет засчитан
+          <Icon name="timer" size={14} strokeWidth={2.1} /> Время вышло — результат не будет засчитан
         </div>
       )}
 

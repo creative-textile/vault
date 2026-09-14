@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import MoneyBreakdown from '../common/MoneyBreakdown';
 import BalancePanel from '../common/BalancePanel';
 import Header from '../layout/Header';
 import Icon from '../ui/Icon';
@@ -82,9 +81,10 @@ export default function Deposit() {
     {/* Тот же блок денег, что на главной и на /withdraw: сумма, которую можно
         потратить, и пилюли «где ещё лежат средства». Прежняя строка
         «Текущий баланс: $50.00 / ❄️ Заморожено…» выглядела черновиком. */}
+    {/* Пилюли «в деле» рисует сам BalancePanel — отдельный MoneyBreakdown
+        здесь задваивал их: «в деле В дуэлях $25 В сейфе $33,33» дважды подряд */}
     <BalancePanel variant="hero" label="Баланс" showTotal
       aside={<span className="balance__net">TON</span>} />
-    <MoneyBreakdown />
 
     <div className="card">
       <div className="card-title deposit-title">

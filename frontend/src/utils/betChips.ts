@@ -107,3 +107,41 @@ export function formatAmount(value: number): string {
     maximumFractionDigits: 2
   });
 }
+
+/**
+ * Сумма по умолчанию в поле ввода.
+ *
+ * Прежде в полях стояли захардкоженные числа — $100 в Сейфе, $25 в Дуэли,
+ * $10 в Ракете. Они не имели отношения к деньгам игрока: при балансе $5 поле
+ * обещало взнос, который невозможно сделать, а при $50 000 предлагало мелочь.
+ *
+ * Правило одно и совпадает с рядом кнопок `amountChips()`:
+ *  1. если `preferred` (исторический дефолт экрана или минимум игры) по карману
+ *     — оставляем его: игроку, который привык ставить $10, не подменяют ставку;
+ *  2. иначе — средний номинал кнопок (25% доступного, округлённый вниз до
+ *     красивой цифры), то есть поле и кнопки показывают одно и то же;
+ *  3. если ставить нечего — пустая строка, а не ложная цифра.
+ *
+ * @param available доступный баланс (баланс минус заморозка дуэлей)
+ * @param min       минимальная сумма игры
+ * @param max       лимит игры; `null` — лимита нет
+ * @param preferred желаемая сумма по умолчанию, если она по карману
+ */
+export function defaultAmount(
+  available: number,
+  min = 1,
+  max: number | null = null,
+  preferred?: number
+): string {
+  const { chips, all } = amountChips(available, min, max);
+  if (all == null && !chips.length) return '';
+
+  if (preferred != null && Number.isFinite(preferred)) {
+    const want = money2(preferred);
+    const spendable = all ?? 0;
+    if (want >= money2(min) && want <= spendable) return String(want);
+  }
+
+  const pick = chips.length >= 2 ? chips[1] : (chips[0] ?? all);
+  return pick == null ? '' : String(money2(pick));
+}

@@ -6,6 +6,7 @@ import Header from '../layout/Header';
 import Icon, { type IconName } from '../ui/Icon';
 import { dialog } from '../ui/Dialog';
 import { formatAmount } from '../../utils/betChips';
+import { useAmountField } from '../../utils/useAmountField';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -72,11 +73,21 @@ export default function Safe() {
   const [results, setResults] = useState<any[]>([]);
   const [showLast, setShowLast] = useState(false);
 
-  const [amount, setAmount] = useState('100');
   const [collectTime, setCollectTime] = useState(0);
   const [crackTime, setCrackTime] = useState(0);
   const [safeMinBank, setSafeMinBank] = useState(25);
   const [minBet, setMinBet] = useState(1);
+
+  // Вклад вносится из доступных денег (баланс минус резерв дуэлей). Считаем
+  // ДО хука суммы: ниже в компоненте есть ранний return «Загрузка…», а хук
+  // обязан вызываться на каждом рендере.
+  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
+
+  // Сумма по умолчанию больше не захардкожена ($100 стояло при любом балансе:
+  // у игрока с $5 поле обещало невозможный взнос, у игрока с $5 000 предлагало
+  // мелочь). Берём средний номинал тех же кнопок — 25% доступного, округлённый
+  // вниз до красивой цифры; до первого ввода игрока.
+  const [amount, setAmount] = useAmountField({ available, min: minBet });
 
   // Дедлайны в ref: объект Date в зависимостях эффекта пересоздавался на каждом
   // опросе и запускал эффект заново — отсюда бесконечные запросы /api/safe/current
@@ -233,8 +244,6 @@ export default function Safe() {
   }
 
   const collecting = collect?.status === 'collecting';
-  // Вклад вносится из доступных денег (баланс минус резерв дуэлей)
-  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
   // Итог игрока в последнем раунде: приз берём с сервера, а не считаем «×1.5»
   const prize = Number(lastDeposit?.prize || 0);
   const depAmount = Number(lastDeposit?.amount || 0);
@@ -256,9 +265,15 @@ export default function Safe() {
       {/* Номиналы от доступного баланса: прежний фиксированный ряд
           [10, 50, 100, 250, 500, 1000] не имел ничего общего с деньгами игрока */}
       <AmountChips available={available} value={amount} onChange={setAmount} min={minBet} allLabel="Всё" />
-      <button className="btn btn-big btn-green" onClick={deposit}>
+      <button
+        className="btn btn-big btn-green" onClick={deposit}
+        disabled={!(parseFloat(amount) >= minBet)}
+        type="button"
+      >
         <Icon name="deposit" size={18} strokeWidth={2} />
-        {collectDeposit ? 'Добавить' : 'Внести'} ${formatAmount(parseFloat(amount) || 0)}
+        {parseFloat(amount) >= minBet
+          ? <>{collectDeposit ? 'Добавить' : 'Внести'} ${formatAmount(parseFloat(amount))}</>
+          : <>Минимум ${formatAmount(minBet)}</>}
       </button>
     </>
   );
@@ -296,7 +311,9 @@ export default function Safe() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
             <div className="safe-live__title"><Icon name="flame" size={15} strokeWidth={2.1} /> Сейф #{safe.id} — идёт взлом</div>
             <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: 'nowrap', color: crackTime < 15000 ? 'var(--red)' : undefined }}>
-              {crackTime > 0 ? `⏱ ${timeToStr(crackTime)}` : '⏳ подводим итоги…'}
+              {crackTime > 0
+                ? <><Icon name="timer" size={13} strokeWidth={2.1} /> {timeToStr(crackTime)}</>
+                : <><Icon name="clock" size={13} strokeWidth={2.1} /> подводим итоги…</>}
             </div>
           </div>
           <div className="text-dim" style={{ fontSize: 12, marginTop: 4 }}>
@@ -323,7 +340,7 @@ export default function Safe() {
             <span className="pill pill-active">сбор</span>
           </div>
 
-          <div className="timer">⏰ {timeToStr(collectTime)}</div>
+          <div className="timer"><Icon name="timer" size={14} strokeWidth={2.1} /> {timeToStr(collectTime)}</div>
           <div className="text-center text-dim" style={{ fontSize: 12, marginTop: -4 }}>
             {collect.crack_at_msk ? `взлом в ${collect.crack_at_msk} МСК` : 'до взлома'}
           </div>

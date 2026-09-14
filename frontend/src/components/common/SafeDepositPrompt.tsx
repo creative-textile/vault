@@ -7,6 +7,17 @@
  * Теперь это обычная тёмная карточка с одним акцентом: суммой вклада.
  * Все стили вынесены в `app.css` (классы `safe-prompt__*`), инлайновых
  * `style={{…}}` с цветами больше нет.
+ *
+ * Прогноз приза считается ОТ ВСЕГО ВКЛАДА в раунд, а не только от новой суммы:
+ * игрок, который уже внёс $150 и добавляет $85,86, участвует в розыгрыше с
+ * $235,86, и прежние «возможный приз $128,79» выглядели как обман. Существующий
+ * вклад берётся из `/api/safe/current` (`my_collecting_deposit`).
+ *
+ * Нижняя часть разделена на две смысловые группы: «внести» (зелёная кнопка +
+ * чекбокс автовклада) и «не вносить» (кнопка «Пропустить» + тихий чекбокс
+ * «больше не предлагать»). Раньше чекбокс автовклада стоял вплотную к
+ * «Пропустить», а обе кнопки были одинаково невзрачными — группа «согласен»
+ * визуально склеивалась с группой «отказ».
  */
 import { useState, useEffect } from 'react';
 import { safeApi, profileApi, publicConfig } from '../../api/client';
@@ -34,6 +45,8 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
   const [mutePrompts, setMutePrompts] = useState(false);
   // Множитель приза тоже из настроек: «×1.5» в вёрстке расходилось с сервером
   const [payoutMult, setPayoutMult] = useState(1.5);
+  /** Сколько игрок УЖЕ внёс в раунд, который сейчас собирает вклады. */
+  const [already, setAlready] = useState(0);
 
   useEffect(() => {
     publicConfig().then((c: any) => {
@@ -41,6 +54,10 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
       if (Number.isFinite(m) && m > 0) setPayoutMult(m);
     }).catch(() => {});
     safeApi.current().then((s: any) => {
+      // Существующий вклад — из того же ответа: он относится именно к сейфу,
+      // который собирает взносы (то есть к тому, куда ляжет эта сумма)
+      const prev = Number(s?.my_collecting_deposit?.amount) || 0;
+      if (prev > 0) setAlready(prev);
       // Время взлома берём у сейфа, в который реально идёт вклад:
       // во время взлома/после розыгрыша это уже сейф следующего дня
       const target = s?.collecting_safe || s?.safe;
@@ -62,7 +79,9 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
 
   const amount = Math.round(profit * (percent / 100) * 100) / 100;
   const canDeposit = amount >= 1;
-  const prizeForecast = Math.round(amount * payoutMult * 100) / 100;
+  /** Весь вклад в раунд после этого взноса — именно с него считается приз. */
+  const totalInSafe = Math.round((already + amount) * 100) / 100;
+  const prizeForecast = Math.round(totalInSafe * payoutMult * 100) / 100;
 
   const skip = () => {
     if (mutePrompts) muteSafePrompt();
@@ -109,11 +128,23 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
           <div className="safe-prompt__sum">
             <span className="safe-prompt__sum-label">вкладываем</span>
             <b className="safe-prompt__sum-value">${formatAmount(amount)}</b>
+            {/* Второй взнос в тот же раунд складывается с первым — игрок обязан
+                это видеть, иначе «вкладываем $85,86» читается как весь вклад */}
+            <span className="safe-prompt__sum-sub">
+              {already > 0
+                ? <>+ ${formatAmount(already)} уже в сейфе</>
+                : <>первый взнос в раунд</>}
+            </span>
           </div>
           <Icon name="arrowRight" size={18} strokeWidth={2} className="safe-prompt__arrow" />
           <div className="safe-prompt__sum">
             <span className="safe-prompt__sum-label">возможный приз</span>
             <b className="safe-prompt__sum-value safe-prompt__sum-value--green">${formatAmount(prizeForecast)}</b>
+            <span className="safe-prompt__sum-sub">
+              {already > 0
+                ? <>со всего вклада ${formatAmount(totalInSafe)}</>
+                : <>×{payoutMult} от ${formatAmount(amount)}</>}
+            </span>
           </div>
         </div>
         <div className="safe-prompt__note">
@@ -144,13 +175,22 @@ export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Prop
           {submitting ? 'Вносим…' : canDeposit ? `Внести $${formatAmount(amount)}` : 'Минимум $1'}
         </button>
 
+        {/* Группа «внести»: чекбокс автовклада относится к зелёной кнопке,
+            поэтому стоит прямо под ней, а не прижат к «Пропустить» */}
         <label className="safe-prompt__check">
           <input type="checkbox" checked={autoSave} onChange={e => setAutoSave(e.target.checked)} />
           <span className="safe-prompt__box"><Icon name="check" size={11} strokeWidth={3} /></span>
           Вкладывать так каждый раз — {percent}% от любого выигрыша
         </label>
 
-        <button className="btn btn-ghost" onClick={skip} type="button">
+        <div className="safe-prompt__split" aria-hidden="true" />
+
+        {/* Группа «не вносить»: «Пропустить» — заметная кнопка-альтернатива
+            (контур, а не прозрачный ghost), а «больше не предлагать» остаётся
+            тихой настройкой под ней. Раньше обе были одинаково бледными и
+            сливались в одну строку */}
+        <button className="safe-prompt__skip" onClick={skip} type="button">
+          <Icon name="close" size={14} strokeWidth={2.2} />
           Пропустить
         </button>
         <label className="safe-prompt__check safe-prompt__check--muted">

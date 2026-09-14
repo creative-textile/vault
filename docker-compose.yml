@@ -28,10 +28,23 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vault}"]
+      # Проверка идёт ЧЕРЕЗ TCP (-h 127.0.0.1), а не через unix-сокет.
+      #
+      # Это не косметика: образ postgres выполняет init.sql на временном
+      # сервере, который слушает ТОЛЬКО сокет (listen_addresses=''). Поэтому
+      # «сокетный» pg_isready становился зелёным в середине инициализации,
+      # backend стартовал по depends_on: service_healthy, получал обрыв
+      # соединения при перезапуске уже настоящего сервера и уходил в цикл
+      # «[DB] Attempt N/30 failed … Retrying in 2000ms» — те самые долгие
+      # переподключения в docker logs. TCP-проверка проходит только после
+      # полного подъёма, так что init.sql гарантированно применён.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-vault} -d ${POSTGRES_DB:-vault}"]
       interval: 3s
       timeout: 3s
-      retries: 30
+      # 60 попыток по 3 с: первая инициализация тома с init.sql на медленном
+      # диске занимает до минуты, и прежние 30 попыток могли не хватить
+      retries: 60
+      start_period: 20s
     restart: unless-stopped
 
   redis:

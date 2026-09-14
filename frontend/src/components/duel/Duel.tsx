@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
 import Icon from '../ui/Icon';
 import { formatAmount } from '../../utils/betChips';
+import { useAmountField } from '../../utils/useAmountField';
 import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -28,11 +29,15 @@ export default function Duel() {
   const nav = useNavigate();
   const [lobby, setLobby] = useState<LobbyItem[]>([]);
   const [history, setHistory] = useState<any[]>([]);
-  const [amount, setAmount] = useState('25');
+  const [minBet, setMinBet] = useState(1);
+  // Ставка по умолчанию считается от доступного баланса: прежние $25 стояли и
+  // у игрока с $3 (невозможная ставка), и у игрока с $10 000 (мелочь). Если
+  // $25 по карману — остаются $25, иначе средний номинал кнопок ниже.
+  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
+  const [amount, setAmount] = useAmountField({ available, min: minBet, preferred: 25 });
   const [creating, setCreating] = useState(false);
   /** Какая доля банка достаётся победителю (100 − комиссия игр). */
   const [winnerShare, setWinnerShare] = useState(90);
-  const [minBet, setMinBet] = useState(1);
 
   useEffect(() => {
     publicConfig().then(c => {
@@ -129,7 +134,6 @@ export default function Duel() {
   }
 
   // Ставка в дуэли делается из доступных денег (баланс минус уже висящие вызовы)
-  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
 
   return (
     <>

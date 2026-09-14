@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import MoneyBreakdown from '../common/MoneyBreakdown';
 import BalancePanel from '../common/BalancePanel';
 import AmountChips from '../common/AmountChips';
 import Header from '../layout/Header';
@@ -8,6 +7,7 @@ import { dialog } from '../ui/Dialog';
 import { vaultApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { formatAmount } from '../../utils/betChips';
+import { useAmountField } from '../../utils/useAmountField';
 
 /** Сроки вклада. `hot` — метка самого выгодного срока (вместо эмодзи «🔥»). */
 const TERMS = [
@@ -30,23 +30,9 @@ function pluralDays(n: number): string {
 export default function VaultDeposit() {
   const { user, refreshUser, showToast } = useAuth();
   const [status, setStatus] = useState<any>(null);
-  const [amount, setAmount] = useState('10');
   const [selectedTerm, setSelectedTerm] = useState(30);
   const [history, setHistory] = useState<any[]>([]);
   const [accruals, setAccruals] = useState<any[]>([]);
-
-  const load = () => vaultApi.status().then(s => {
-    setStatus(s);
-    setHistory(s.history || []);
-    const mn = s?.pool_info?.min_deposit || 10;
-    setAmount(prev => {
-      const cur = parseFloat(prev);
-      if (!cur || cur < mn) return String(mn);
-      return prev;
-    });
-  });
-
-  useEffect(() => { load(); vaultApi.accruals().then(setAccruals).catch(()=>{}); }, []);
 
   const active = status?.active_deposit;
   const maxDeposit = status?.pool_info?.max_deposit || 100;
@@ -54,6 +40,22 @@ export default function VaultDeposit() {
   const baseRate = status?.pool_info?.yesterday?.base_rate || 2.1;
   // Деньги, которые реально можно положить во вклад (баланс минус резерв дуэлей)
   const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
+
+  // Сумма вклада по умолчанию: минимум пула, если он по карману, иначе средний
+  // номинал тех же кнопок (25% доступного в границах пула). Прежние «$10»
+  // стояли в поле и при балансе $2 (вклад невозможен), и при $50 000 (мелочь),
+  // а подтягивание «до минимума» в load() перезаписывало сумму, которую игрок
+  // уже ввёл руками. Хук подставляет значение только до первого ввода.
+  const [amount, setAmount] = useAmountField({
+    available, min: minDeposit, max: maxDeposit, preferred: minDeposit
+  });
+
+  const load = () => vaultApi.status().then(s => {
+    setStatus(s);
+    setHistory(s.history || []);
+  });
+
+  useEffect(() => { load(); vaultApi.accruals().then(setAccruals).catch(()=>{}); }, []);
 
   const forecast = (days: number, mult: number) => {
     const a = parseFloat(amount) || 0;
@@ -110,9 +112,9 @@ export default function VaultDeposit() {
     <>
       <Header title="Vault Вклад" icon="gem" />
       {/* Единый блок денег: столько же, сколько на /deposit и /withdraw */}
+      {/* «Куда делись деньги, которых не хватает для нового вклада» показывают
+          пилюли внутри BalancePanel — отдельный MoneyBreakdown их задваивал */}
       <BalancePanel variant="hero" label="Доступно для вклада" showTotal />
-      {/* Куда делись деньги, которых не хватает для нового вклада */}
-      <MoneyBreakdown />
 
       {active ? (
         <>
@@ -244,9 +246,16 @@ export default function VaultDeposit() {
             </span>
           </div>
 
-          <button className="btn btn-big btn-violet" onClick={lock}>
+          {/* При пустом/слишком маленьком поле кнопка говорит, чего не хватает,
+              а не обещает «вклад $0.00» */}
+          <button
+            className="btn btn-big btn-violet" onClick={lock} type="button"
+            disabled={!(parseFloat(amount) >= minDeposit)}
+          >
             <Icon name="lock" size={18} strokeWidth={2} />
-            ОТКРЫТЬ ВКЛАД · ${formatAmount(parseFloat(amount || '0'))} на {selectedTerm} {pluralDays(selectedTerm).toUpperCase()}
+            {parseFloat(amount) >= minDeposit
+              ? <>ОТКРЫТЬ ВКЛАД · ${formatAmount(parseFloat(amount))} на {selectedTerm} {pluralDays(selectedTerm).toUpperCase()}</>
+              : <>МИНИМУМ ${formatAmount(minDeposit)}</>}
           </button>
         </>
       )}

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import MoneyBreakdown from '../common/MoneyBreakdown';
 import BalancePanel from '../common/BalancePanel';
 import Header from '../layout/Header';
 import Icon from '../ui/Icon';
@@ -69,10 +68,10 @@ export default function Withdraw() {
       <Header title="Вывести" icon="withdraw" />
 
       {/* Единый блок денег: та же карточка, что на главной и на /deposit */}
+      {/* «Почему доступно меньше, чем на балансе» объясняют пилюли внутри
+          BalancePanel; второй MoneyBreakdown рисовал их же ещё раз */}
       <BalancePanel variant="hero" label="Доступно к выводу" showTotal
         aside={<span className="balance__net">USDT · TON</span>} />
-      {/* Почему доступно меньше, чем на балансе */}
-      <MoneyBreakdown />
 
       <div className="card">
         <div className="card-title"><Icon name="coins" size={16} /> Сумма вывода</div>

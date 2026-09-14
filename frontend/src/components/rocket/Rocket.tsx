@@ -5,6 +5,7 @@ import MoneyBreakdown from '../common/MoneyBreakdown';
 import AmountChips from '../common/AmountChips';
 import Icon from '../ui/Icon';
 import { formatAmount } from '../../utils/betChips';
+import { useAmountField } from '../../utils/useAmountField';
 import Header from '../layout/Header';
 import RocketScene from '../../three/rocket/RocketScene';
 import { rocketApi, safeApi, publicConfig } from '../../api/client';
@@ -32,19 +33,21 @@ interface RocketLimits {
   /** null — лимита нет (настройка 0% от кассы) */
   max_bet: number | null;
   max_bet_percent: number;
-  bankroll: number;
+  // Кассы Ракеты здесь намеренно нет: сервер её больше не отдаёт. Размер кассы
+  // — админская цифра, и подпись «100% кассы Ракеты ($1 837,50)» раскрывала её
+  // любому игроку. Клиенту достаточно готового `max_bet`.
 }
 
 export default function Rocket() {
   const { user, refreshUser, showToast } = useAuth();
   const [phase, setPhase] = useState<Phase>('betting');
-  const [bet, setBet] = useState('10');
+
   const [history, setHistory] = useState<HistoryItem[]>([]);
   // Лимиты ставки берём с сервера: максимум — это процент от кассы Ракеты, а
   // касса меняется после каждой ставки и каждого выигрыша. Прежние `100` и
   // `minBet` из /api/config не пересчитывались, и подпись «Макс: $100» висела
   // одним значением всю сессию.
-  const [limits, setLimits] = useState<RocketLimits>({ min_bet: 1, max_bet: null, max_bet_percent: 0, bankroll: 0 });
+  const [limits, setLimits] = useState<RocketLimits>({ min_bet: 1, max_bet: null, max_bet_percent: 0 });
   const [multiplier, setMultiplier] = useState(1.0);
   const [crashAt, setCrashAt] = useState(1.0);
   const [cashoutMult, setCashoutMult] = useState(0);
@@ -70,14 +73,24 @@ export default function Rocket() {
   const minBet = limits.min_bet || 1;
   const maxBet = limits.max_bet;
 
-  /** Подтянуть лимиты и кассу. Ошибку глотаем молча: подпись не критична. */
+  // Ставка проверяется, списывается и считается по умолчанию из «доступно»
+  // (баланс минус заморозка дуэлей): цифра баланса при висящем вызове обещала
+  // больше, чем можно поставить.
+  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
+
+  // Сумма по умолчанию больше не захардкожена: $10 стояли в поле при любом
+  // балансе. Если $10 по карману — остаются $10, иначе подставляется средний
+  // номинал тех же кнопок (25% доступного, «красивая» цифра). Работает только
+  // до первого ввода игрока — набранную вручную ставку не перезаписываем.
+  const [bet, setBet] = useAmountField({ available, min: minBet, max: maxBet, preferred: 10 });
+
+  /** Подтянуть лимиты ставки. Ошибку глотаем молча: подпись не критична. */
   const refreshLimits = useCallback(() => {
-    rocketApi.bankroll().then((r: any) => {
+    rocketApi.limits().then((r: any) => {
       setLimits({
         min_bet: Number(r.min_bet) || 1,
         max_bet: r.max_bet == null ? null : Number(r.max_bet),
-        max_bet_percent: Number(r.max_bet_percent) || 0,
-        bankroll: Number(r.bankroll) || 0
+        max_bet_percent: Number(r.max_bet_percent) || 0
       });
     }).catch(() => {});
   }, []);
@@ -239,15 +252,13 @@ export default function Rocket() {
       sfx.betPlace();
       tickRef.current = createTickTracker();
       setRoundId(res.round_id);
-      // Сервер возвращает лимиты, посчитанные по кассе НА МОМЕНТ ставки:
-      // подпись «Макс» обновляется сразу, не дожидаясь следующего опроса
+      // Сервер возвращает лимиты, посчитанные НА МОМЕНТ ставки: подпись «Макс»
+      // обновляется сразу, не дожидаясь следующего опроса
       setLimits(l => ({
         ...l,
         max_bet: res.max_bet == null ? null : Number(res.max_bet),
-        max_bet_unlimited: !!res.max_bet_unlimited,
-        min_bet: Number(res.min_bet) || l.min_bet,
-        bankroll: Number(res.bankroll) || l.bankroll
-      } as RocketLimits));
+        min_bet: Number(res.min_bet) || l.min_bet
+      }));
       // crash_at сервер больше не присылает: множитель падения станет известен
       // только из события `crash` / `cashout_result`
       setCrashAt(1.0);
@@ -318,9 +329,6 @@ export default function Rocket() {
 
   const scenePhase = phase === 'win' ? 'cashed' : phase === 'lose' ? 'crashed' : phase === 'flying' ? 'flying' : 'idle';
   const betNum = parseFloat(bet) || 0;
-  // Ставка проверяется и списывается из «доступно» (баланс минус заморозка
-  // дуэлей), поэтому и номиналы кнопок считаем от этой же цифры
-  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
 
   return (
     <>
@@ -396,13 +404,15 @@ export default function Rocket() {
                 Мин: <b>${formatAmount(minBet)}</b>
               </span>
             </div>
-            {/* Лимита может не быть вовсе (настройка «0% от кассы») — это надо
-                обозначить словами, иначе «Макс: $0» читается как запрет ставки */}
-            <div className="limits-hint">
-              {maxBet == null
-                ? 'Ставка не ограничена кассой — можно внести всю доступную сумму.'
-                : `Лимит одной ставки: ${limits.max_bet_percent}% кассы Ракеты ($${formatAmount(limits.bankroll)}).`}
-            </div>
+            {/* Лимита может не быть вовсе (настройка «0%») — это надо обозначить
+                словами, иначе «Макс: $0» читается как запрет ставки. Как именно
+                лимит посчитан (процент от кассы и её размер), игроку не
+                сообщаем: касса — внутренняя цифра платформы. */}
+            {maxBet == null && (
+              <div className="limits-hint">
+                Ставка не ограничена — можно внести всю доступную сумму.
+              </div>
+            )}
           </div>
           <button className="btn btn-big btn-green btn-pulse" onClick={start}>
             <Icon name="rocket" size={18} strokeWidth={2} /> ЗАПУСТИТЬ

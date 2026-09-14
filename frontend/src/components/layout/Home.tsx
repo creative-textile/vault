@@ -183,7 +183,9 @@ export default function Home() {
           <div className="game-sub">мин. $1 · забери до взрыва</div>
         </Link>
         <Link to="/duel" className="game-tile tile-duel" onClick={() => sfx.transition()}>
-          <span className="tile-badge">
+          {/* Бейдж в цвете зала (циан), а не красный: красная плашка споривала
+              с идентичностью Дуэли и читалась как «ошибка/тревога» */}
+          <span className="tile-badge tile-badge--cyan">
             <span className="tile-badge__pre">PvP</span>
             <span className="tile-badge__mult">50/50</span>
           </span>
