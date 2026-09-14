@@ -241,10 +241,10 @@ server.listen(config.port, async () => {
     // Убедимся что настройки содержат safe_crack_hour/minute
       const defaults: Record<string,string> = {
       commission_percent:'10', withdraw_commission:'1', referral_percent:'3',
-      min_bet:'1', rocket_max_bet_percent:'50', vault_pool_percent:'15',
+      min_bet:'1', rocket_max_bet_percent:'100', vault_pool_percent:'15',
       safe_min_bank:'25', safe_min_participants:'2', beautiful_flight_chance:'3',
       vault_min_deposit:'10', vault_max_floor:'100', vault_max_multiplier:'10', dead_balance_inactive_days:'180',
-      safe_crack_hour:'21', safe_crack_minute:'0',
+      safe_crack_hour:'18', safe_crack_minute:'0',
       safe_crack_timeout_minutes: '1',
       safe_drum_speed_multiplier: '1',
       safe_payout_multiplier: '1.5',
@@ -256,6 +256,14 @@ server.listen(config.port, async () => {
     // Окно взлома по умолчанию сокращено с 2 минут до 1. Обновляем только те БД,
     // где осталось прежнее значение по умолчанию — осознанный выбор админа не трогаем.
     await query(`UPDATE settings SET value='1' WHERE key='safe_crack_timeout_minutes' AND value='2'`);
+    // Час взлома сейфа перенесён с 21:00 на 18:00 МСК (задача продукта). Так же
+    // правим только БД со старым значением ПО УМОЛЧАНИЮ: если админ сам выставил
+    // другой час, его выбор не перезаписывается.
+    await query(`UPDATE settings SET value='18' WHERE key='safe_crack_hour' AND value='21'`);
+    // Максимальная ставка Ракеты по умолчанию поднята с 50% кассы до 100%.
+    // 0% означает «лимита нет» — это осознанный выбор админа, поэтому правило
+    // затрагивает только прежнее дефолтное значение.
+    await query(`UPDATE settings SET value='100' WHERE key='rocket_max_bet_percent' AND value='50'`);
     for (const [k,v] of Object.entries(defaults)) {
       await query(`INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING`, [k,v]);
     }

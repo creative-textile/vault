@@ -6,6 +6,7 @@ import { useHasRocketFlight } from '../../utils/rocketFlight';
 import { onNotificationEvent } from '../../utils/socketEvents';
 import { holdBalance, releaseBalance } from '../../utils/balanceHold';
 import { isDuelAccepting } from '../../utils/duelTransition';
+import Icon from '../ui/Icon';
 
 /**
  * Результаты дуэлей — ОДНО модальное окно со списком.
@@ -186,7 +187,7 @@ export default function DuelResultModal() {
         border: '2px solid var(--gold)', textAlign: 'center',
         maxHeight: '88vh', display: 'flex', flexDirection: 'column'
       }}>
-        <div style={{ fontSize: 34, marginBottom: 2 }}>⚔️</div>
+        <div className="duel-result__icon"><Icon name="swords" size={30} strokeWidth={1.7} /></div>
 
         <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 2 }}>
           {queue.length === 1 ? 'РЕЗУЛЬТАТ ДУЭЛИ' : `РЕЗУЛЬТАТЫ ДУЭЛЕЙ · ${queue.length}`}
@@ -195,7 +196,7 @@ export default function DuelResultModal() {
         {/* Исход не показываем: ни словом, ни суммой, ни цветом — только факт
             броска. Всё остальное игрок увидит на экране дуэли. */}
         <div className="text-dim" style={{ fontSize: 11, marginBottom: 12 }}>
-          🪙 Монеты брошены. Исход — в броске, а не здесь.
+          <Icon name="coins" size={14} /> Монеты брошены. Исход — в броске, а не здесь.
         </div>
 
         <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
@@ -218,7 +219,7 @@ export default function DuelResultModal() {
                   {n.message || (opponent ? `Соперник: ${opponent}` : 'Монета брошена')}
                 </div>
                 <div className="text-dim" style={{ fontSize: 11, marginBottom: 10 }}>
-                  🪙 монета брошена{finishedAt ? ` · ${finishedAt} МСК` : ''}
+                  <Icon name="coins" size={13} /> монета брошена{finishedAt ? ` · ${finishedAt} МСК` : ''}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
@@ -226,7 +227,7 @@ export default function DuelResultModal() {
                     style={{ flex: 1, padding: '10px 6px', fontSize: 13 }}
                     onClick={() => closeOne(duelId)}
                   >
-                    ✖ ЗАКРЫТЬ
+                    <Icon name="close" size={14} strokeWidth={2.4} /> Закрыть
                   </button>
                   <button
                     className="btn"
@@ -243,7 +244,7 @@ export default function DuelResultModal() {
 
         {queue.length > 1 && (
           <button className="btn btn-secondary" style={{ marginBottom: 8 }} onClick={closeAll}>
-            ✖ ЗАКРЫТЬ ВСЕ ({queue.length})
+            <Icon name="close" size={14} strokeWidth={2.4} /> Закрыть все ({queue.length})
           </button>
         )}
 

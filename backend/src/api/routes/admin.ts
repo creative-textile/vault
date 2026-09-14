@@ -376,6 +376,110 @@ router.get('/users', async (req, res) => {
   }
 });
 
+/**
+ * Агрегированная статистика игрока — «в плюсе он или в минусе» одним взглядом.
+ *
+ * Считается по журналу `transactions`, а не по играм: журнал — единственный
+ * источник, где видны ВСЕ потоки (игры, дивиденды вклада, реферальные,
+ * ручные корректировки админа). Депозиты и выводы в результат НЕ входят — это
+ * движение денег, а не прибыль/убыток.
+ */
+async function buildUserStats(userId: number) {
+  const rows = (await query(
+    `SELECT type, COALESCE(game_type, 'other') AS game_type,
+            COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0) AS sum
+       FROM transactions WHERE user_id = $1
+      GROUP BY type, game_type`,
+    [userId]
+  )).rows.map(r => ({ type: r.type, game_type: r.game_type, cnt: Number(r.cnt), sum: parseFloat(r.sum) || 0 }));
+
+  const sumOf = (pred: (r: typeof rows[number]) => boolean) =>
+    Math.round(rows.filter(pred).reduce((a, r) => a + r.sum, 0) * 100) / 100;
+  const countOf = (pred: (r: typeof rows[number]) => boolean) =>
+    rows.filter(pred).reduce((a, r) => a + r.cnt, 0);
+
+  const byGame = (game: string) => {
+    const bets = Math.abs(sumOf(r => r.game_type === game && r.type === 'bet'));
+    const wins = sumOf(r => r.game_type === game && r.type === 'win');
+    return {
+      bets: Math.round(bets * 100) / 100,
+      wins: Math.round(wins * 100) / 100,
+      rounds: countOf(r => r.game_type === game && (r.type === 'bet' || r.type === 'win')),
+      net: Math.round((wins - bets) * 100) / 100
+    };
+  };
+
+  const deposited = sumOf(r => r.type === 'deposit' || r.type === 'demo_deposit');
+  const withdrawn = Math.abs(sumOf(r => r.type === 'withdraw'));
+  const bets = Math.abs(sumOf(r => r.type === 'bet'));
+  const wins = sumOf(r => r.type === 'win');
+  const referral = sumOf(r => r.type === 'referral');
+  const dividends = sumOf(r => r.type === 'dividend');
+  const adjustments = sumOf(r => r.type === 'admin_adjust');
+  const gamesNet = Math.round((wins - bets) * 100) / 100;
+  const totalNet = Math.round((gamesNet + referral + dividends + adjustments) * 100) / 100;
+
+  return {
+    deposited, withdrawn, bets, wins, referral, dividends, adjustments,
+    /** Итог только по играм: >0 — игрок выигрывает у платформы */
+    games_net: gamesNet,
+    /** Итог со всеми начислениями (игры + дивиденды + рефералы + корректировки) */
+    total_net: totalNet,
+    games: { rocket: byGame('rocket'), duel: byGame('duel'), safe: byGame('safe'), vault: byGame('vault') }
+  };
+}
+
+/** Рефералы конкретного игрока — по именам, с их оборотом. */
+async function buildReferrals(userId: number) {
+  // Один запрос с LEFT JOIN вместо подзапроса на каждого реферала: прежний
+  // вариант `getReferralStats()` делал N+1 обращений к БД и на рефоводе с
+  // сотней приглашённых подвешивал карточку пользователя.
+  //
+  // Ставки пишутся отрицательными, поэтому «оборот» считаем арифметикой, а не
+  // через abs(): так запрос не зависит от того, реализована ли функция для
+  // конкретного числового типа (в тестовой in-memory БД её нет).
+  const rows = await query(
+    `SELECT u.id, u.username, u.created_at, u.banned,
+            COALESCE(SUM(CASE WHEN t.type = 'bet' THEN (CASE WHEN t.amount < 0 THEN -t.amount ELSE t.amount END) ELSE 0 END), 0) AS total_bets,
+            COALESCE(SUM(CASE WHEN t.type = 'bet' THEN 1 ELSE 0 END), 0)::int AS bets_count
+       FROM users u
+       LEFT JOIN transactions t ON t.user_id = u.id
+      WHERE u.referred_by = $1
+      GROUP BY u.id, u.username, u.created_at, u.banned
+      ORDER BY u.id DESC`,
+    [userId]
+  );
+  const inviter = await query(
+    `SELECT p.id, p.username FROM users p JOIN users c ON c.referred_by = p.id WHERE c.id = $1`,
+    [userId]
+  );
+  const earned = await query(
+    `SELECT COALESCE(SUM(amount), 0) AS earned FROM transactions WHERE user_id = $1 AND type = 'referral'`,
+    [userId]
+  );
+  const referralPercent = parseFloat((await getSetting('referral_percent')) || '3');
+  return {
+    invited_by: inviter.rows[0] || null,
+    /** Сколько игрок получил реферальных начислений (точные данные из журнала) */
+    earned_total: Math.round((parseFloat(earned.rows[0].earned) || 0) * 100) / 100,
+    referral_percent: referralPercent,
+    count: rows.rows.length,
+    list: rows.rows.map(r => {
+      const bets = Math.round((parseFloat(r.total_bets) || 0) * 100) / 100;
+      return {
+        id: r.id,
+        username: r.username,
+        created_at: r.created_at,
+        banned: !!r.banned,
+        bets_count: Number(r.bets_count),
+        total_bets: bets,
+        /** Оценка начислений рефоводу с этого реферала по текущему проценту */
+        earned_from: Math.round(bets * (referralPercent / 100) * 100) / 100
+      };
+    })
+  };
+}
+
 // GET /api/admin/users/:id — детальная инфа
 router.get('/users/:id', async (req, res) => {
   try {
@@ -430,7 +534,10 @@ router.get('/users/:id', async (req, res) => {
       })),
       rockets: rockets.rows.map(r => ({ ...r, bet: parseFloat(r.bet), profit: parseFloat(r.profit), crash_at: parseFloat(r.crash_at) })),
       duels: duels.rows.map(r => ({ ...r, amount: parseFloat(r.amount) })),
-      safes: safes.rows.map(r => ({ ...r, amount: parseFloat(r.amount), prize: parseFloat(r.prize) }))
+      safes: safes.rows.map(r => ({ ...r, amount: parseFloat(r.amount), prize: parseFloat(r.prize) })),
+      // Задачи админки: подробная статистика игрока (в плюсе/минусе) и его рефералы
+      stats: await buildUserStats(id),
+      referrals: await buildReferrals(id)
     });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -490,10 +597,10 @@ router.get('/settings', async (_req, res) => {
   ];
   const defaults: Record<string, string> = {
     commission_percent: '10', withdraw_commission: '1', referral_percent: '3',
-    min_bet: '1', rocket_max_bet_percent: '50', vault_pool_percent: '15',
+    min_bet: '1', rocket_max_bet_percent: '100', vault_pool_percent: '15',
     safe_min_bank: '25', safe_min_participants: '2', beautiful_flight_chance: '3',
     vault_min_deposit: '10', vault_max_floor: '100', vault_max_multiplier: '10',
-    safe_crack_hour: '21', safe_crack_minute: '0', safe_crack_timeout_minutes: '1', safe_drum_speed_multiplier: '1',
+    safe_crack_hour: '18', safe_crack_minute: '0', safe_crack_timeout_minutes: '1', safe_drum_speed_multiplier: '1',
     project_start_date: '2026-01-01'
   };
   const out: Record<string, string> = {};
@@ -502,11 +609,11 @@ router.get('/settings', async (_req, res) => {
     withdraw_commission: 'Комиссия вывода (%)',
     referral_percent: 'Реферальный процент (%)',
     min_bet: 'Минимальная ставка ($)',
-    rocket_max_bet_percent: 'Макс. ставка Ракеты (% от кассы)',
+    rocket_max_bet_percent: 'Макс. ставка Ракеты (% от кассы, 0 — без лимита)',
     vault_pool_percent: 'Отчисления в ПУЛ ВКЛАД (%)',
     safe_min_bank: 'Мин. банк Сейфа ($)',
     safe_min_participants: 'Мин. участников Сейфа',
-    beautiful_flight_chance: 'Шанс красивого полёта (%)',
+    beautiful_flight_chance: 'Шанс красивого полёта (%) — внутренняя настройка',
     vault_min_deposit: 'Мин. вклад ВАУЛЬТ ($)',
     vault_max_floor: 'Минимальный максимум вклада ($)',
     vault_max_multiplier: 'Максимум: множитель вчерашнего пула',
@@ -531,7 +638,7 @@ router.get('/settings', async (_req, res) => {
 // POST /api/admin/settings
 router.post('/settings', async (req, res) => {
   try {
-    const ranges:Record<string,[number,number]>={commission_percent:[0,50],withdraw_commission:[0,20],referral_percent:[0,50],min_bet:[0.01,1000000],rocket_max_bet_percent:[1,100],vault_pool_percent:[0,100],safe_min_bank:[0,10000000],safe_min_participants:[1,100000],beautiful_flight_chance:[0,100],vault_min_deposit:[0.01,10000000],vault_max_floor:[0.01,10000000],vault_max_multiplier:[0.01,1000],safe_crack_hour:[0,23],safe_crack_minute:[0,59],safe_crack_timeout_minutes:[0.1,1440],safe_drum_speed_multiplier:[0.1,10]};
+    const ranges:Record<string,[number,number]>={commission_percent:[0,50],withdraw_commission:[0,20],referral_percent:[0,50],min_bet:[0.01,1000000],rocket_max_bet_percent:[0,1000000],vault_pool_percent:[0,100],safe_min_bank:[0,10000000],safe_min_participants:[1,100000],beautiful_flight_chance:[0,100],vault_min_deposit:[0.01,10000000],vault_max_floor:[0.01,10000000],vault_max_multiplier:[0.01,1000],safe_crack_hour:[0,23],safe_crack_minute:[0,59],safe_crack_timeout_minutes:[0.1,1440],safe_drum_speed_multiplier:[0.1,10]};
     for (const [k,v] of Object.entries(req.body)) {
       if(k==='project_start_date') { if(!/^\d{4}-\d{2}-\d{2}$/.test(String(v))) throw new Error('Некорректная дата'); }
       else { const range=ranges[k],n=Number(v); if(!range||!Number.isFinite(n)||n<range[0]||n>range[1]) throw new Error(`Некорректная настройка: ${k}`); }

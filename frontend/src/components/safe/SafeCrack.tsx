@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
+import Icon from '../ui/Icon';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -301,7 +302,7 @@ export default function SafeCrack() {
         const shown = Number.isFinite(r?.crack_time_ms) ? r.crack_time_ms : totalTime;
         setMyTime(shown);
         sfx.confirm();
-        showToast(`✅ Код собран за ${(shown / 1000).toFixed(2)} с`);
+        showToast(`Код собран за ${(shown / 1000).toFixed(2)} с`);
         refreshUser();
         // Все участники сдали результат — сервер подвёл итоги досрочно
         if (r?.finished) setFinished(true);
@@ -363,7 +364,7 @@ export default function SafeCrack() {
     if (done.length === 3) submit(done);
   };
 
-  if (!safe) return <><Header title="🔒 ВЗЛОМ СЕЙФА" /><div className="text-center mt">Загрузка...</div></>;
+  if (!safe) return <><Header title="ВЗЛОМ СЕЙФА" icon="lockOpen" /><div className="text-center mt">Загрузка...</div></>;
 
   // До открытия кода сервер присылает null: показывать 0-0-0 нельзя — игрок
   // принял бы их за настоящий код (и барабаны «остановились» бы на нуле).
@@ -374,13 +375,13 @@ export default function SafeCrack() {
 
   return (
     <>
-      <Header title="🔒 ВЗЛОМ СЕЙФА" />
+      <Header title="ВЗЛОМ СЕЙФА" icon="lockOpen" />
 
       {/* Какой аккаунт играет сейчас: при нескольких вкладках/браузерах это
           единственное место, где видно, чей результат засчитывается */}
       {user && (
         <div className="text-dim text-center" style={{ fontSize: 12, margin: '2px 0 6px' }}>
-          👤 играет @{user.username || 'demo'}
+          <Icon name="user" size={13} strokeWidth={2} /> играет @{user.username || 'demo'}
         </div>
       )}
 
@@ -473,7 +474,7 @@ export default function SafeCrack() {
                     {shownDigit}
                   </div>
                   <div className="drum__time" style={isStopped ? { color: 'var(--green)' } : undefined}>
-                    {isStopped ? `✓ ${(taps[i]! / 1000).toFixed(2)} с` : isFlash ? 'промах — крутится дальше' : 'крутится'}
+                    {isStopped ? `${(taps[i]! / 1000).toFixed(2)} с — засчитано` : isFlash ? 'промах — крутится дальше' : 'крутится'}
                   </div>
                 </div>
               );
@@ -488,7 +489,7 @@ export default function SafeCrack() {
       {phase === 'done' && (
         <>
           <div className="card mt text-center">
-            <div className="result-text win">✅ КОД СОБРАН: {code ? `${code[0]} ${code[1]} ${code[2]}` : '—'}</div>
+            <div className="result-text win"><Icon name="check" size={22} strokeWidth={2.6} /> Код собран: {code ? `${code[0]} ${code[1]} ${code[2]}` : '—'}</div>
             {myTime != null && (
               <div className="text-accent" style={{ fontWeight: 900, fontSize: 20 }}>
                 Ваше время: {(myTime / 1000).toFixed(2)} с
@@ -508,7 +509,7 @@ export default function SafeCrack() {
             </div>
             <button className="btn mt" onClick={() => goToSafeResults(nav)}>К РЕЗУЛЬТАТАМ</button>
           </div>
-          <button className="btn btn-secondary" onClick={() => nav('/')}>🏠 НА ГЛАВНУЮ</button>
+          <button className="btn btn-secondary" onClick={() => nav('/')}><Icon name="home" size={16} strokeWidth={2} /> На главную</button>
         </>
       )}
 

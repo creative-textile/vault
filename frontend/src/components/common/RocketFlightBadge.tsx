@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { getSocket } from '../../api/socket';
 import { safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import Icon from '../ui/Icon';
 import {
   useRocketFlight, getFlight, setFlightMultiplier, clearFlight, isRocketScreenActive
 } from '../../utils/rocketFlight';
@@ -45,7 +46,7 @@ export default function RocketFlightBadge() {
       if (!f) return;
       if (Date.now() - cashedAtRef.current < 2000) return; // это не падение, а конец раунда после кэшаута
       if (isRocketScreenActive()) return; // там свой экран «РАКЕТА УПАЛА»
-      showToast(`🚀 Ракета упала на x${(f.multiplier || 1).toFixed(2)} — ставка сгорела`);
+      showToast(`Ракета упала на x${(f.multiplier || 1).toFixed(2)} — ставка сгорела`);
     };
 
     const onCashout = async (res: any) => {
@@ -56,13 +57,13 @@ export default function RocketFlightBadge() {
       if (!wasHere) return;
       if (res?.result !== 'win') {
         // Сервер ответил too_late: раунд уже упал, забрать не успели
-        if (res?.result === 'too_late') showToast('🚀 Ракета упала — забрать выигрыш не успели');
+        if (res?.result === 'too_late') showToast('Ракета упала — забрать выигрыш не успели');
         return;
       }
 
       const profit = Number(res.profit) || 0;
       await refreshUser().catch(() => {});
-      showToast(`🚀 Забрал на x${res.cashout_at}: ${profit >= 0 ? '+' : '−'}$${Math.abs(profit).toFixed(2)}`);
+      showToast(`Забрал на x${res.cashout_at}: ${profit >= 0 ? '+' : '−'}$${Math.abs(profit).toFixed(2)}`);
 
       // Автовклад в сейф работает так же, как на экране ракеты: иначе игрок,
       // забравший выигрыш из бейджа, молча лишился бы этой настройки
@@ -72,7 +73,7 @@ export default function RocketFlightBadge() {
         if (amt >= 1) {
           try {
             await safeApi.deposit(amt);
-            showToast(`🔒 $${amt.toFixed(2)} автоматически в Сейф`);
+            showToast(`$${amt.toFixed(2)} автоматически внесено в Сейф`);
             await refreshUser().catch(() => {});
           } catch (e: any) {
             console.warn('[safe] автовклад не прошёл:', e?.message || e);
@@ -114,12 +115,12 @@ export default function RocketFlightBadge() {
         borderRadius: 14, boxShadow: '0 6px 20px rgba(0,0,0,0.55)', maxWidth: '94vw'
       }}
     >
-      <span style={{ fontWeight: 900, color: 'var(--gold)', fontSize: 16, whiteSpace: 'nowrap' }}>
-        🚀 x{mult.toFixed(2)}
+      <span className="flight-badge__mult">
+        <Icon name="rocket" size={16} strokeWidth={2} /> x{mult.toFixed(2)}
       </span>
-      <span className="text-dim" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>в полёте</span>
+      <span className="flight-badge__hint">в полёте</span>
       <button className="btn btn-green btn-small" onClick={cashout} disabled={cashing}>
-        {cashing ? '...' : 'ЗАБРАТЬ'}
+        {cashing ? '…' : 'Забрать'}
       </button>
     </div>
   );

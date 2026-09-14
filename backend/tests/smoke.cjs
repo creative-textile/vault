@@ -82,10 +82,14 @@ require('ts-node').register({
 });
 
 const DDL = [
+  // Колонки синхронизированы с src/db/init.sql: карточка пользователя в админке
+  // читает banned/ban_reason/pin_hash/адреса, и без них маршрут падал в тестах.
   `CREATE TABLE users (id SERIAL PRIMARY KEY, telegram_id BIGINT UNIQUE NOT NULL, username VARCHAR(64),
      balance DECIMAL DEFAULT 0, frozen_balance DECIMAL DEFAULT 0, referred_by INTEGER,
+     deposit_address VARCHAR(128), withdraw_address VARCHAR(128), pin_hash VARCHAR(256), ref_code VARCHAR(16),
      auto_safe_percent INTEGER DEFAULT 0, notif_duel BOOLEAN DEFAULT TRUE, notif_safe BOOLEAN DEFAULT TRUE,
      notif_referral BOOLEAN DEFAULT TRUE, notif_vault BOOLEAN DEFAULT TRUE, notified_dead BOOLEAN DEFAULT FALSE,
+     banned BOOLEAN DEFAULT FALSE, ban_reason TEXT,
      dead_deadline TIMESTAMP, created_at TIMESTAMP DEFAULT NOW(), last_active TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE transactions (id SERIAL PRIMARY KEY, user_id INTEGER, type VARCHAR(32), amount DECIMAL,
      balance_after DECIMAL, game_type VARCHAR(32), game_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())`,
@@ -587,6 +591,44 @@ const finish = () => {
       Object.keys(r.json?.values || {}).every(k => grouped.has(k)),
       Object.keys(r.json?.values || {}).filter(k => !grouped.has(k)));
 
+    // ── Публичный конфиг: цифры для сноски и лимита Ракеты ──────────────
+    r = await call('GET', '/api/config');
+    check('/api/config отдаёт комиссию игр (сноска на главном экране)',
+      r.json?.commission_percent === 10, r.json);
+    check('лимит ставки Ракеты по умолчанию 100% кассы (было 50%)',
+      r.json?.rocket_max_bet_percent === 100, r.json?.rocket_max_bet_percent);
+
+    // ── Валидатор настроек: 0% = «без лимита», больше 100% разрешено ────
+    r = await call('POST', '/api/admin/settings', { rocket_max_bet_percent: '0' });
+    check('настройка 0% (без лимита) принимается', r.status === 200, r);
+    r = await call('POST', '/api/admin/settings', { rocket_max_bet_percent: '250' });
+    check('настройка больше 100% кассы принимается', r.status === 200, r);
+    r = await call('POST', '/api/admin/settings', { rocket_max_bet_percent: '-5' });
+    check('отрицательный процент отклонён', r.status === 400, r);
+    r = await call('GET', '/api/admin/settings');
+    check('подпись объясняет, что 0 — это отсутствие лимита',
+      /без лимита/i.test(r.json?.labels?.rocket_max_bet_percent || ''),
+      r.json?.labels?.rocket_max_bet_percent);
+    await call('POST', '/api/admin/settings', { rocket_max_bet_percent: '100' });
+
+    // ── Карточка пользователя: подробная статистика и рефералы ──────────
+    await query(`INSERT INTO users (telegram_id, username, balance, referred_by) VALUES (1003,'carol',300,1)`);
+    r = await call('GET', '/api/admin/users/1');
+    check('в карточке пользователя есть подробная статистика',
+      r.status === 200 && !!r.json?.stats
+        && typeof r.json.stats.games_net === 'number'
+        && typeof r.json.stats.total_net === 'number'
+        && !!r.json.stats.games?.rocket && !!r.json.stats.games?.duel,
+      r.json?.stats);
+    check('статистика считает депозиты и выводы отдельно от результата',
+      r.json?.stats?.deposited >= 100 && r.json?.stats?.withdrawn >= 30,
+      { deposited: r.json?.stats?.deposited, withdrawn: r.json?.stats?.withdrawn });
+    check('в карточке пользователя видны его рефералы по именам',
+      Array.isArray(r.json?.referrals?.list)
+        && r.json.referrals.list.some(x => x.username === 'carol')
+        && r.json.referrals.count === 1,
+      r.json?.referrals);
+
     // ── Токен привязан к человеку, а не к номеру строки ────────────────
     // Реальный случай: браузер хранил токен старого аккаунта, БД пересоздали,
     // тот же id достался другому человеку — и «нулевой» аккаунт сыграл чужой вклад.
@@ -750,6 +792,21 @@ const finish = () => {
     const rBob = await call('GET', `/api/duel/${duel1}`);
     check('i_won в реплее считается под того, кто смотрит',
       r.json?.i_won === true && rBob.json?.i_won === false, [r.json?.i_won, rBob.json?.i_won]);
+
+    // ── Публичный реплей дуэли: выплата, а не половина банка ────────────
+    // Ставка $25, банк $50, комиссия 10% → приз $45. Победитель получает весь
+    // приз, его чистый результат 45 − 25 = 20. Прежняя формула `prize/2 − amount`
+    // показывала «+$5.00» — в четыре раза меньше реального.
+    const { getReplay: duelReplay } = require(path.join(BACKEND, 'src/services/replay.ts'));
+    const rep = await duelReplay('duel', duel1);
+    check('в реплее дуэли чистый результат победителя = приз − ставка (20, а не 5)',
+      Number(rep?.outcome?.profit) === 20, rep?.outcome);
+    check('победитель в списке участников получил +20, проигравший −25',
+      rep?.participants?.find(p => p.won)?.net === 20
+        && rep?.participants?.find(p => !p.won)?.net === -25,
+      rep?.participants);
+    check('внутренняя метка «красивый полёт» не отдаётся в реплее',
+      rep?.outcome?.was_beautiful === undefined, rep?.outcome);
 
     // ── Деньги дуэли: банк 2×ставка, комиссия 10%, приз 90% ──────────────
     const totalPaid = (await query(
@@ -1111,6 +1168,36 @@ const finish = () => {
       close(Number(staleRow.profit), -Number(staleRow.bet)), staleRow);
     check('дорасчитанный раунд не отдаёт crash_at в реплее… но попадает в историю как проигрыш',
       (await rocketSvc.getRocketHistory(50)).some(h => h.round_id === staleRound.round_id && h.cashout_at === null), null);
+
+    // ── Лимит ставки Ракеты: 100% кассы, больше 100% и «0 = без лимита» ──
+    const { setSetting: setSettingLocal } = require(path.join(BACKEND, 'src/services/revenue.ts'));
+    const { roundDownClean } = require(path.join(BACKEND, 'src/config.ts'));
+    const limDefault = await rocketSvc.getRocketLimits(1234.56);
+    check('по умолчанию максимум = 100% кассы (округление вниз до красивой цифры)',
+      limDefault.max_bet === roundDownClean(1234.56) && limDefault.max_bet_percent === 100,
+      limDefault);
+    await setSettingLocal('rocket_max_bet_percent', '250');
+    const lim250 = await rocketSvc.getRocketLimits(1000);
+    // 250% от $1000 = $2500, но лимит округляется ВНИЗ до красивой цифры
+    // (первой значащей), как и вклад VAULT: игрок видит $2000, а не $2500.
+    check('лимит может превышать кассу (250% от $1000 → $2000 после округления)',
+      lim250.max_bet === roundDownClean(2500) && lim250.max_bet === 2000
+        && lim250.max_bet > lim250.bankroll && lim250.max_bet_percent === 250, lim250);
+    await setSettingLocal('rocket_max_bet_percent', '0');
+    const lim0 = await rocketSvc.getRocketLimits(1000);
+    check('0% означает «лимита нет»: max_bet === null',
+      lim0.max_bet === null && lim0.max_bet_percent === 0, lim0);
+    await query(`UPDATE users SET balance = 500000 WHERE id = 1`);
+    const bigBet = await rocketSvc.placeBet(1, 100000);
+    check('при 0% принимается ставка, превышающая кассу',
+      Number.isInteger(bigBet.round_id) && bigBet.max_bet === null && bigBet.max_bet_unlimited === true,
+      bigBet);
+    await setSettingLocal('rocket_max_bet_percent', '100');
+    const limBack = await rocketSvc.getRocketLimits();
+    check('лимиты отдаются вместе с кассой одним ответом (для подписи «Макс:»)',
+      typeof limBack.bankroll === 'number' && typeof limBack.min_bet === 'number'
+        && (limBack.max_bet === null || limBack.max_bet > 0),
+      limBack);
 
     // ── Демо-пополнение: вне демо-режима денег не печатает ───────────────
     const tonSvc = require(path.join(BACKEND, 'src/services/ton.ts'));

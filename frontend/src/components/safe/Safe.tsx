@@ -1,7 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import MoneyBreakdown from '../common/MoneyBreakdown';
+import AmountChips from '../common/AmountChips';
 import { Link, useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
+import Icon, { type IconName } from '../ui/Icon';
+import { dialog } from '../ui/Dialog';
+import { formatAmount } from '../../utils/betChips';
 import SafeCrackScene from '../../three/safe/SafeCrackScene';
 import { safeApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -20,7 +24,6 @@ function timeToStr(ms: number) {
   return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-const CHIPS_DEFAULTS = [10, 50, 100, 250, 500, 1000];
 
 /** Ключ флага: игрок уже видел итоги этого раунда. */
 const seenKey = resultSeenKey;
@@ -35,12 +38,12 @@ function outcomeOf(amount: number, prize: number, crackTimeMs: number | null | u
   const net = Math.round(((Number(prize) || 0) - (Number(amount) || 0)) * 100) / 100;
   if (!(prize > 0)) {
     return crackTimeMs == null
-      ? { key: 'late', icon: '⏱', title: 'НЕ УСПЕЛИ', color: 'var(--red)', net }
-      : { key: 'lose', icon: '❌', title: 'ПОРАЖЕНИЕ', color: 'var(--red)', net };
+      ? { key: 'late', icon: 'timer' as IconName, title: 'НЕ УСПЕЛИ', color: 'var(--red)', net }
+      : { key: 'lose', icon: 'close' as IconName, title: 'ПОРАЖЕНИЕ', color: 'var(--red)', net };
   }
-  if (net > 0) return { key: 'win', icon: '🏆', title: 'ПОБЕДА', color: 'var(--green)', net };
-  if (net === 0) return { key: 'even', icon: '⚖️', title: 'В НОЛЬ', color: 'var(--cyan)', net };
-  return { key: 'partial', icon: '⚠️', title: 'ЧАСТИЧНЫЙ ПРИЗ', color: 'var(--accent-2)', net };
+  if (net > 0) return { key: 'win', icon: 'trophy' as IconName, title: 'ПОБЕДА', color: 'var(--green)', net };
+  if (net === 0) return { key: 'even', icon: 'equal' as IconName, title: 'В НОЛЬ', color: 'var(--cyan)', net };
+  return { key: 'partial', icon: 'alert' as IconName, title: 'ЧАСТИЧНЫЙ ПРИЗ', color: 'var(--accent-2)', net };
 }
 
 /** «+$12.50» / «−$11.00» / «±$0.00» — прибыль или убыток относительно вклада. */
@@ -185,7 +188,7 @@ export default function Safe() {
       // Деньги ушли в сейф: звон монет и подтверждение
       sfx.deposit();
       sfx.money();
-      showToast(`✅ $${a.toFixed(2)} внесено в СЕЙФ #${target}`);
+      showToast(`$${fmt(a)} внесено в СЕЙФ #${target}`);
       await refreshUser();
       load();
     } catch (e: any) {
@@ -195,11 +198,28 @@ export default function Safe() {
   };
 
   const cancel = async () => {
-    if (!confirm('Вернуть вклад? Призовой фонд будет уменьшен.')) return;
+    // Кастомное окно вместо `window.confirm`: в Telegram WebView нативный
+    // диалог нередко не показывается вовсе, и отмена вклада либо молча не
+    // срабатывала, либо происходила без подтверждения
+    const ok = await dialog.confirm({
+      title: 'Вернуть вклад?',
+      message: (
+        <>
+          Сумма вернётся на баланс, а призовой фонд сейфа
+          {collect ? ` #${collect.id}` : ''} уменьшится. Повторно внести вклад
+          в этот раунд можно, пока идёт сбор.
+        </>
+      ),
+      confirmText: 'Вернуть вклад',
+      cancelText: 'Оставить в сейфе',
+      tone: 'danger',
+      icon: 'lockOpen'
+    });
+    if (!ok) return;
     try {
       const r: any = await safeApi.cancel();
       sfx.refund();
-      showToast(`💸 $${fmt(r?.returned || 0)} возвращено (СЕЙФ #${r?.safe_id ?? collect?.id})`);
+      showToast(`$${fmt(r?.returned || 0)} возвращено (СЕЙФ #${r?.safe_id ?? collect?.id})`);
       await refreshUser();
       load();
     } catch (e: any) {
@@ -209,10 +229,12 @@ export default function Safe() {
   };
 
   if (!safe && !collect) {
-    return <><Header title="🔒 Сейф" onBack={backToMenu} /><div className="text-center mt">Загрузка...</div></>;
+    return <><Header title="Сейф" icon="lock" onBack={backToMenu} /><div className="text-center mt">Загрузка...</div></>;
   }
 
   const collecting = collect?.status === 'collecting';
+  // Вклад вносится из доступных денег (баланс минус резерв дуэлей)
+  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
   // Итог игрока в последнем раунде: приз берём с сервера, а не считаем «×1.5»
   const prize = Number(lastDeposit?.prize || 0);
   const depAmount = Number(lastDeposit?.amount || 0);
@@ -224,23 +246,30 @@ export default function Safe() {
 
   const depositForm = (
     <>
-      <div className="card-title">{collectDeposit ? 'Добавить ещё' : 'Внести'}</div>
-      <input type="number" className="input" value={amount} onChange={e => setAmount(e.target.value)} min={1} />
-      <div className="bet-chips">
-        {CHIPS_DEFAULTS.filter(x => x >= minBet).map(c => <div key={c} className="chip" onClick={() => { sfx.chip(); setAmount(String(c)); }}>${c}</div>)}
+      <div className="card-title">
+        <Icon name="coins" size={16} /> {collectDeposit ? 'Добавить ещё' : 'Внести в сейф'}
       </div>
+      <input
+        type="number" className="input input--amount" value={amount} inputMode="decimal"
+        onChange={e => setAmount(e.target.value)} min={minBet}
+      />
+      {/* Номиналы от доступного баланса: прежний фиксированный ряд
+          [10, 50, 100, 250, 500, 1000] не имел ничего общего с деньгами игрока */}
+      <AmountChips available={available} value={amount} onChange={setAmount} min={minBet} allLabel="Всё" />
       <button className="btn btn-big btn-green" onClick={deposit}>
-        💰 {collectDeposit ? 'ДОБАВИТЬ' : 'ВНЕСТИ'} ${(parseFloat(amount) || 0).toFixed(0)}
+        <Icon name="deposit" size={18} strokeWidth={2} />
+        {collectDeposit ? 'Добавить' : 'Внести'} ${formatAmount(parseFloat(amount) || 0)}
       </button>
     </>
   );
 
   return (
     <>
-      <Header title="🔒 Сейф" onBack={backToMenu} />
+      <Header title="Сейф" icon="lock" onBack={backToMenu} />
       {user && (
-        <div className="text-dim text-center" style={{ fontSize: 12, margin: '2px 0 8px' }}>
-          👤 @{user.username || 'demo'} · баланс ${fmt(user.balance)}
+        <div className="safe-whoami">
+          <Icon name="user" size={13} strokeWidth={2} />
+          @{user.username || 'demo'} · баланс ${fmt(user.balance)}
         </div>
       )}
       <SafeCrackScene
@@ -249,13 +278,11 @@ export default function Safe() {
         drumSpeeds={safe?.drum_speeds || undefined}
       />
 
-      <div style={{ padding: '8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
+      <div className="avail-line">
         {/* Здесь именно ДОСТУПНО (баланс минус заморозка дуэлей): подпись
             «Баланс» при таком значении врала */}
-        <span className="text-dim">Доступно:</span>
-        <span className="text-accent" style={{ fontWeight: 700, fontSize: 18 }}>
-          ${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}
-        </span>
+        <span className="avail-line__label"><Icon name="wallet" size={14} /> Доступно</span>
+        <span className="avail-line__value">${formatAmount(available)}</span>
       </div>
       <MoneyBreakdown />
 
@@ -267,7 +294,7 @@ export default function Safe() {
       {isCracking && (
         <div className="card" style={{ border: '1px solid var(--red)', background: 'rgba(255,68,68,0.08)', padding: '10px 12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>🔥 СЕЙФ #{safe.id} — ИДЁТ ВЗЛОМ</div>
+            <div className="safe-live__title"><Icon name="flame" size={15} strokeWidth={2.1} /> Сейф #{safe.id} — идёт взлом</div>
             <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: 'nowrap', color: crackTime < 15000 ? 'var(--red)' : undefined }}>
               {crackTime > 0 ? `⏱ ${timeToStr(crackTime)}` : '⏳ подводим итоги…'}
             </div>
@@ -276,15 +303,15 @@ export default function Safe() {
             Сдали результат: {Math.max(0, (safe.participants_count ?? 0) - (safe.pending_cracks ?? 0))} из {safe.participants_count}
             {safeDeposit
               ? ((safeDeposit.crack_time_ms ?? null) != null
-                ? ` · ✅ ваш результат ${(safeDeposit.crack_time_ms / 1000).toFixed(2)} с засчитан`
+                ? ` · ваш результат ${(safeDeposit.crack_time_ms / 1000).toFixed(2)} с засчитан`
                 : ' · мини-игра откроется сама')
               : ' · вы не вносили вклад в этот раунд'}
           </div>
           {safeDeposit
             ? ((safeDeposit.crack_time_ms ?? null) != null
               ? null
-              : <button className="btn btn-small mt" onClick={() => nav('/safe/crack')}>🔓 СОБРАТЬ КОД</button>)
-            : <button className="btn btn-small mt" onClick={() => nav('/safe/crack')}>👀 СМОТРЕТЬ ВЗЛОМ</button>}
+              : <button className="btn btn-small mt" onClick={() => nav('/safe/crack')}><Icon name="key" size={13} strokeWidth={2.2} /> Собрать код</button>)
+            : <button className="btn btn-small mt" onClick={() => nav('/safe/crack')}><Icon name="eye" size={13} strokeWidth={2.2} /> Смотреть взлом</button>}
         </div>
       )}
 
@@ -292,7 +319,7 @@ export default function Safe() {
       {collecting && (
         <div className="card" style={{ border: isCracking ? undefined : '1px solid rgba(255,215,0,0.35)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div className="card-title">🔒 СЕЙФ #{collect.id}</div>
+            <div className="card-title"><Icon name="lock" size={16} /> Сейф #{collect.id}</div>
             <span className="pill pill-active">сбор</span>
           </div>
 
@@ -355,14 +382,16 @@ export default function Safe() {
           >
             <div>
               <div className="card-title" style={{ margin: 0 }}>
-                {last.status === 'finished' ? `🏆 СЕЙФ #${last.id} — ВЗЛОМАН` : `⛔ СЕЙФ #${last.id} — ОТМЕНЁН`}
+                {last.status === 'finished'
+                  ? <><Icon name="trophy" size={15} /> Сейф #{last.id} — взломан</>
+                  : <><Icon name="ban" size={15} /> Сейф #{last.id} — отменён</>}
               </div>
               <div className="text-dim" style={{ fontSize: 12, marginTop: 2 }}>
                 {last.status === 'finished'
                   ? <>Банк ${fmt(last.bank)} · призовой ${fmt(last.prize_pool)} · участников {last.participants_count} · с призом {last.winners_count}</>
                   : 'Не набрал минимум — вклады возвращены'}
                 {last.status === 'finished' && lastDeposit && (
-                  <b style={{ color: out.color }}> · вы: ${fmt(prize)} {out.icon}</b>
+                  <b style={{ color: out.color }}> · вы: ${fmt(prize)} <Icon name={out.icon} size={13} strokeWidth={2.2} /></b>
                 )}
               </div>
             </div>
@@ -375,13 +404,13 @@ export default function Safe() {
 
           {showLast && last.status === 'finished' && (
             <>
-              <Link className="btn btn-small btn-secondary" state={{replayFrom:'/safe'}} to={`/replay/safe/${last.id}?player=${encodeURIComponent('@'+(user?.username||'user'))}`}>📼 Реплей и ссылка</Link>
+              <Link className="btn btn-small btn-secondary" state={{replayFrom:'/safe'}} to={`/replay/safe/${last.id}?player=${encodeURIComponent('@'+(user?.username||'user'))}`}><Icon name="replay" size={13} /> Реплей и ссылка</Link>
               {/* Исход для игрока: приз и результат «чистыми» */}
               {showOutcome && (
                 <div className="card" style={{ margin: '12px 0 0', background: `${out.color}1f`, border: `1px solid ${out.color}` }}>
                   <div className="card-title" style={{ margin: 0 }}>Ваш вклад: ${fmt(depAmount)}</div>
                   <div style={{ fontWeight: 900, fontSize: out.key === 'win' ? 26 : 22, margin: '6px 0', color: out.color }}>
-                    {out.icon} {out.title}
+                    <Icon name={out.icon} size={16} strokeWidth={2.1} /> {out.title}
                   </div>
                   <div style={{ fontSize: 17, fontWeight: 700, color: out.color }}>
                     Приз: ${fmt(prize)}{' '}
@@ -451,7 +480,7 @@ export default function Safe() {
                         }}>
                           <span>{i + 1}. {r.username}{isMe ? ' (вы)' : ''} · {timeStr}</span>
                           <span style={{ textAlign: 'right' }}>
-                            ${fmt(r.amount)} → ${fmt(r.prize)} <b>({fmtNet(o.net)})</b> {o.icon}
+                            ${fmt(r.amount)} → ${fmt(r.prize)} <b>({fmtNet(o.net)})</b> <Icon name={o.icon} size={13} strokeWidth={2.2} />
                           </span>
                         </div>
                       );

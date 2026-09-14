@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Header from '../layout/Header';
+import Icon, { type IconName } from '../ui/Icon';
+import { dialog } from '../ui/Dialog';
 import { adminApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 
@@ -85,43 +87,38 @@ export default function AdminPanel() {
   useEffect(() => { loadPayouts(); }, [loadPayouts]);
   useEffect(() => { loadTxs(); /* eslint-disable-next-line */ }, [txFilter.type, txFilter.from, txFilter.to]);
 
-  if (!stats) return <><Header title="🔧 Админ" /><div className="text-center mt">Загрузка / проверка доступа...</div></>;
+  if (!stats) return <><Header title="Админ" icon="wrench" /><div className="text-center mt">Загрузка / проверка доступа...</div></>;
 
   const rev = stats.revenue_by_source || {};
   const totalRev = Number(stats.total_revenue) || 0;
 
-  const tabs: {id: Tab; label: string; icon: string}[] = [
-    {id:'overview', label:'Обзор', icon:'📊'},
-    {id:'cashboxes', label:'Кассы', icon:'💰'},
-    {id:'users', label:'Пользователи', icon:'👥'},
-    {id:'tx', label:'Операции', icon:'📋'},
-    {id:'payouts', label:'Выплаты', icon:'📤'},
-    {id:'antifraud', label:'Антифрод', icon:'🚨'},
-    {id:'settings', label:'Настройки', icon:'⚙️'}
+  const tabs: {id: Tab; label: string; icon: IconName}[] = [
+    {id:'overview', label:'Обзор', icon:'chart'},
+    {id:'cashboxes', label:'Кассы', icon:'coins'},
+    {id:'users', label:'Пользователи', icon:'users'},
+    {id:'tx', label:'Операции', icon:'list'},
+    {id:'payouts', label:'Выплаты', icon:'withdraw'},
+    {id:'antifraud', label:'Антифрод', icon:'shield'},
+    {id:'settings', label:'Настройки', icon:'sliders'}
   ];
 
   return (
     <>
-      <Header title="🔧 АДМИН-ПАНЕЛЬ" />
+      <Header title="АДМИН-ПАНЕЛЬ" icon="wrench" />
 
-      <div style={{
-        display:'flex', gap:6, marginBottom:12, padding:'4px 2px 8px',
-        overflowX:'auto', WebkitOverflowScrolling:'touch',
-        scrollbarWidth:'thin', position:'sticky', top:0,
-        background:'linear-gradient(180deg, var(--bg-2) 80%, transparent)',
-        zIndex:10
-      }}>
+      {/* Лента разделов. Активный раздел — золотая клавиша с тёмным текстом,
+          неактивные — стеклянные: раньше цвет задавался инлайном, и эмодзи-иконки
+          рисовались системным шрифтом вразнобой с текстом. */}
+      <div className="admin-tabs">
         {tabs.map(t => (
-          <button key={t.id}
-            className="btn btn-small"
+          <button
+            key={t.id}
+            type="button"
+            className={`admin-tab${tab === t.id ? ' admin-tab--active' : ''}`}
             onClick={() => setTab(t.id)}
-            style={{
-              flex:'0 0 auto', padding:'8px 12px', fontSize:13, width:'auto',
-              background: tab === t.id ? 'var(--gold)' : 'var(--bg-3)',
-              color: tab === t.id ? 'var(--bg)' : 'var(--text)'
-            }}
           >
-            {t.icon} {t.label}
+            <Icon name={t.icon} size={15} strokeWidth={2} />
+            {t.label}
           </button>
         ))}
       </div>
@@ -129,7 +126,7 @@ export default function AdminPanel() {
       {tab === 'overview' && (
         <>
           {reconciliation && <div className="card" style={{border:`1px solid ${reconciliation.ok?'var(--green)':'var(--red)'}`}}>
-            <div className="card-title">{reconciliation.ok?'✅':'🚨'} Финансовая сверка</div>
+            <div className="card-title"><Icon name={reconciliation.ok?'check':'alert'} size={16} /> Финансовая сверка</div>
             <div className="text-dim">{reconciliation.ok?'Все инварианты соблюдены':'Обнаружены расхождения'}</div>
             <div style={{fontSize:12,marginTop:6}}>Пользователи ${fmt(reconciliation.user_accounts?.balance)} · Сейф ${fmt(reconciliation.obligations?.safe)} · Vault ${fmt(reconciliation.obligations?.vault_principal)}</div>
             <div style={{fontSize:12,marginTop:6}}>Нарушения: баланс {reconciliation.violations?.negative_or_over_reserved||0} · резервы дуэлей {reconciliation.violations?.duel_reserve_mismatch||0} · журнал {reconciliation.violations?.transaction_tail_mismatch||0}</div>
@@ -137,7 +134,7 @@ export default function AdminPanel() {
             <button className="btn btn-small btn-secondary mt" onClick={()=>adminApi.reconciliation().then(setReconciliation).catch((e:any)=>showToast(e.message))}>↻ Проверить снова</button>
           </div>}
           <div className="card">
-            <div className="card-title">📅 Период: {rangeFrom} — {rangeTo}</div>
+            <div className="card-title"><Icon name="calendar" size={16} /> Период: {rangeFrom} — {rangeTo}</div>
             <div style={{display:'flex', gap:8, marginTop:8}}>
               <input type="date" className="input" style={{fontSize:14, padding:'10px'}} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} />
               <input type="date" className="input" style={{fontSize:14, padding:'10px'}} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
@@ -150,32 +147,32 @@ export default function AdminPanel() {
           </div>
 
           <div className="card">
-            <h3 style={{color:'var(--gold)', margin:'0 0 8px'}}>📊 СТАТИСТИКА</h3>
+            <h3 className="admin-h admin-h--gold"><Icon name="chart" size={15} /> Статистика</h3>
             <div className="history-item"><span>Всего пользователей:</span><b>{stats.users_count}</b></div>
             <div className="history-item"><span>🆕 Новых за период:</span><span className="text-green">+{stats.new_users_range}</span></div>
             <div className="history-item"><span>Активных за период:</span><span>{stats.active_range}</span></div>
-            <div className="history-item"><span>🎰 Оборот (ставки):</span><span>${fmt(stats.total_turnover)}</span></div>
+            <div className="history-item"><span className="row-label"><Icon name="dice" size={14} /> Оборот (ставки)</span><span>${fmt(stats.total_turnover)}</span></div>
           </div>
 
           <div className="card">
-            <h3 style={{color:'var(--green)', margin:'0 0 8px'}}>💵 ПОПОЛНЕНИЯ / ВЫВОДЫ</h3>
-            <div className="history-item"><span>📥 Пополнений:</span><span>{stats.deposits_count} на ${fmt(stats.deposits_total)}</span></div>
-            <div className="history-item"><span>📤 Выводов:</span><span>{stats.withdraws_count} на ${fmt(stats.withdraws_total)}</span></div>
+            <h3 className="admin-h admin-h--green"><Icon name="coins" size={15} /> Пополнения и выводы</h3>
+            <div className="history-item"><span className="row-label"><Icon name="deposit" size={14} /> Пополнений</span><span>{stats.deposits_count} на ${fmt(stats.deposits_total)}</span></div>
+            <div className="history-item"><span className="row-label"><Icon name="withdraw" size={14} /> Выводов</span><span>{stats.withdraws_count} на ${fmt(stats.withdraws_total)}</span></div>
           </div>
 
           <div className="card">
-            <h3 style={{color:'var(--gold)', margin:'0 0 8px'}}>💸 ДОХОД ПРОЕКТА: ${fmt(totalRev)}</h3>
-            <div className="history-item"><span>🚀 Ракета:</span><span className="text-green">+${fmt(rev.rocket || 0)}</span></div>
-            <div className="history-item"><span>⚔️ Дуэли:</span><span className="text-green">+${fmt(rev.duel || 0)}</span></div>
-            <div className="history-item"><span>🔒 Сейф (всего):</span><span className="text-green">+${fmt((rev.safe||0)+(rev.safe_remainder||0))}</span></div>
-            <div className="history-item"><span>📤 Комиссия выводов:</span><span className="text-green">+${fmt(rev.withdrawal || 0)}</span></div>
+            <h3 className="admin-h admin-h--gold"><Icon name="trendUp" size={15} /> Доход проекта: ${fmt(totalRev)}</h3>
+            <div className="history-item"><span className="row-label"><Icon name="rocket" size={14} /> Ракета</span><span className="text-green">+${fmt(rev.rocket || 0)}</span></div>
+            <div className="history-item"><span className="row-label"><Icon name="swords" size={14} /> Дуэли</span><span className="text-green">+${fmt(rev.duel || 0)}</span></div>
+            <div className="history-item"><span className="row-label"><Icon name="lock" size={14} /> Сейф (всего)</span><span className="text-green">+${fmt((rev.safe||0)+(rev.safe_remainder||0))}</span></div>
+            <div className="history-item"><span className="row-label"><Icon name="percent" size={14} /> Комиссия выводов</span><span className="text-green">+${fmt(rev.withdrawal || 0)}</span></div>
             {Object.entries(rev).filter(([k]) => !['rocket','duel','safe','safe_remainder','withdrawal'].includes(k)).map(([k,v]) => (
               <div key={k} className="history-item"><span>• {k}:</span><span className="text-green">+${fmt(Number(v))}</span></div>
             ))}
           </div>
 
           <div className="card">
-            <h3 style={{color:'var(--violet)', margin:'0 0 8px'}}>💎 ПУЛ ВКЛАДА</h3>
+            <h3 className="admin-h admin-h--violet"><Icon name="gem" size={15} /> Пул вклада</h3>
             <div className="history-item"><span>К распределению завтра:</span><b>${fmt(stats.vault_pool_total)}</b></div>
             <div className="history-item"><span>Заблокировано во вкладах:</span><span>${fmt(stats.vault?.total_locked)}</span></div>
             <div className="history-item"><span>Активных вкладчиков:</span><span>{stats.vault?.depositors}</span></div>
@@ -189,7 +186,7 @@ export default function AdminPanel() {
 
           {stats.recent_transactions?.length > 0 && (
             <div className="card">
-              <h3 style={{margin:'0 0 8px'}}>🕒 ПОСЛЕДНИЕ ОПЕРАЦИИ</h3>
+              <h3 className="admin-h"><Icon name="clock" size={15} /> Последние операции</h3>
               <div className="scroll-list" style={{maxHeight:280, overflowY:'auto'}}>
                 {stats.recent_transactions.map((t: any) => (
                   <div key={t.id} className="history-item" style={{fontSize:12}}>
@@ -212,7 +209,7 @@ export default function AdminPanel() {
       {tab === 'cashboxes' && (
         <>
           <div className="card card-hl">
-            <div className="card-title" style={{color:'var(--gold)', fontSize:22}}>🏦 ГЛАВНАЯ КАССА</div>
+            <div className="card-title admin-cash"><Icon name="vault" size={20} /> Главная касса</div>
             <div style={{fontSize:32, fontWeight:900, color:'var(--gold)', textAlign:'center', margin:'8px 0'}}>
               ${fmt(stats.platform_cashbox)}
             </div>
@@ -221,19 +218,19 @@ export default function AdminPanel() {
               <input className="input" style={{fontSize:14, flex:1}} type="number" placeholder="Сумма" value={seedAmt} onChange={e=>setSeedAmt(e.target.value)} />
               <button className="btn btn-small btn-green" onClick={async () => {
                 await adminApi.seedPlatform(parseFloat(seedAmt)); setSeedAmt(''); loadStats(); showToast('Касса пополнена');
-              }}>🧪 ТЕСТ +</button>
+              }}><Icon name="flask" size={13} strokeWidth={2.2} /> Тест +</button>
             </div>
             <div style={{display:'flex', gap:8, marginTop:8}}>
               <input className="input" style={{fontSize:14, flex:1}} type="number" placeholder="Сумма" value={withdrawAmt} onChange={e=>setWithdrawAmt(e.target.value)} />
               <input className="input" style={{fontSize:12, width:120}} placeholder="Коммент" value={withdrawNote} onChange={e=>setWithdrawNote(e.target.value)} />
               <button className="btn btn-small btn-danger" onClick={async () => {
                 await adminApi.withdrawPlatform(parseFloat(withdrawAmt), withdrawNote); setWithdrawAmt(''); setWithdrawNote(''); loadStats(); showToast('Выведено');
-              }}>➡️ ВЫВЕСТИ</button>
+              }}><Icon name="withdraw" size={13} strokeWidth={2.2} /> Вывести</button>
             </div>
           </div>
 
           <div className="card">
-            <div className="card-title" style={{color:'var(--blue)'}}>🚀 КАССА РАКЕТЫ</div>
+            <div className="card-title admin-cash admin-cash--blue"><Icon name="rocket" size={17} /> Касса Ракеты</div>
             <div style={{fontSize:28, fontWeight:900, color:'var(--blue)', textAlign:'center', margin:'8px 0'}}>
               ${fmt(stats.rocket_bankroll)}
             </div>
@@ -250,7 +247,7 @@ export default function AdminPanel() {
           </div>
 
           <div className="card">
-            <div className="card-title" style={{color:'var(--violet)'}}>💎 ПУЛ ВКЛАДА</div>
+            <div className="card-title admin-cash admin-cash--violet"><Icon name="gem" size={17} /> Пул вклада</div>
             <div style={{fontSize:28, fontWeight:900, color:'var(--violet)', textAlign:'center', margin:'8px 0'}}>
               ${fmt(stats.vault_pool_total)}
             </div>
@@ -265,7 +262,7 @@ export default function AdminPanel() {
 
           {stats.transfers?.length > 0 && (
             <div className="card">
-              <div className="card-title">📋 История переводов между кассами</div>
+              <div className="card-title"><Icon name="list" size={16} /> История переводов между кассами</div>
               <div className="scroll-list" style={{maxHeight:300, overflowY:'auto'}}>
                 {stats.transfers.map((t: any) => (
                   <div key={t.id} className="history-item" style={{fontSize:12}}>
@@ -286,7 +283,7 @@ export default function AdminPanel() {
 
       {tab === 'settings' && (
         <>
-          {(settingsGroups.length ? settingsGroups : [{ title: '⚙️ НАСТРОЙКИ', keys: Object.keys(settings) }]).map((g, gi) => {
+          {(settingsGroups.length ? settingsGroups : [{ title: 'НАСТРОЙКИ', keys: Object.keys(settings) }]).map((g, gi) => {
             const keys = g.keys.filter(k => k in settings);
             if (!keys.length) return null;
             return (
@@ -316,7 +313,7 @@ export default function AdminPanel() {
             if (!rest.length) return null;
             return (
               <div className="card">
-                <div className="card-title">🧩 Прочее</div>
+                <div className="card-title"><Icon name="sliders" size={16} /> Прочее</div>
                 {rest.map(k => (
                   <div key={k} className="history-item">
                     <label style={{fontSize:13, flex:1}}>{settingsLabels[k] || k}</label>
@@ -334,20 +331,22 @@ export default function AdminPanel() {
             );
           })()}
 
-          <button className="btn mt" onClick={async () => { await adminApi.setSettings(settings); showToast('Сохранено'); }}>💾 СОХРАНИТЬ ВСЕ НАСТРОЙКИ</button>
+          <button className="btn mt" onClick={async () => { await adminApi.setSettings(settings); showToast('Сохранено'); }}>
+            <Icon name="check" size={16} strokeWidth={2.4} /> Сохранить все настройки
+          </button>
         </>
       )}
 
       {tab === 'users' && (
         <>
           <div className="card">
-            <div className="card-title">👥 Пользователи</div>
+            <div className="card-title"><Icon name="users" size={16} /> Пользователи</div>
             <input className="input" style={{fontSize:14}} placeholder="Поиск по @username, ID, TG ID" value={userSearch} onChange={e=>setUserSearch(e.target.value)} />
             <div className="scroll-list" style={{maxHeight:400, overflowY:'auto', marginTop:10}}>
               {users.map((u: any) => (
                 <div key={u.id} className="history-item" style={{cursor:'pointer'}} onClick={() => adminApi.userDetail(u.id).then(setSelectedUser)}>
                   <div>
-                    <div style={{fontWeight:700}}>{u.banned ? '🚫 ' : ''}{u.username} <span className="text-dim" style={{fontSize:11}}>#{u.id} · TG:{u.telegram_id}</span></div>
+                    <div style={{fontWeight:700}}>{u.banned && <Icon name="ban" size={13} className="text-red" />}{u.username} <span className="text-dim" style={{fontSize:11}}>#{u.id} · TG:{u.telegram_id}</span></div>
                     <div className="text-dim" style={{fontSize:11}}>Рак:{u.rocket_games} · Дuel:{u.duel_games} · ${fmt(u.rocket_bet_sum)} ставок · деп ${fmt(u.deposits_sum)}</div>
                   </div>
                   <div style={{fontWeight:900, color:'var(--gold)'}}>${fmt(u.balance)}</div>
@@ -360,15 +359,19 @@ export default function AdminPanel() {
             <div className="card" style={{border:'2px solid var(--gold)'}}>
               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <div className="card-title" style={{margin:0}}>
-                  {selectedUser.user.banned ? '🚫 ' : ''}{selectedUser.user.username}
+                  {selectedUser.user.banned && <Icon name="ban" size={15} className="text-red" />} {selectedUser.user.username}
                 </div>
-                <button className="btn btn-small btn-secondary" onClick={() => setSelectedUser(null)}>✖</button>
+                <button className="btn btn-small btn-secondary" onClick={() => setSelectedUser(null)} aria-label="Закрыть">
+                  <Icon name="close" size={14} strokeWidth={2.4} />
+                </button>
               </div>
               <div className="text-dim" style={{fontSize:12, marginBottom:8}}>
                 ID: {selectedUser.user.id} · TG: {selectedUser.user.telegram_id} · рег. {new Date(selectedUser.user.created_at).toLocaleDateString('ru-RU', {timeZone:'Europe/Moscow'})}
               </div>
               <div className="history-item"><span>Баланс:</span><b style={{color:'var(--gold)'}}>${fmt(selectedUser.user.balance)}</b></div>
-              <div className="history-item"><span>Заморожено (дуэли):</span><span>${fmt(selectedUser.user.frozen_balance)}</span></div>
+              {/* «Заморожено» не объясняло, откуда взялась сумма: это резерв
+                  ставок в дуэлях, поэтому подписываем прямо «Дуэли» */}
+              <div className="history-item"><span>Дуэли (резерв):</span><span>${fmt(selectedUser.user.frozen_balance)}</span></div>
               {/* Где ещё деньги игрока: вклад в сейф и тело вклада VAULT */}
               <div className="history-item"><span>В сейфе:</span><span>${fmt(selectedUser.user.safe_locked || 0)}</span></div>
               <div className="history-item"><span>Во вкладе VAULT:</span><span>${fmt(selectedUser.user.vault_locked || 0)}</span></div>
@@ -378,7 +381,94 @@ export default function AdminPanel() {
                 + (selectedUser.user.vault_locked || 0)
               )}</b></div>
               <div className="history-item"><span>Автосейф:</span><span>{selectedUser.user.auto_safe_percent}%</span></div>
-              <div className="history-item"><span>Рефовод:</span><span>{selectedUser.user.referred_by || '—'}</span></div>
+              <div className="history-item">
+                <span>Пригласил:</span>
+                <span>
+                  {selectedUser.referrals?.invited_by
+                    ? `@${selectedUser.referrals.invited_by.username} (#${selectedUser.referrals.invited_by.id})`
+                    : (selectedUser.user.referred_by ? `ID ${selectedUser.user.referred_by}` : '— пришёл сам')}
+                </span>
+              </div>
+
+              {/* ── Подробная статистика: в плюсе игрок или в минусе ─────────
+                  Считается сервером по журналу операций (см. buildUserStats),
+                  поэтому сюда попадают и игры, и дивиденды вклада, и реферальные,
+                  и ручные корректировки. Депозиты/выводы в итог не входят — это
+                  движение денег, а не результат. */}
+              {selectedUser.stats && (
+                <div className="admin-stats">
+                  <div className="admin-stats__title">Результат игрока</div>
+                  <div className={`admin-verdict ${selectedUser.stats.total_net > 0 ? 'admin-verdict--plus' : selectedUser.stats.total_net < 0 ? 'admin-verdict--minus' : ''}`}>
+                    <span>{selectedUser.stats.total_net > 0 ? 'в плюсе' : selectedUser.stats.total_net < 0 ? 'в минусе' : 'в нуле'}</span>
+                    <b>{selectedUser.stats.total_net > 0 ? '+' : selectedUser.stats.total_net < 0 ? '−' : ''}${fmt(Math.abs(selectedUser.stats.total_net))}</b>
+                  </div>
+                  <div className="admin-stats__grid">
+                    <div><span>Ставки</span><b>${fmt(selectedUser.stats.bets)}</b></div>
+                    <div><span>Выигрыши</span><b className="text-green">${fmt(selectedUser.stats.wins)}</b></div>
+                    <div><span>Итог по играм</span><b className={selectedUser.stats.games_net >= 0 ? 'text-green' : 'text-red'}>{selectedUser.stats.games_net >= 0 ? '+' : '−'}${fmt(Math.abs(selectedUser.stats.games_net))}</b></div>
+                    <div><span>Дивиденды вклада</span><b>${fmt(selectedUser.stats.dividends)}</b></div>
+                    <div><span>Реферальные</span><b>${fmt(selectedUser.stats.referral)}</b></div>
+                    <div><span>Корректировки</span><b>${fmt(selectedUser.stats.adjustments)}</b></div>
+                    <div><span>Пополнил</span><b>${fmt(selectedUser.stats.deposited)}</b></div>
+                    <div><span>Вывел</span><b>${fmt(selectedUser.stats.withdrawn)}</b></div>
+                  </div>
+                  <div className="admin-stats__title" style={{marginTop:10}}>По играм</div>
+                  <div className="admin-games">
+                    {([
+                      ['rocket','Ракета'], ['duel','Дуэль'], ['safe','Сейф'], ['vault','Вклад']
+                    ] as const).map(([key, label]) => {
+                      const g = selectedUser.stats.games?.[key];
+                      if (!g) return null;
+                      return (
+                        <div className="admin-game" key={key}>
+                          <div className="admin-game__name">{label}</div>
+                          <div className="admin-game__rows">
+                            <span>раундов <b>{g.rounds}</b></span>
+                            <span>ставки <b>${fmt(g.bets)}</b></span>
+                            <span>выигрыши <b>${fmt(g.wins)}</b></span>
+                          </div>
+                          <div className={`admin-game__net ${g.net >= 0 ? 'text-green' : 'text-red'}`}>
+                            {g.net >= 0 ? '+' : '−'}${fmt(Math.abs(g.net))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Рефералы игрока: по именам, с оборотом каждого ────────── */}
+              {selectedUser.referrals && (
+                <div className="admin-refs">
+                  <div className="admin-stats__title">
+                    Рефералы: {selectedUser.referrals.count}
+                    {selectedUser.referrals.earned_total > 0 && (
+                      <span className="admin-refs__earned">
+                        начислено ${fmt(selectedUser.referrals.earned_total)} ({selectedUser.referrals.referral_percent}% с оборота)
+                      </span>
+                    )}
+                  </div>
+                  {selectedUser.referrals.count === 0 && (
+                    <div className="text-dim" style={{fontSize:12}}>Никого не пригласил</div>
+                  )}
+                  {selectedUser.referrals.list?.map((r: any) => (
+                    <div className="history-item" key={r.id} style={{fontSize:12}}>
+                      <div>
+                        <div style={{fontWeight:700}}>
+                          {r.banned && <Icon name="ban" size={12} className="text-red" />}@{r.username || 'без имени'}
+                          <span className="text-dim" style={{fontSize:11}}> #{r.id}</span>
+                        </div>
+                        <div className="text-dim" style={{fontSize:11}}>
+                          {r.bets_count} ставок · оборот ${fmt(r.total_bets)} · с него ${fmt(r.earned_from)}
+                        </div>
+                      </div>
+                      <button className="btn btn-small btn-secondary" onClick={() => adminApi.userDetail(r.id).then(setSelectedUser)}>
+                        Открыть
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div style={{display:'flex', gap:6, margin:'10px 0'}}>
                 <input className="input" style={{fontSize:13, flex:1}} placeholder="+/- сумма корректировки" value={adjustDelta} onChange={e=>setAdjustDelta(e.target.value)} />
@@ -389,14 +479,14 @@ export default function AdminPanel() {
                   setSelectedUser(fresh);
                   loadStats();
                   showToast('Баланс скорректирован');
-                }}>КОРРЕКТИРОВАТЬ</button>
+                }}><Icon name="edit" size={13} strokeWidth={2.2} /> Корректировать</button>
               </div>
               <div style={{display:'flex', gap:6}}>
                 {selectedUser.user.banned ? (
                   <button className="btn btn-small btn-green" onClick={async () => {
                     await adminApi.unbanUser(selectedUser.user.id);
                     const fresh = await adminApi.userDetail(selectedUser.user.id); setSelectedUser(fresh); loadUsers(); showToast('Разбанен');
-                  }}>✅ РАЗБАНИТЬ</button>
+                  }}><Icon name="check" size={13} strokeWidth={2.4} /> Разбанить</button>
                 ) : (
                   <>
                     <input className="input" style={{fontSize:13, flex:1}} placeholder="Причина бана" value={banReason} onChange={e=>setBanReason(e.target.value)} />
@@ -404,7 +494,7 @@ export default function AdminPanel() {
                       await adminApi.banUser(selectedUser.user.id, banReason);
                       setBanReason('');
                       const fresh = await adminApi.userDetail(selectedUser.user.id); setSelectedUser(fresh); loadUsers(); showToast('Забанен');
-                    }}>🚫 БАН</button>
+                    }}><Icon name="ban" size={13} strokeWidth={2.2} /> Бан</button>
                   </>
                 )}
               </div>
@@ -426,7 +516,7 @@ export default function AdminPanel() {
       )}
 
       {tab === 'antifraud' && (
-        <div className="card"><div className="card-title">🚨 Антифрод</div>
+        <div className="card"><div className="card-title"><Icon name="shield" size={16} /> Антифрод</div>
           {fraud.map((f:any)=><div className="history-item" key={f.id}><div><b>@{f.username||f.telegram_id}</b><div className="text-dim">{f.kind} · риск {f.risk_score}</div></div><div style={{display:'flex',gap:4}}><button className="btn btn-small" onClick={async()=>{await adminApi.reviewFraud(f.id,'confirmed');setFraud(fraud.filter(x=>x.id!==f.id));}}>Подтвердить</button><button className="btn btn-small btn-secondary" onClick={async()=>{await adminApi.reviewFraud(f.id,'resolved');setFraud(fraud.filter(x=>x.id!==f.id));}}>Закрыть</button></div></div>)}
           {!fraud.length&&<div className="text-dim text-center">Открытых флагов нет</div>}
         </div>
@@ -434,7 +524,7 @@ export default function AdminPanel() {
 
       {tab === 'tx' && (
         <div className="card">
-          <div className="card-title">📋 Все операции</div>
+          <div className="card-title"><Icon name="list" size={16} /> Все операции</div>
           <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:8}}>
             <select className="input" style={{width:'auto', fontSize:13, padding:'8px'}} value={txFilter.type} onChange={e=>setTxFilter({...txFilter, type:e.target.value})}>
               <option value="">Все типы</option>
@@ -472,7 +562,7 @@ export default function AdminPanel() {
 
       {tab === 'payouts' && (
         <div className="card">
-          <div className="card-title">📤 Заявки на вывод</div>
+          <div className="card-title"><Icon name="withdraw" size={16} /> Заявки на вывод</div>
           <div className="text-dim" style={{fontSize:12, marginBottom:8}}>
             Деньги списаны с баланса в момент создания заявки. В реальном режиме заявка ждёт
             ручной отправки USDT: внесите tx_hash из блокчейна и нажмите «Выплачено».
@@ -521,12 +611,30 @@ export default function AdminPanel() {
                       if (!tx) return showToast('Введите tx_hash');
                       try { await adminApi.payWithdrawal(w.id, tx); showToast(`Заявка #${w.id} выплачена`); loadPayouts(); loadStats(); }
                       catch (e: any) { showToast(e.message); }
-                    }}>✅ Выплачено</button>
+                    }}><Icon name="check" size={13} strokeWidth={2.4} /> Выплачено</button>
                     <button className="btn btn-small btn-danger" onClick={async () => {
-                      const reason = window.prompt('Причина отклонения (деньги вернутся на баланс)') || '';
-                      try { await adminApi.rejectWithdrawal(w.id, reason || undefined); showToast(`Заявка #${w.id} отклонена, деньги возвращены`); loadPayouts(); loadStats(); }
+                      // Кастомное окно вместо `window.prompt`: в Telegram WebView
+                      // нативный prompt часто не показывается, и заявка
+                      // отклонялась без причины (или действие молча не выполнялось)
+                      const reason = await dialog.prompt({
+                        title: `Отклонить заявку #${w.id}?`,
+                        message: (
+                          <>
+                            К выплате <b>${fmt(w.payout)}</b> вернутся на баланс игрока.
+                            Причина попадёт в историю выплат и в уведомление игроку.
+                          </>
+                        ),
+                        input: { placeholder: 'Например: неверный адрес кошелька' },
+                        confirmText: 'Отклонить',
+                        cancelText: 'Не отклонять',
+                        tone: 'danger',
+                        icon: 'alert'
+                      });
+                      // null — окно закрыли/отменили: ничего не делаем
+                      if (reason === null) return;
+                      try { await adminApi.rejectWithdrawal(w.id, reason.trim() || undefined); showToast(`Заявка #${w.id} отклонена, деньги возвращены`); loadPayouts(); loadStats(); }
                       catch (e: any) { showToast(e.message); }
-                    }}>↩ Отклонить</button>
+                    }}><Icon name="refresh" size={13} strokeWidth={2.2} /> Отклонить</button>
                   </div>
                 )}
               </div>

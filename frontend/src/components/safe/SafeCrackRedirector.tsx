@@ -94,7 +94,7 @@ export default function SafeCrackRedirector() {
     // результат обрабатывает бейдж (тост, баланс, автовклад) и двойной
     // обработки не происходит.
     if (flight) {
-      showToast(`🚀 Останавливаем ракету на x${(flight.multiplier || 1).toFixed(2)}…`);
+      showToast(`Останавливаем ракету на x${(flight.multiplier || 1).toFixed(2)}…`);
       setTimeout(() => getSocket().emit('cashout', { round_id: flight.roundId }), 0);
     }
     // Баланс мог измениться (кэшаут, дуэль) — подтягиваем, не дожидаясь сокета

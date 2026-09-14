@@ -1,46 +1,60 @@
-import { useAuth } from '../../stores/auth';
-
 /**
- * Краткая заморозка для игровых экранов и полная раскладка только для профиля.
- * `balance` уже включает резерв открытых дуэлей, поэтому общая сумма средств —
- * balance + safe + vault (не плюс frozen второй раз).
+ * Полная раскладка средств игрока.
+ *
+ * Используется там, где нужно объяснить цифры подробно (профиль) или коротко
+ * (игровые экраны). Короткий вариант — тот же набор пилюль, что рисует
+ * `BalancePanel`, поэтому экраны не спорят друг с другом оформлением.
  */
-export default function MoneyBreakdown({ detailed = false }: { detailed?: boolean }) {
-  const { user } = useAuth();
-  if (!user) return null;
+import { useMoneyParts } from './BalancePanel';
+import { formatAmount } from '../../utils/betChips';
+import Icon, { type IconName } from '../ui/Icon';
 
-  const balance = Number(user.balance) || 0;
-  const frozen = Number(user.frozen_balance) || 0;
-  const safe = Number(user.safe_locked) || 0;
-  const vault = Number(user.vault_locked) || 0;
+export default function MoneyBreakdown({ detailed = false }: { detailed?: boolean }) {
+  const { available, frozen, safe, vault, total, locked } = useMoneyParts();
 
   if (!detailed) {
-    const locked = frozen + safe + vault;
-    return locked > 0 ? (
-      <div className="text-dim" style={{ marginTop: 6, fontSize: 12 }}>
-        ❄️ Заморожено: <b style={{ color: 'var(--text)' }}>${locked.toFixed(2)}</b>
+    if (!locked.length) return null;
+    return (
+      <div className="balance__locked balance__locked--inline">
+        <span className="balance__locked-hint">
+          <Icon name="snowflake" size={12} strokeWidth={2} />
+          в деле
+        </span>
+        {locked.map(p => (
+          <span key={p.key} className={`lock-pill lock-pill--${p.tone}`}>
+            <Icon name={p.icon} size={12} strokeWidth={2} />
+            {p.label}
+            <b>${formatAmount(p.value)}</b>
+          </span>
+        ))}
       </div>
-    ) : null;
+    );
   }
 
-  const rows = [
-    { key: 'available', label: 'Доступно', value: balance - frozen },
-    { key: 'duel', label: 'В дуэлях', value: frozen },
-    { key: 'safe', label: '🔒 В сейфе', value: safe },
-    { key: 'vault', label: '💎 Во вкладе', value: vault }
+  const rows: { icon: IconName; label: string; value: number; tone?: string }[] = [
+    { icon: 'wallet', label: 'Доступно', value: available },
+    { icon: 'swords', label: 'В дуэлях', value: frozen },
+    { icon: 'lock', label: 'В сейфе', value: safe },
+    { icon: 'gem', label: 'Во вкладе', value: vault }
   ];
 
   return (
-    <div style={{ marginTop: 8, fontSize: 12, width: '100%' }}>
+    <div className="money-rows">
       {rows.map(r => (
-        <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '3px 0' }}>
-          <span className="text-dim">{r.label}</span>
-          <b style={{ color: 'var(--text)', whiteSpace: 'nowrap' }}>${r.value.toFixed(2)}</b>
+        <div className="money-rows__line" key={r.label}>
+          <span className="money-rows__label">
+            <Icon name={r.icon} size={14} strokeWidth={1.9} />
+            {r.label}
+          </span>
+          <b className="money-rows__value">${formatAmount(r.value)}</b>
         </div>
       ))}
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--bg-4)' }}>
-        <span className="text-dim">Всего средств</span>
-        <b style={{ color: 'var(--gold)', whiteSpace: 'nowrap' }}>${(balance + safe + vault).toFixed(2)}</b>
+      <div className="money-rows__line money-rows__line--total">
+        <span className="money-rows__label">
+          <Icon name="coins" size={14} strokeWidth={1.9} />
+          Всего средств
+        </span>
+        <b className="money-rows__value money-rows__value--gold">${formatAmount(total)}</b>
       </div>
     </div>
   );

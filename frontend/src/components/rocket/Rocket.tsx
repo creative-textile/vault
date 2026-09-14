@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { sfx, createTickTracker } from '../../audio';
 import { Link } from 'react-router-dom';
 import MoneyBreakdown from '../common/MoneyBreakdown';
+import AmountChips from '../common/AmountChips';
+import Icon from '../ui/Icon';
+import { formatAmount } from '../../utils/betChips';
 import Header from '../layout/Header';
 import RocketScene from '../../three/rocket/RocketScene';
 import { rocketApi, safeApi, publicConfig } from '../../api/client';
@@ -24,14 +27,24 @@ interface HistoryItem {
   profit: number;
 }
 
-const CHIPS_DEFAULTS = [1, 5, 10, 25, 50, 100];
+interface RocketLimits {
+  min_bet: number;
+  /** null — лимита нет (настройка 0% от кассы) */
+  max_bet: number | null;
+  max_bet_percent: number;
+  bankroll: number;
+}
 
 export default function Rocket() {
   const { user, refreshUser, showToast } = useAuth();
   const [phase, setPhase] = useState<Phase>('betting');
   const [bet, setBet] = useState('10');
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [maxBet, setMaxBet] = useState(100);
+  // Лимиты ставки берём с сервера: максимум — это процент от кассы Ракеты, а
+  // касса меняется после каждой ставки и каждого выигрыша. Прежние `100` и
+  // `minBet` из /api/config не пересчитывались, и подпись «Макс: $100» висела
+  // одним значением всю сессию.
+  const [limits, setLimits] = useState<RocketLimits>({ min_bet: 1, max_bet: null, max_bet_percent: 0, bankroll: 0 });
   const [multiplier, setMultiplier] = useState(1.0);
   const [crashAt, setCrashAt] = useState(1.0);
   const [cashoutMult, setCashoutMult] = useState(0);
@@ -54,14 +67,38 @@ export default function Rocket() {
   const engineRef = useRef(0);
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
-  const [minBet, setMinBet] = useState(1);
+  const minBet = limits.min_bet || 1;
+  const maxBet = limits.max_bet;
+
+  /** Подтянуть лимиты и кассу. Ошибку глотаем молча: подпись не критична. */
+  const refreshLimits = useCallback(() => {
+    rocketApi.bankroll().then((r: any) => {
+      setLimits({
+        min_bet: Number(r.min_bet) || 1,
+        max_bet: r.max_bet == null ? null : Number(r.max_bet),
+        max_bet_percent: Number(r.max_bet_percent) || 0,
+        bankroll: Number(r.bankroll) || 0
+      });
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
-    publicConfig().then(c => setMinBet(c.min_bet || 1)).catch(()=>{});
+    // min_bet из /api/config — мгновенный первый кадр, пока лимиты не приехали
+    publicConfig().then(c => setLimits(l => ({ ...l, min_bet: Number(c.min_bet) || 1 }))).catch(()=>{});
   }, []);
+
+  // Касса живёт своей жизнью (другие игроки ставят и выигрывают), поэтому во
+  // время приёма ставок обновляем лимиты периодически — «Макс» обязан быть
+  // актуальным на момент нажатия кнопки, а не на момент открытия экрана.
+  useEffect(() => {
+    if (phase !== 'betting') return;
+    const t = setInterval(refreshLimits, 15000);
+    return () => clearInterval(t);
+  }, [phase, refreshLimits]);
 
   const resetRound = useCallback(() => {
     setPhase('betting');
+    refreshLimits();
     setMultiplier(1.0);
     setCashoutMult(0);
     setRoundId(null);
@@ -70,12 +107,12 @@ export default function Rocket() {
     setCrashAt(1.0);
     setSceneKey(k => k + 1); // перерисовать Three.js сцену
     sfx.transition();
-  }, []);
+  }, [refreshLimits]);
 
   useEffect(() => {
     rocketApi.history(20).then(setHistory).catch(() => {});
-    rocketApi.bankroll().then(() => {}).catch(() => {});
-  }, []);
+    refreshLimits();
+  }, [refreshLimits]);
 
   // WebSocket события
   useEffect(() => {
@@ -136,7 +173,7 @@ export default function Rocket() {
             try {
               await safeApi.deposit(amt);
               sfx.deposit();
-              showToast(`🔒 $${amt.toFixed(2)} автоматически в Сейф`);
+              showToast(`$${amt.toFixed(2)} автоматически внесено в Сейф`);
               refreshUser();
             } catch (e: any) {
               console.warn('[safe] автовклад не прошёл:', e?.message || e);
@@ -185,6 +222,13 @@ export default function Rocket() {
   const start = async () => {
     const b = parseFloat(bet);
     if (!b || b < minBet) { sfx.error(); return showToast(`Мин. ставка $${minBet}`); }
+    // Лимит кассы проверяем на клиенте до запроса: сообщение «Превышен лимит»
+    // из API не говорит, какой лимит сейчас действует
+    if (maxBet != null && Math.round(b * 100) > Math.round(maxBet * 100)) {
+      sfx.error();
+      refreshLimits();
+      return showToast(`Макс. ставка сейчас $${formatAmount(maxBet)}`);
+    }
     if (Math.round(b * 100) > Math.round(((user?.balance || 0) - (user?.frozen_balance || 0)) * 100)) {
       sfx.error();
       return showToast('Недостаточно средств');
@@ -195,7 +239,15 @@ export default function Rocket() {
       sfx.betPlace();
       tickRef.current = createTickTracker();
       setRoundId(res.round_id);
-      setMaxBet(res.max_bet);
+      // Сервер возвращает лимиты, посчитанные по кассе НА МОМЕНТ ставки:
+      // подпись «Макс» обновляется сразу, не дожидаясь следующего опроса
+      setLimits(l => ({
+        ...l,
+        max_bet: res.max_bet == null ? null : Number(res.max_bet),
+        max_bet_unlimited: !!res.max_bet_unlimited,
+        min_bet: Number(res.min_bet) || l.min_bet,
+        bankroll: Number(res.bankroll) || l.bankroll
+      } as RocketLimits));
       // crash_at сервер больше не присылает: множитель падения станет известен
       // только из события `crash` / `cashout_result`
       setCrashAt(1.0);
@@ -266,10 +318,13 @@ export default function Rocket() {
 
   const scenePhase = phase === 'win' ? 'cashed' : phase === 'lose' ? 'crashed' : phase === 'flying' ? 'flying' : 'idle';
   const betNum = parseFloat(bet) || 0;
+  // Ставка проверяется и списывается из «доступно» (баланс минус заморозка
+  // дуэлей), поэтому и номиналы кнопок считаем от этой же цифры
+  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
 
   return (
     <>
-      <Header title="🚀 Ракета" />
+      <Header title="Ракета" icon="rocket" />
 
       {/* Сцена и HUD — один позиционированный блок: цифры множителя лежат
           поверх 3D (.scene-hud → position:absolute, inset:0), а не под картинкой.
@@ -298,7 +353,7 @@ export default function Rocket() {
           <div className="scene-hud">
             <div className="scene-hud__top">
               <span className="mult-pill mult-pill--huge">ЗАБРАНО x{cashoutMult.toFixed(2)}</span>
-              {!ghostDone && <span className="mult-pill">👻 призрак летит…</span>}
+              {!ghostDone && <span className="mult-pill"><Icon name="ghost" size={13} /> призрак летит…</span>}
             </div>
             {ghostDone && (
               <div className="scene-hud__bottom">
@@ -309,28 +364,49 @@ export default function Rocket() {
         )}
       </div>
 
-      <div style={{padding:'12px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
+      <div className="avail-line">
         {/* Ставка проверяется и списывается из «доступно» (баланс минус
             заморозка дуэлей), поэтому и показываем его: цифра баланса при
             висящем вызове обещала больше, чем можно поставить */}
-        <span className="text-dim">Доступно:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
+        <span className="avail-line__label"><Icon name="wallet" size={14} /> Доступно</span>
+        <span className="avail-line__value">${formatAmount(available)}</span>
       </div>
       <MoneyBreakdown />
 
       {phase === 'betting' && (
         <>
           <div className="card">
-            <div className="card-title">Ставка</div>
-            <input type="number" className="input" value={bet} onChange={e => setBet(e.target.value)} min={1} />
-            <div className="bet-chips">
-              {CHIPS_DEFAULTS.filter(x => x >= minBet).slice(0,6).map(c => (
-                <div key={c} className="chip" onClick={() => { sfx.chip(); setBet(String(c)); }}>${c}</div>
-              ))}
+            <div className="card-title"><Icon name="coins" size={16} /> Ставка</div>
+            <input
+              type="number" className="input input--amount" value={bet} inputMode="decimal"
+              onChange={e => setBet(e.target.value)} min={minBet}
+            />
+            {/* Номиналы считаются от доступного баланса, а не из фиксированного списка:
+                у игрока с $7 нет кнопки $100, у игрока с $50 000 есть $25 000 */}
+            <AmountChips available={available} value={bet} onChange={setBet} min={minBet} max={maxBet} />
+            <div className="limits-line">
+              <span className="limits-line__item">
+                <Icon name="arrowUpRight" size={13} />
+                {maxBet == null
+                  ? <>Макс: <b className="text-accent">без лимита</b></>
+                  : <>Макс: <b className="text-accent">${formatAmount(maxBet)}</b></>}
+              </span>
+              <span className="limits-line__sep" aria-hidden="true" />
+              <span className="limits-line__item">
+                Мин: <b>${formatAmount(minBet)}</b>
+              </span>
             </div>
-            <div className="text-dim text-center" style={{fontSize:13}}>Макс: ${maxBet} · Мин: ${minBet}</div>
+            {/* Лимита может не быть вовсе (настройка «0% от кассы») — это надо
+                обозначить словами, иначе «Макс: $0» читается как запрет ставки */}
+            <div className="limits-hint">
+              {maxBet == null
+                ? 'Ставка не ограничена кассой — можно внести всю доступную сумму.'
+                : `Лимит одной ставки: ${limits.max_bet_percent}% кассы Ракеты ($${formatAmount(limits.bankroll)}).`}
+            </div>
           </div>
-          <button className="btn btn-big btn-green btn-pulse" onClick={start}>🚀 ЗАПУСТИТЬ</button>
+          <button className="btn btn-big btn-green btn-pulse" onClick={start}>
+            <Icon name="rocket" size={18} strokeWidth={2} /> ЗАПУСТИТЬ
+          </button>
         </>
       )}
 
@@ -344,7 +420,8 @@ export default function Rocket() {
             Выигрыш: ${(betNum * multiplier).toFixed(2)}
           </div>
           <button className="btn btn-big btn-green btn-pulse" onClick={cashout}>
-            💰 ЗАБРАТЬ ${(betNum * multiplier).toFixed(2)}
+            <Icon name="coins" size={19} strokeWidth={2} />
+            Забрать ${formatAmount(betNum * multiplier)}
           </button>
         </>
       )}
@@ -355,10 +432,14 @@ export default function Rocket() {
             <div className="bigwin__label">забрали на x{cashoutMult.toFixed(2)}</div>
             <div className="bigwin__amount">+${profit.toFixed(2)}</div>
             <div className="text-dim" style={{ fontSize: 13 }}>
-              {ghostDone ? `💥 Взрыв на x${crashAt.toFixed(2)}` : '👻 Смотрим, куда долетит призрак…'}
+              {ghostDone
+                ? <><Icon name="burst" size={14} /> Взрыв на x{crashAt.toFixed(2)}</>
+                : <><Icon name="ghost" size={14} /> Смотрим, куда долетит призрак…</>}
             </div>
           </div>
-          <button className="btn btn-big btn-green" onClick={resetRound}>🚀 ИГРАТЬ СНОВА</button>
+          <button className="btn btn-big btn-green" onClick={resetRound}>
+            <Icon name="rocket" size={18} strokeWidth={2} /> Играть снова
+          </button>
         </>
       )}
 
@@ -366,16 +447,18 @@ export default function Rocket() {
         <>
           {/* Вспышка живёт 0.52 с и не перехватывает клики (pointer-events:none) */}
           <div className="flash-overlay" style={{ background: 'radial-gradient(circle at 50% 45%, rgba(255,59,92,.55), transparent 62%)' }} />
-          <div className="result-text lose">💥 ВЗРЫВ!</div>
-          <div className="text-center" style={{fontSize:24}}>Взрыв на x{crashAt.toFixed(2)}</div>
+          <div className="result-text lose"><Icon name="burst" size={26} strokeWidth={1.8} /> Взрыв!</div>
+          <div className="text-center" style={{fontSize:22}}>Взрыв на x{crashAt.toFixed(2)}</div>
           <div className="result-text lose">-${betNum.toFixed(2)}</div>
-          <button className="btn btn-big btn-danger" onClick={resetRound}>🚀 ИГРАТЬ СНОВА</button>
+          <button className="btn btn-big btn-danger" onClick={resetRound}>
+            <Icon name="rocket" size={18} strokeWidth={2} /> Играть снова
+          </button>
         </>
       )}
 
       {/* История */}
       <div className="card mt">
-        <div className="card-title">📜 Последние раунды</div>
+        <div className="card-title"><Icon name="list" size={16} /> Последние раунды</div>
         {/* Полоса множителей: первым делом игрок смотрит, на чём падало раньше.
             Цвет пилюли = уровень падения (красное — рано, золото — высоко). */}
         <div className="mult-strip">
@@ -394,12 +477,20 @@ export default function Rocket() {
         <div className="scroll-list" style={{maxHeight:220, overflowY:'auto'}}>
           {history.slice(0, 15).map(h => (
             <div key={h.round_id} className="history-item" style={{fontSize:13}}>
-              <Link className="text-dim" state={{replayFrom:'/rocket'}} to={`/replay/rocket/${h.round_id}?player=${encodeURIComponent(h.player)}`}>📼 #{h.round_id} {h.player}</Link>
+              <Link className="text-dim history-item__replay" state={{replayFrom:'/rocket'}} to={`/replay/rocket/${h.round_id}?player=${encodeURIComponent(h.player)}`}>
+                <Icon name="replay" size={13} /> #{h.round_id} {h.player}
+              </Link>
               <span>
                 ${h.bet.toFixed(0)}
                 {h.cashout_at
-                  ? <> → <span className="text-green">забрал x{h.cashout_at.toFixed(2)}</span>{h.round_id===roundId&&phase==='win'&&!ghostDone?<> · <span className="text-dim">👻 призрак летит…</span></>:<> 💥<span className="text-red">x{h.crash_at.toFixed(2)}</span></>}</>
-                  : <> 💥<span className="text-red">x{h.crash_at.toFixed(2)}</span></>
+                  ? <>
+                      <Icon name="arrowRight" size={12} />
+                      <span className="text-green">забрал x{h.cashout_at.toFixed(2)}</span>
+                      {h.round_id===roundId&&phase==='win'&&!ghostDone
+                        ? <span className="text-dim"> · <Icon name="ghost" size={12} /> призрак летит…</span>
+                        : <><Icon name="burst" size={12} className="text-red" /><span className="text-red">x{h.crash_at.toFixed(2)}</span></>}
+                    </>
+                  : <><Icon name="burst" size={12} className="text-red" /><span className="text-red">x{h.crash_at.toFixed(2)}</span></>
                 }
               </span>
             </div>

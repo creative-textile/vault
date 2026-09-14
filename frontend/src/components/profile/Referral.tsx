@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Header from '../layout/Header';
 import { referralApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
+import Icon from '../ui/Icon';
 
 export default function Referral() {
   const { user, showToast } = useAuth();
@@ -36,7 +37,7 @@ export default function Referral() {
 
   return (
     <>
-      <Header title="👥 Рефералы" />
+      <Header title="Рефералы" icon="users" />
 
       <div className="card card-hl text-center">
         <div className="card-title">Ваша ссылка</div>
@@ -50,11 +51,11 @@ export default function Referral() {
           margin:'12px 0'
         }}>{shareLink || 'Загрузка...'}</div>
         {isDemo && <div className="text-dim text-center" style={{fontSize:12, marginBottom:8}}>
-          🧪 Демо-режим: откройте ссылку в новой вкладке/браузере — получите бонус 3%
+          <Icon name="flask" size={14} /> Демо-режим: откройте ссылку в новой вкладке или другом браузере — получите бонус 3%
         </div>}
         <div className="btn-row">
-          <button className="btn btn-secondary" onClick={copy}>📋 Копировать</button>
-          <button className="btn" onClick={share}>📤 Отправить</button>
+          <button className="btn btn-secondary" onClick={copy}><Icon name="copy" size={15} strokeWidth={2} /> Копировать</button>
+          <button className="btn" onClick={share}><Icon name="send" size={15} strokeWidth={2} /> Отправить</button>
         </div>
       </div>
 
