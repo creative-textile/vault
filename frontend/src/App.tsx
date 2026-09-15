@@ -35,6 +35,7 @@ import SafeCrackRedirector from './components/safe/SafeCrackRedirector';
 import RocketFlightBadge from './components/common/RocketFlightBadge';
 import Replay from './components/common/Replay';
 import Ambient from './components/layout/Ambient';
+import DialogHost from './components/ui/Dialog';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -52,6 +53,10 @@ export default function App() {
   // существующим; второй ответ закрывал только что открытый onboarding.
   const authInFlight = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** Счётчик принудительных перезапусков входа: меняет зависимости эффекта
+      авто-логина даже тогда, когда `token` и так был null (иначе эффект не
+      перезапустился бы и приложение осталось без сессии до рефреша). */
+  const [reauthNonce, setReauthNonce] = useState(0);
   const { fetchNotifications, clear: clearNotifications } = useNotifications();
 
   const showToast = useCallback((msg: string) => {
@@ -84,12 +89,29 @@ export default function App() {
   // Централизованно восстанавливаем истёкшую/сброшенную сессию. Это важно для
   // Deposit: после 401 адрес загрузится повторно без ручного reload.
   useEffect(() => {
+    /** Окна времени и счётчик попыток: защита от бесконечного цикла re-login,
+        если сервер стабильно отвечает 401 (сбитый JWT_SECRET, бан и т.п.). */
+    let attempts = 0;
+    let windowStart = Date.now();
     const unauthorized=(event:Event)=>{
-      const failed=(event as CustomEvent).detail?.token;
-      if(!failed || getStoredToken()!==failed) return;
+      const failed=(event as CustomEvent).detail?.token ?? null;
+      const current=getStoredToken();
+      // Запоздалый 401 прежней сессии не должен ронять уже выданный новый JWT.
+      if(failed && current && failed!==current) return;
+      if(Date.now()-windowStart>15000) { attempts=0; windowStart=Date.now(); }
+      attempts+=1;
+      if(attempts>3) {
+        // Третий неудачный перезапуск за 15 секунд — останавливаемся и говорим
+        // пользователю, что делать. Без этого приложение молча долбилось бы в
+        // API по кругу, расходуя лимит запросов.
+        setToast('Не удалось восстановить сессию. Закройте и откройте приложение заново.');
+        setLoading(false);
+        return;
+      }
       clearStoredToken();
       authInFlight.current=false;
       setUser(null); setToken(null); setLoading(false);
+      setReauthNonce(n=>n+1);
     };
     window.addEventListener('vault:unauthorized',unauthorized);
     return()=>window.removeEventListener('vault:unauthorized',unauthorized);
@@ -263,7 +285,7 @@ export default function App() {
         authInFlight.current = false;
       }
     })();
-  }, [token, loading, showToast]);
+  }, [token, loading, showToast, reauthNonce]);
 
   const logout = () => {
     clearStoredToken();
@@ -315,6 +337,10 @@ export default function App() {
     }}>
       <BrowserRouter>
         <Ambient />
+        {/* Хост кастомных диалогов: confirm/prompt/alert по всему приложению
+            (отмена вклада в сейф, действия админки, пароль администратора).
+            Монтируется один раз и выше роутов — окна доступны с любого экрана. */}
+        <DialogHost />
         <div className="app">
           {toast && <div className="toast">{toast}</div>}
           {/* Очередь результатов дуэлей: модальное окно из непрочитанных

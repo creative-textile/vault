@@ -4,6 +4,10 @@ import { sfx } from '../../audio';
 import { useAuth } from '../../stores/auth';
 import { onSafeEvent } from '../../utils/socketEvents';
 import { vaultApi, safeApi } from '../../api/client';
+import BalancePanel from '../common/BalancePanel';
+import PlatformFootnote from '../common/PlatformFootnote';
+import Icon from '../ui/Icon';
+import { formatAmount } from '../../utils/betChips';
 
 function fmt(n: number) {
   return n.toFixed(2);
@@ -88,24 +92,24 @@ export default function Home() {
     <>
       <div className="topbar">
         <div className="logo">VAULT<span className="logo-sub">ХРАНИЛИЩЕ</span></div>
-        <Link to="/profile" onClick={() => sfx.tapSoft()} style={{color:'var(--text)', textDecoration:'none', fontSize:24}}>⚙️</Link>
+        <Link to="/profile" className="topbar__icon-link" onClick={() => sfx.tapSoft()} aria-label="Профиль">
+          <Icon name="sliders" size={20} strokeWidth={1.9} />
+        </Link>
       </div>
 
-      <div className="balance-block">
-        <div className="balance-label">БАЛАНС</div>
-        <div className="balance-amount">${fmt(available)}</div>
-        {(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))>0&&(
-          <div className="balance-sub">
-            ❄️ <span className="balance-frozen" style={{ color: 'inherit' }}>
-              Заморожено: ${fmt(user.frozen_balance+(user.safe_locked||0)+(user.vault_locked||0))}
-            </span>
-          </div>
-        )}
-      </div>
+      {/* Один блок денег на всех экранах: сумма, которую можно поставить, и
+          пилюли «где ещё лежат средства» (дуэли, сейф, вклад). Прежняя строка
+          «❄️ Заморожено: $50.00» под балансом смешивала три разных резерва в
+          одну цифру и выглядела как ошибка вёрстки. */}
+      <BalancePanel variant="hero" label="Доступно" showTotal />
 
       <div className="btn-row">
-        <Link to="/deposit" className="btn btn-secondary" onClick={() => sfx.tap()}>📥 Пополнить</Link>
-        <Link to="/withdraw" className="btn btn-secondary" onClick={() => sfx.tap()}>📤 Вывести</Link>
+        <Link to="/deposit" className="btn btn-secondary" onClick={() => sfx.tap()}>
+          <Icon name="deposit" size={17} strokeWidth={2} /> Пополнить
+        </Link>
+        <Link to="/withdraw" className="btn btn-secondary" onClick={() => sfx.tap()}>
+          <Icon name="withdraw" size={17} strokeWidth={2} /> Вывести
+        </Link>
       </div>
 
       {/* Vault Вклад */}
@@ -113,10 +117,15 @@ export default function Home() {
         {activeDeposit ? (
           <>
             <div style={{display:'flex', justifyContent:'center', alignItems:'center', gap:10}}>
-              <div className="card-title" style={{color:'var(--violet-hi)', margin:0}}>💎 Вклад АКТИВЕН</div>
+              <div className="card-title vault-tile__title">
+                <Icon name="gem" size={17} /> Вклад активен
+              </div>
               <span className="pill pill-active">×{activeDeposit.multiplier}</span>
             </div>
-            <div style={{margin:'8px 0'}}>🔒 ${fmt(activeDeposit.amount)} · {activeDeposit.term_days} дн.</div>
+            <div className="vault-tile__amount">
+              <Icon name="lock" size={13} strokeWidth={2} />
+              ${fmt(activeDeposit.amount)} · {activeDeposit.term_days} дн.
+            </div>
             <div style={{display:'flex', justifyContent:'center', alignItems:'center', gap:12, marginBottom:8}}>
               <span className="text-dim" style={{fontSize:13}}>День {activeDeposit.days_elapsed} из {activeDeposit.term_days}</span>
               <span className="text-accent" style={{fontWeight:900, fontSize:20}}>+${fmt(activeDeposit.accumulated_profit)}</span>
@@ -127,13 +136,30 @@ export default function Home() {
           </>
         ) : (
           <>
-            <div className="card-title" style={{color:'var(--violet-hi)', marginBottom:4}}>💎 Vault Вклад</div>
-            <div style={{fontSize:13}}>1–30 дней · до ×2.0 доли прибыли</div>
-            <div style={{fontSize:15, fontWeight:900, color:'var(--gold)', margin:'4px 0'}}>
-              Пул сегодня: ${pendingPool.toFixed(2)}
+            <div className="card-title vault-tile__title">
+              <Icon name="gem" size={17} /> Vault Вклад
             </div>
-            <div className="text-dim" style={{fontSize:12}}>Вчера: {baseRate.toFixed(1)}% · макс. вклад ${vaultStatus?.pool_info?.max_deposit || 100}</div>
-            <div style={{marginTop:10}}><button className="btn btn-small" style={{background:'var(--violet-hi)', color:'var(--text)'}}>ОТКРЫТЬ ВКЛАД</button></div>
+            {/* Формула вклада одной строкой: срок, доля, откуда доход.
+                Прежние «Зарабатывайте с оборота платформы…» и «Тело вклада
+                возвращается всегда» не объясняли ничего конкретного. */}
+            <div className="vault-tile__lead">
+              1–30 дней · доля прибыли до ×2.0 · начисления каждый день в 00:00 МСК
+            </div>
+            <div className="vault-tile__pool">
+              Пул сегодня: <b>${formatAmount(pendingPool)}</b>
+            </div>
+            <div className="vault-tile__meta">
+              <span className="vault-tile__rate">
+                <Icon name="chart" size={12} strokeWidth={2.1} /> вчера {baseRate.toFixed(1)}%
+              </span>
+              <span className="vault-tile__cap">макс. вклад ${formatAmount(vaultStatus?.pool_info?.max_deposit || 100)}</span>
+            </div>
+            <div style={{marginTop:10}}>
+              <button className="btn btn-small btn-violet" type="button">
+                <Icon name="plus" size={14} strokeWidth={2.4} /> Открыть вклад
+              </button>
+            </div>
+            <div className="vault-tile__note">Сумма вклада возвращается целиком — в срок и досрочно</div>
           </>
         )}
       </div>
@@ -145,14 +171,25 @@ export default function Home() {
             четыре одинаковые кнопки. Бейджи — фактические цифры из правил игр,
             не выдуманные «HOT». */}
         <Link to="/rocket" className="game-tile tile-rocket" onClick={() => sfx.transition()}>
-          <span className="tile-badge tile-badge--gold">до ×90</span>
-          <div className="game-icon">🚀</div>
+          {/* «до ×90» читалось как служебная пометка: непонятно, что это
+              множитель выплаты. Теперь знак × крупный и золотой, а слово «до»
+              стоит мелким префиксом — сразу видно потолок выигрыша. */}
+          <span className="tile-badge tile-badge--gold">
+            <span className="tile-badge__pre">до</span>
+            <span className="tile-badge__mult">×90</span>
+          </span>
+          <div className="game-icon"><Icon name="rocket" size={34} strokeWidth={1.6} /></div>
           <div className="game-name">Ракета</div>
           <div className="game-sub">мин. $1 · забери до взрыва</div>
         </Link>
         <Link to="/duel" className="game-tile tile-duel" onClick={() => sfx.transition()}>
-          <span className="tile-badge">PvP 50/50</span>
-          <div className="game-icon">⚔️</div>
+          {/* Бейдж в цвете зала (циан), а не красный: красная плашка споривала
+              с идентичностью Дуэли и читалась как «ошибка/тревога» */}
+          <span className="tile-badge tile-badge--cyan">
+            <span className="tile-badge__pre">PvP</span>
+            <span className="tile-badge__mult">50/50</span>
+          </span>
+          <div className="game-icon"><Icon name="swords" size={34} strokeWidth={1.6} /></div>
           <div className="game-name">Дуэль</div>
           <div className="game-sub">мин. $1 · орёл или решка</div>
         </Link>
@@ -161,7 +198,7 @@ export default function Home() {
       {/* Короткий статус; внесение и детали — одно действие на экране Сейфа. */}
       <div className="card" onClick={() => { sfx.transition(); nav('/safe'); }} style={{cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
         <div>
-          <b>🔒 Сейф #{collect?.id || '—'}</b>
+          <b className="safe-line__title"><Icon name="lock" size={14} strokeWidth={2} /> Сейф #{collect?.id || '—'}</b>
           <div className="text-dim" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
             {/* Пульсирующая точка — взлом идёт прямо сейчас: это действие
                 ограничено по времени, и его нельзя пропустить */}
@@ -173,24 +210,24 @@ export default function Home() {
                 : <>Подготовка</>}
           </div>
         </div>
-        <span className="text-accent" style={{whiteSpace:'nowrap'}}>Открыть →</span>
+        <span className="safe-line__cta">Открыть <Icon name="chevronRight" size={15} strokeWidth={2.2} /></span>
       </div>
 
       {/* Нижнее меню */}
       <div className="game-grid">
-        <Link to="/referral" className="game-tile tile-ref" style={{padding: '12px'}} onClick={() => sfx.tapSoft()}>
-          <div className="game-icon" style={{fontSize:32}}>👥</div>
+        <Link to="/referral" className="game-tile tile-ref game-tile--compact" onClick={() => sfx.tapSoft()}>
+          <div className="game-icon game-icon--sm"><Icon name="users" size={26} strokeWidth={1.8} /></div>
           <div className="game-name" style={{fontSize:14}}>Рефералы</div>
         </Link>
-        <Link to="/stats" className="game-tile tile-stats" style={{padding: '12px'}} onClick={() => sfx.tapSoft()}>
-          <div className="game-icon" style={{fontSize:32}}>📊</div>
+        <Link to="/stats" className="game-tile tile-stats game-tile--compact" onClick={() => sfx.tapSoft()}>
+          <div className="game-icon game-icon--sm"><Icon name="chart" size={26} strokeWidth={1.8} /></div>
           <div className="game-name" style={{fontSize:14}}>Статистика</div>
         </Link>
       </div>
 
-      <div className="text-center text-dim mt" style={{fontSize:11, paddingBottom: 8}}>
-        Комиссия игр 10% · Вывод 1% · USDT TON
-      </div>
+      {/* Служебная информация о комиссиях: тонкая полоса без акцента, цифры
+          берутся из настроек платформы (админ может их изменить) */}
+      <PlatformFootnote />
     </>
   );
 }

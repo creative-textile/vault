@@ -1,7 +1,31 @@
+/**
+ * Предложение отправить часть выигрыша в Сейф.
+ *
+ * Полностью перерисовано: прежняя версия клала тускло-серый (`--text-dim`) и
+ * золотой текст прямо на яркий фиолетовый градиент — половина подписей
+ * («Взлом в 21:00 МСК…», «Возможный приз», чекбоксы) физически не читалась.
+ * Теперь это обычная тёмная карточка с одним акцентом: суммой вклада.
+ * Все стили вынесены в `app.css` (классы `safe-prompt__*`), инлайновых
+ * `style={{…}}` с цветами больше нет.
+ *
+ * Прогноз приза считается ОТ ВСЕГО ВКЛАДА в раунд, а не только от новой суммы:
+ * игрок, который уже внёс $150 и добавляет $85,86, участвует в розыгрыше с
+ * $235,86, и прежние «возможный приз $128,79» выглядели как обман. Существующий
+ * вклад берётся из `/api/safe/current` (`my_collecting_deposit`).
+ *
+ * Нижняя часть разделена на две смысловые группы: «внести» (зелёная кнопка +
+ * чекбокс автовклада) и «не вносить» (кнопка «Пропустить» + тихий чекбокс
+ * «больше не предлагать»). Раньше чекбокс автовклада стоял вплотную к
+ * «Пропустить», а обе кнопки были одинаково невзрачными — группа «согласен»
+ * визуально склеивалась с группой «отказ».
+ */
 import { useState, useEffect } from 'react';
-import { safeApi, profileApi } from '../../api/client';
+import { safeApi, profileApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
 import { muteSafePrompt } from '../../utils/safePrompt';
+import { formatAmount } from '../../utils/betChips';
+import { sfx } from '../../audio';
+import Icon from '../ui/Icon';
 
 interface Props {
   profit: number;
@@ -9,128 +33,172 @@ interface Props {
   onDeposited: () => void;
 }
 
-const CHIPS = [25, 50, 100];
+const PERCENTS = [25, 50, 100];
 
 export default function SafeDepositPrompt({ profit, onClose, onDeposited }: Props) {
   const { showToast, refreshUser } = useAuth();
   const [percent, setPercent] = useState(100);
   const [submitting, setSubmitting] = useState(false);
-  const [safeTime, setSafeTime] = useState('21:00');
+  // Час взлома — из настроек (по умолчанию 18:00 МСК), а не захардкоженный
+  const [safeTime, setSafeTime] = useState('18:00');
   const [autoSave, setAutoSave] = useState(false);
   const [mutePrompts, setMutePrompts] = useState(false);
+  // Множитель приза тоже из настроек: «×1.5» в вёрстке расходилось с сервером
+  const [payoutMult, setPayoutMult] = useState(1.5);
+  /** Сколько игрок УЖЕ внёс в раунд, который сейчас собирает вклады. */
+  const [already, setAlready] = useState(0);
 
   useEffect(() => {
+    publicConfig().then((c: any) => {
+      const m = Number(c?.safe_payout_multiplier);
+      if (Number.isFinite(m) && m > 0) setPayoutMult(m);
+    }).catch(() => {});
     safeApi.current().then((s: any) => {
+      // Существующий вклад — из того же ответа: он относится именно к сейфу,
+      // который собирает взносы (то есть к тому, куда ляжет эта сумма)
+      const prev = Number(s?.my_collecting_deposit?.amount) || 0;
+      if (prev > 0) setAlready(prev);
       // Время взлома берём у сейфа, в который реально идёт вклад:
       // во время взлома/после розыгрыша это уже сейф следующего дня
       const target = s?.collecting_safe || s?.safe;
+      if (target?.crack_at_msk) { setSafeTime(target.crack_at_msk); return; }
       if (target?.crack_at) {
         try {
           const d = new Date(target.crack_at);
           if (!isNaN(d.getTime())) {
-            setSafeTime(d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}));
+            setSafeTime(d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }));
           }
         } catch {}
       }
     }).catch(()=>{});
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') skip(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const amount = Math.round(profit * (percent / 100) * 100) / 100;
   const canDeposit = amount >= 1;
+  /** Весь вклад в раунд после этого взноса — именно с него считается приз. */
+  const totalInSafe = Math.round((already + amount) * 100) / 100;
+  const prizeForecast = Math.round(totalInSafe * payoutMult * 100) / 100;
+
+  const skip = () => {
+    if (mutePrompts) muteSafePrompt();
+    sfx.tapSoft();
+    onClose();
+  };
 
   const deposit = async () => {
     if (!canDeposit || submitting) return;
     setSubmitting(true);
     try {
       await safeApi.deposit(amount);
-      showToast(`🔒 $${amount.toFixed(2)} внесено в Сейф`);
+      sfx.deposit();
+      showToast(`$${formatAmount(amount)} внесено в Сейф`);
       if (autoSave) {
         await profileApi.update({ auto_safe_percent: percent });
-        showToast(`✅ Автовклад ${percent}% включён`);
+        showToast(`Автовклад ${percent}% включён`);
       }
       await refreshUser();
       onDeposited();
     } catch (e: any) {
+      sfx.error();
       showToast(e.message);
     }
     setSubmitting(false);
   };
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 2000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16, animation: 'sdfFade 0.2s'
-    }} onClick={onClose}>
-      <div style={{
-        background: 'var(--grad-violet)',
-        border: '2px solid var(--gold)', borderRadius: 16, padding: 24,
-        width: '100%', maxWidth: 420, animation: 'sdfPop 0.25s'
-      }} onClick={(e) => e.stopPropagation()}>
-        <div style={{fontSize:48, textAlign:'center', marginBottom:8}}>🔒💎</div>
-        <div style={{fontSize:22, fontWeight:900, textAlign:'center', color:'var(--gold)', marginBottom:8}}>
-          В СЕЙФ?
-        </div>
-        <div style={{fontSize:13, textAlign:'center', color:'var(--text-dim)', marginBottom:16}}>
-          Взлом в <b style={{color:'var(--text)'}}>{safeTime}</b> МСК. Вложите часть выигрыша —
-          получите <span style={{color:'var(--green)', fontWeight:700}}>×1.5</span>, если соберёте код раньше других!
+    <div className="safe-prompt" onClick={skip} role="dialog" aria-modal="true" aria-label="Внести часть выигрыша в сейф">
+      <div className="safe-prompt__card" onClick={(e) => e.stopPropagation()}>
+        <button className="safe-prompt__close" onClick={skip} aria-label="Закрыть" type="button">
+          <Icon name="close" size={16} strokeWidth={2.4} />
+        </button>
+
+        <div className="safe-prompt__head">
+          <span className="safe-prompt__icon"><Icon name="lock" size={22} strokeWidth={1.9} /></span>
+          <div className="safe-prompt__title">Отложить выигрыш в сейф?</div>
+          <div className="safe-prompt__sub">
+            Взлом сегодня в <b>{safeTime}</b> МСК · приз до ×{payoutMult}
+          </div>
         </div>
 
-        <div style={{textAlign:'center', fontSize:32, fontWeight:900, color:'var(--gold)', marginBottom:4}}>
-          ${amount.toFixed(2)}
+        <div className="safe-prompt__sums">
+          <div className="safe-prompt__sum">
+            <span className="safe-prompt__sum-label">вкладываем</span>
+            <b className="safe-prompt__sum-value">${formatAmount(amount)}</b>
+            {/* Второй взнос в тот же раунд складывается с первым — игрок обязан
+                это видеть, иначе «вкладываем $85,86» читается как весь вклад */}
+            <span className="safe-prompt__sum-sub">
+              {already > 0
+                ? <>+ ${formatAmount(already)} уже в сейфе</>
+                : <>первый взнос в раунд</>}
+            </span>
+          </div>
+          <Icon name="arrowRight" size={18} strokeWidth={2} className="safe-prompt__arrow" />
+          <div className="safe-prompt__sum">
+            <span className="safe-prompt__sum-label">возможный приз</span>
+            <b className="safe-prompt__sum-value safe-prompt__sum-value--green">${formatAmount(prizeForecast)}</b>
+            <span className="safe-prompt__sum-sub">
+              {already > 0
+                ? <>со всего вклада ${formatAmount(totalInSafe)}</>
+                : <>×{payoutMult} от ${formatAmount(amount)}</>}
+            </span>
+          </div>
         </div>
-        <div style={{textAlign:'center', color:'var(--text-dim)', fontSize:12, marginBottom:14}}>
-          Возможный приз: ${(amount * 1.5).toFixed(2)}
+        <div className="safe-prompt__note">
+          Приз делится между теми, кто собрал код быстрее остальных. Если код не
+          собран — вклад возвращается в общий банк раунда.
         </div>
 
-        <div style={{display:'flex', gap:8, justifyContent:'center', marginBottom:16}}>
-          {CHIPS.map(p => (
+        <div className="safe-prompt__percents">
+          {PERCENTS.map(p => (
             <button
-              key={p}
-              onClick={() => setPercent(p)}
-              style={{
-                flex:1, padding:'10px 0', borderRadius:12, border:'1px solid rgba(255,255,255,0.1)',
-                background: p === percent ? 'var(--gold)' : 'var(--bg-3)',
-                color: p === percent ? 'var(--bg)' : 'var(--text)',
-                fontWeight:700, fontSize:15, cursor:'pointer'
-              }}
+              key={p} type="button"
+              className={`safe-prompt__percent${p === percent ? ' safe-prompt__percent--on' : ''}`}
+              onClick={() => { sfx.chip(); setPercent(p); }}
             >
-              {p}%
+              {p === 100 ? 'всё' : `${p}%`}
+              <small>${formatAmount(Math.round(profit * (p / 100) * 100) / 100)}</small>
             </button>
           ))}
         </div>
 
-        <label style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:'var(--text)', marginBottom:14, cursor:'pointer'}}>
-          <input
-            type="checkbox"
-            checked={autoSave}
-            onChange={e => setAutoSave(e.target.checked)}
-            style={{width:18, height:18, accentColor:'var(--gold)'}}
-          />
-          Вкладывать автоматически ({percent}% от каждого выигрыша)
-        </label>
-
         <button
-          className="btn"
+          className="btn btn-big btn-green"
           onClick={deposit}
           disabled={!canDeposit || submitting}
-          style={{background:'var(--gold)', color:'var(--bg)'}}
+          type="button"
         >
-          {submitting ? 'ВНОШУ...' : canDeposit ? `🔒 ВНЕСТИ $${amount.toFixed(2)}` : 'Минимум $1'}
+          <Icon name="deposit" size={18} strokeWidth={2} />
+          {submitting ? 'Вносим…' : canDeposit ? `Внести $${formatAmount(amount)}` : 'Минимум $1'}
         </button>
-        <label style={{display:'flex', alignItems:'center', gap:8, marginTop:12, fontSize:12, color:'var(--text-dim)', cursor:'pointer'}}>
+
+        {/* Группа «внести»: чекбокс автовклада относится к зелёной кнопке,
+            поэтому стоит прямо под ней, а не прижат к «Пропустить» */}
+        <label className="safe-prompt__check">
+          <input type="checkbox" checked={autoSave} onChange={e => setAutoSave(e.target.checked)} />
+          <span className="safe-prompt__box"><Icon name="check" size={11} strokeWidth={3} /></span>
+          Вкладывать так каждый раз — {percent}% от любого выигрыша
+        </label>
+
+        <div className="safe-prompt__split" aria-hidden="true" />
+
+        {/* Группа «не вносить»: «Пропустить» — заметная кнопка-альтернатива
+            (контур, а не прозрачный ghost), а «больше не предлагать» остаётся
+            тихой настройкой под ней. Раньше обе были одинаково бледными и
+            сливались в одну строку */}
+        <button className="safe-prompt__skip" onClick={skip} type="button">
+          <Icon name="close" size={14} strokeWidth={2.2} />
+          Пропустить
+        </button>
+        <label className="safe-prompt__check safe-prompt__check--muted">
           <input type="checkbox" checked={mutePrompts} onChange={e => setMutePrompts(e.target.checked)} />
+          <span className="safe-prompt__box"><Icon name="check" size={11} strokeWidth={3} /></span>
           Больше не предлагать сегодня
         </label>
-        <button className="btn btn-secondary mt" onClick={() => { if (mutePrompts) muteSafePrompt(); onClose(); }}>ПРОПУСТИТЬ</button>
       </div>
-      <style>{`
-        @keyframes sdfFade { from {opacity:0} to {opacity:1} }
-        @keyframes sdfPop { from {transform:scale(0.85);opacity:0} to {transform:scale(1);opacity:1} }
-      `}</style>
     </div>
   );
 }

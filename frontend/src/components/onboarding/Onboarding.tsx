@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../stores/auth';
 import VaultScene from '../../three/main/VaultScene';
+import Icon from '../ui/Icon';
 
 const screens = [
   {
@@ -9,7 +10,7 @@ const screens = [
   },
   {
     title: 'Четыре способа заработать',
-    text: '🚀 Ракета — забери до взрыва\n⚔️ Дуэль — орёл или решка\n🔒 Сейф — взломай первым\n💎 Вклад — пассивный доход'
+    text: 'Ракета — забери выигрыш до взрыва. Дуэль — орёл или решка один на один. Сейф — взломай код первым. Вклад — пассивный доход каждый день.'
   },
   {
     title: 'Пополни и начни',
@@ -30,9 +31,13 @@ export default function Onboarding() {
       </div>
 
       {step < screens.length - 1 ? (
-        <button className="btn" onClick={() => setStep(step + 1)}>ДАЛЕЕ →</button>
+        <button className="btn" onClick={() => setStep(step + 1)}>
+          ДАЛЕЕ <Icon name="chevronRight" size={16} strokeWidth={2.4} />
+        </button>
       ) : (
-        <button className="btn btn-green btn-big" onClick={setOnboardingDone}>🚀 НАЧАТЬ</button>
+        <button className="btn btn-green btn-big" onClick={setOnboardingDone}>
+          <Icon name="rocket" size={18} strokeWidth={2} /> Начать игру
+        </button>
       )}
 
       <div style={{display:'flex', gap:8, marginTop: 24}}>

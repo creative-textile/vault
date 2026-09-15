@@ -14,8 +14,14 @@ export async function getReplay(game:ReplayGame,id:number):Promise<ReplayEnvelop
     // (`/api/rocket/replay/:id` и `/api/replay/rocket/:id` публичны).
     if(r.cashout_at==null && Number(r.profit||0)===0) return null;
     const crash=Number(r.crash_at),curve=Number(r.flight_curve||.075);
+    // `was_beautiful` наружу НЕ отдаётся. Это внутренняя механика (бесплатное
+    // продление визуального полёта призрака после кэшаута): она не влияет на
+    // выплату, а её название и факт срабатывания в публичной карточке выдавали
+    // игроку устройство раунда и провоцировали искать «особенные» полёты.
+    // Анимация при этом остаётся честной: призрак летит до сохранённого
+    // `crash_at` и взрывается — ровно так же, как на экране Ракеты.
     return {version:1,game,id,created_at:r.started_at||r.created_at,duration_ms:Math.round(Math.log(crash)/curve*1000),
-      outcome:{bet:Number(r.bet),crash_at:crash,cashout_at:r.cashout_at==null?null:Number(r.cashout_at),profit:Number(r.profit),payout:r.cashout_at==null?0:Math.round((Number(r.bet)+Number(r.profit))*100)/100,was_beautiful:!!r.was_beautiful},
+      outcome:{bet:Number(r.bet),crash_at:crash,cashout_at:r.cashout_at==null?null:Number(r.cashout_at),profit:Number(r.profit),payout:r.cashout_at==null?0:Math.round((Number(r.bet)+Number(r.profit))*100)/100},
       animation:{seed:r.replay_seed||`legacy-rocket-${id}`,curve,tick_hz:30},participants:[{name:`@${r.username||'user'}`}],share_url:share(game,id)};
   }
   if(game==='duel') {
@@ -28,7 +34,12 @@ export async function getReplay(game:ReplayGame,id:number):Promise<ReplayEnvelop
     const commission=parseFloat((await getSetting('commission_percent'))||'10');
     const amount=Number(r.amount);
     const prize=Math.round(amount*2*(1-commission/100)*100)/100;
-    const net=Math.round((prize/2-amount)*100)/100;
+    // Чистый результат ПОБЕДИТЕЛЯ: весь приз минус своя ставка.
+    // Прежняя формула `prize/2 - amount` делила банк пополам и поэтому при
+    // ставке $50 показывала «+$5.00» вместо настоящих «+$40.00»
+    // (банк $100, комиссия 10% → приз $90, прибыль победителя $40).
+    // Проигравший теряет ровно свою ставку.
+    const net=Math.round((prize-amount)*100)/100;
     return {version:1,game,id,created_at:r.finished_at||r.created_at,duration_ms:2800,
       outcome:{amount,result:r.result,winner_id:r.winner_id,prize,profit:net},animation:{seed:`duel-${id}`,trajectory:r.coin_trajectory},
       participants:[{role:'creator',name:`@${r.creator_name||'user'}`,won:Number(r.winner_id)===Number(r.creator_id),net:Number(r.winner_id)===Number(r.creator_id)?net:-amount},{role:'opponent',name:`@${r.opponent_name||'user'}`,won:Number(r.winner_id)===Number(r.opponent_id),net:Number(r.winner_id)===Number(r.opponent_id)?net:-amount}],share_url:share(game,id)};

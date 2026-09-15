@@ -920,10 +920,10 @@ export default function RocketScene({
         <div className="scene-hud">
           <div className="scene-hud__top">
             <div className="hud-pill hud-pill--green">
-              ✅ кэшаут x{cashoutAt.toFixed(2)}
+              кэшаут x{cashoutAt.toFixed(2)}
             </div>
             <div className={`hud-pill ${ghostDone ? 'hud-pill--red' : 'hud-pill--gold'}`}>
-              {ghostDone ? '💥 финальная точка' : '👻 призрак летит'}
+              {ghostDone ? 'финальная точка' : 'призрак летит'}
             </div>
           </div>
           <div style={{ margin: '0 auto', textAlign: 'center' }}>

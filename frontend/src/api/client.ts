@@ -5,12 +5,22 @@
 const API_URL = '';
 
 import { getStoredToken } from '../utils/tokenStorage';
+import { dialog } from '../components/ui/Dialog';
 
 function getDeviceId(): string {
-  let id=localStorage.getItem('vault:device-id');
-  if(!id) { id=crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`; localStorage.setItem('vault:device-id',id); }
-  return id;
+  // Хранилище может быть недоступно (приватный режим, WebView, iframe без
+  // same-origin) — тогда id живёт в памяти вкладки: он нужен только как ключ
+  // лимитера, его потеря не критична, а исключение сломало бы все запросы.
+  try {
+    let id=localStorage.getItem('vault:device-id');
+    if(!id) { id=crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`; localStorage.setItem('vault:device-id',id); }
+    return id;
+  } catch {
+    return deviceMemoryId;
+  }
 }
+
+const deviceMemoryId = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
 function getToken(): string | null {
   return getStoredToken();
@@ -20,12 +30,65 @@ export class ApiError extends Error {
   constructor(message:string,public status:number,public retryAfter?:number){super(message);this.name='ApiError';}
 }
 
+const ADMIN_PWD_KEY = 'vault:admin-password';
+
+/** Хранилище может бросать исключение — не роняем из-за этого запрос. */
+function readSession(key: string): string {
+  try { return sessionStorage.getItem(key) || ''; } catch { return ''; }
+}
+function writeSession(key: string, value: string | null) {
+  try {
+    if (value == null) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, value);
+  } catch { /* приватный режим / WebView без хранилищ */ }
+}
+
+/**
+ * Пароль администратора спрашиваем одним окном на все параллельные запросы.
+ *
+ * Админка при открытии шлёт несколько запросов разом; без single-flight каждый
+ * из них поднял бы своё окно ввода, и админу пришлось бы вводить пароль N раз.
+ * Нативный `window.prompt` здесь больше не используется: в Telegram Mini App
+ * он выглядит чужеродно, а на части WebView просто не показывается.
+ */
+let adminPasswordPrompt: Promise<string> | null = null;
+let adminPasswordMemory = '';
+
+async function ensureAdminPassword(): Promise<string> {
+  const stored = readSession(ADMIN_PWD_KEY) || adminPasswordMemory;
+  if (stored) return stored;
+  if (!adminPasswordPrompt) {
+    adminPasswordPrompt = dialog.prompt({
+      title: 'Пароль администратора',
+      message: 'Раздел доступен только владельцу проекта. Пароль запоминается до конца сессии.',
+      input: { type: 'password', placeholder: 'Введите пароль', required: true },
+      confirmText: 'Войти',
+      tone: 'gold',
+      icon: 'key'
+    }).then((value) => {
+      const pwd = (value || '').trim();
+      if (pwd) { adminPasswordMemory = pwd; writeSession(ADMIN_PWD_KEY, pwd); }
+      return pwd;
+    }).finally(() => { adminPasswordPrompt = null; });
+  }
+  return adminPasswordPrompt;
+}
+
+export function forgetAdminPassword() {
+  adminPasswordMemory = '';
+  writeSession(ADMIN_PWD_KEY, null);
+}
+
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
-  let adminPassword='';
-  if(path.startsWith('/api/admin')) {
-    adminPassword=sessionStorage.getItem('vault:admin-password')||'';
-    if(!adminPassword) { adminPassword=window.prompt('Пароль администратора')||''; if(adminPassword) sessionStorage.setItem('vault:admin-password',adminPassword); }
+  const isAdminPath = path.startsWith('/api/admin');
+  let adminPassword = '';
+  if (isAdminPath) {
+    adminPassword = await ensureAdminPassword();
+    // Пароль не ввели (окно закрыли) — запрос не отправляем вовсе. Иначе сервер
+    // ответил бы 401 на «нет пароля», и приложение приняло бы это за потерю
+    // сессии: сбросило токен и перезапустило вход.
+    if (!adminPassword) throw new ApiError('Требуется пароль администратора', 401);
   }
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -38,10 +101,18 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     }
   });
   const data = await res.json().catch(()=>({}));
-  if (!res.ok && path.startsWith('/api/admin') && res.status===401) sessionStorage.removeItem('vault:admin-password');
+  if (!res.ok && isAdminPath && res.status===401) forgetAdminPassword();
   // Любой актуальный 401 будит единый auth bootstrap. Токен кладём в detail,
   // чтобы запоздалый ответ старой сессии не мог удалить уже выданный новый JWT.
-  if (res.status===401 && token) window.dispatchEvent(new CustomEvent('vault:unauthorized',{detail:{token}}));
+  //
+  // Событие шлём и когда токена НЕТ: раньше условие `&& token` оставляло
+  // приложение в мёртвой точке — запросы уходили без Authorization, каждый
+  // отвечал 401, а перезапуск входа никто не инициировал (помогал только
+  // рефреш страницы). Эндпоинты входа и админский пароль исключаем: там 401
+  // означает не потерю сессии, а неверные учётные данные.
+  if (res.status===401 && !path.startsWith('/api/auth') && !isAdminPath) {
+    window.dispatchEvent(new CustomEvent('vault:unauthorized',{detail:{token}}));
+  }
   if (!res.ok) throw new ApiError(data.error || 'Ошибка',res.status,Number(data.retry_after)||undefined);
   return data as T;
 }
@@ -87,7 +158,12 @@ export const walletApi = {
 export const rocketApi = {
   start: (bet: number) => api('/api/rocket/start', { method: 'POST', body: JSON.stringify({ bet }) }),
   history: (limit = 50) => api(`/api/rocket/history?limit=${limit}`),
-  bankroll: () => api('/api/rocket/bankroll')
+  /**
+   * Лимиты ставки Ракеты. Путь исторически называется `/bankroll`, но кассу он
+   * больше не отдаёт (это админская цифра) — только `min_bet`, `max_bet`
+   * (`null` = без лимита) и `max_bet_percent`.
+   */
+  limits: () => api('/api/rocket/bankroll')
 };
 
 export const duelApi = {

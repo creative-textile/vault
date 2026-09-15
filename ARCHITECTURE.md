@@ -65,7 +65,7 @@
 │  ┌──────────────────────────────────────────────┐    │
 │  │   Cron (node-cron)                           │    │
 │  │   09:00 — создать сейф                       │    │
-│  │   21:00 — старт взлома (открыть окно)        │    │
+│  │   18:00 МСК — старт взлома (открыть окно)     │    │
 │  │   21:02 — дедлайн окна взлома                │    │
 │  │          (итоги раньше, если все сдали)      │    │
 │  │   00:00 — распределить Вклад                 │    │
@@ -382,7 +382,7 @@ platform_cashbox / cashbox_transfers ── (главная касса и жур
 settings ────────────────── key-value хранилище настроек           │
   key (PRIMARY), value                                             │
   └── commission_percent=10, referral_percent=3,                   │
-      safe_payout_multiplier=1.5, safe_crack_hour=21, ...          │
+      safe_payout_multiplier=1.5, safe_crack_hour=18, ...          │
                                                                    │
 user_notifications, admin_audit_log,                               │
 user_security_identifiers, antifraud_flags, vault_deposit_accruals │
@@ -426,11 +426,12 @@ function roundDownClean(value: number): number {
 }
 ```
 
-Примеры: `33→30`, `68→60`, `116→100`, `288→200`, `1437→1000`, `14000→10000`.
+Примеры: `33→30`, `68→60`, `116→100`, `288→200`, `1437→1000`, `2500→2000`, `14000→10000`.
 
 Применяется к:
-- Максимальной ставке Ракеты: `roundDownClean(bankroll × 0.5)`
-- Максимальному Вкладу: `roundDownClean(max(pool × 10, 100))`
+- Максимальной ставке Ракеты: `roundDownClean(bankroll × rocket_max_bet_percent / 100)`
+- Максимальному Вкладу: `roundDownClean(max(pool × 10, 100))
+- Кнопкам быстрого выбора суммы на клиенте (`frontend/src/utils/betChips.ts` повторяет ту же формулу, чтобы «25%» на кнопке и «Макс: $N» в подписи не расходились)
 
 ---
 
@@ -536,13 +537,13 @@ function calculateCrashPoint(bet, bankroll) {
    - **Даты сейфов считаются строково, никогда через `Date`.** В контейнере `TZ=Europe/Moscow`, и pg отдаёт колонку `DATE` как `Date` в **локальной** полночи: `setUTCDate(+1)` + `toISOString()` сдвигает дату на день назад, следующий сейф получает сегодняшнюю дату, `INSERT` упирается в `UNIQUE(date)` и цепочка обрывается (в pg-mem `DATE` приходит строкой, поэтому баг воспроизводится только на живой БД). Помощники `toDateStr()`/`nextSafeDate()` в `services/safe.ts` берут локальные компоненты и прибавляют день через `Date.UTC` — покрытие в `smoke-cron.cjs chain`
    - **Сбор не останавливается ни на минуту, а цепочка сейфов бесконечна.** `getCollectingSafe()` возвращает первый сейф со статусом `collecting` и датой ≥ сегодня; при отсутствии его создаёт `ensureNextDaySafe()` — датой **«максимальная дата в таблице + 1 день»** (а не «календарное завтра»), иначе после переноса времени взлома «завтра» уже занято сейфом #2, `INSERT` упирается в `UNIQUE(date)`, и раунд #3 не создаётся никогда. Если сервер долго не работал, дата берётся не раньше сегодняшней. Вставка идёт с `ON CONFLICT (date) DO NOTHING`, поэтому параллельные вклады не создают два сейфа. `safeDeposit()`/`cancelSafeDeposit()` работают именно с ним, поэтому во время взлома и после розыгрыша вклады (ручные и автовклад `auto_safe_percent` с выигрыша в дуэли/ракете) уходят уже в следующий сейф и никогда не получают «Сейф закрыт»
    - Каждый вклад/возврат рассылает socket-событие `safe_deposit { safe_id, bank, prize_pool, participants_count }` — банк в карточках (главная, сейф) обновляется у всех клиентов без перезагрузки
-3. **21:00** — планировщик (`maybeStartCrack()`, тик раз в минуту + `runSafeTick()` для тестов) проверяет минимум (банк ≥ $25, участников ≥ 2):
+3. **18:00 МСК** — планировщик (`maybeStartCrack()`, тик раз в минуту + `runSafeTick()` для тестов) проверяет минимум (банк ≥ $25, участников ≥ 2):
    - Если не собран — все вклады возвращаются, сейф получает статус `cancelled`
    - Если собран — статус `cracking`, проставляется `crack_started_at`, создаётся сейф на следующий день, клиентам показываются барабаны. **Код в этот момент ещё не отдаётся**: он открывается за `SPIN_CODE_LEAD_MS` (3 с) до общего старта вращения (`isCodeRevealed()`), а до этого `/api/safe/current` возвращает `code: null`, `drum_speeds: null` и `code_reveal_in_ms` — сколько миллисекунд осталось до открытия
    - **Ломают тот сейф, который сейчас собирает** (`getCollectingSafeOrNull()`), а не «сегодняшний»: после розыгрыша собирать уже может сейф следующей даты, и именно он должен открыться в настроенное время
    - Слот взлома — настроенные час:минута сегодняшнего дня (`todaySlotMSK()`). Если сейф начал собирать **позже** текущего слота (`collect_started_at`, для старых строк — момент взлома предыдущего сейфа), значит слот уже отыгран предыдущим раундом и взлом переносится на завтра. Отсюда два следствия: (а) нет бесконечного цикла «взлом → сбор → тут же взлом», (б) **перенос времени в админке срабатывает сразу** — собирающий сейф открывается в новый слот, ждать сутки не нужно
    - `/api/safe/current` отдаёт `crack_at`/`time_to_crack_ms` собирающего сейфа (`nextMSK()` — ближайшее наступление настроенного времени), поэтому таймер на главной и на экране сейфа всегда показывает реальный момент следующего взлома
-4. **21:00 → 21:00 + окно взлома** — фаза взлома. Окно длится **ровно** `safe_crack_timeout_minutes` (настройка в админке «Нужно взломать сейф за (минуты)», по умолчанию **1 минута**; та же формулировка — в таймерах на `/safe` и `/safe/crack`) — это дедлайн для всех участников:
+4. **18:00 → 18:00 + окно взлома** — фаза взлома. Окно длится **ровно** `safe_crack_timeout_minutes` (настройка в админке «Нужно взломать сейф за (минуты)», по умолчанию **1 минута**; та же формулировка — в таймерах на `/safe` и `/safe/crack`) — это дедлайн для всех участников:
    - Пользователи тапают по барабанам в момент, когда видна нужная цифра, фронтенд отправляет `{ time_ms }`
    - **Код проверяет сервер.** Барабан останавливается только на своей цифре. Клиент отправляет `{ time_ms, taps: [ms, ms, ms] }` — моменты тапов от старта вращения, а сервер той же формулой `digitAt(speed, ms) = floor((ms × speed × 0.0013) % 10)` пересчитывает, какие цифры были видны, и сверяет с кодом сейфа. Если хоть одна цифра не совпала — результат **отклоняется** (`400 «Цифры не совпадают с кодом сейфа»`), клиент раскручивает барабаны заново, и игрок пробует снова. Тапы вне диапазона `[0, spinElapsed + 1 с]` считаются некорректными (допуск на расхождение часов клиента и сервера); отклонения пишутся в лог
    - **Время засчитывается только по серверным часам:**
@@ -601,7 +602,7 @@ function calculateCrashPoint(bet, bankroll) {
 
 **Экран `/safe` во время взлома** показывает короткую строку состояния (сейф, остаток окна, «сдали результат: X из Y», статус своего вклада), а не отдельное «меню взлома»: игрок с вкладом сюда просто не попадает — его уводит редиректор. Кнопка «🔓 СОБРАТЬ КОД» оставлена только как запасной вход для того, кто вышел из мини-игры сам, плюс «👀 СМОТРЕТЬ ВЗЛОМ» для тех, кто в раунде не участвовал. На главной в это же время написано, участвует ли игрок в идущем взломе («вы участвуете в этом раунде — мини-игра откроется сама» / «вы не вносили вклад в этот раунд — взлом идёт без вас»), чтобы причина перехода (или его отсутствия) была видна без консоли.
 
-**Подпись отсчёта — часами, а не «время МСК».** `/api/safe/current` отдаёт `crack_at_msk` («21:00», из `safe_crack_hour`/`safe_crack_minute` через `fmtMSK(nextMSK(...))`), и под таймером написано «взлом в 21:00 МСК» (на главной — «СЕЙФ #2 · взлом в 21:00 МСК»). Обратный отсчёт остаётся, но игрок видит конкретное время: «до взлома (время МСК)» не отвечало на вопрос «во сколько» на вопрос «во сколько».
+**Подпись отсчёта — часами, а не «время МСК».** `/api/safe/current` отдаёт `crack_at_msk` («18:00», из `safe_crack_hour`/`safe_crack_minute` через `fmtMSK(nextMSK(...))`), и под таймером написано «взлом в 18:00 МСК» (на главной — «СЕЙФ #2 · взлом в 18:00 МСК»). Обратный отсчёт остаётся, но игрок видит конкретное время: «до взлома (время МСК)» не отвечало на вопрос «во сколько» на вопрос «во сколько».
 
 Оба флага живут в **`sessionStorage`** (`tabStore` в `Safe.tsx`), а не в `localStorage`: он свой для каждой вкладки. С общим хранилищем две вкладки одного браузера делили флаг — в одной мини-игра открывалась сама, в другой нужно было жать кнопку и терять секунды, а итоги в одной раскрывались, в другой нет.
 
@@ -815,9 +816,15 @@ esbuild-бандлом, поэтому работают на Node 20 из Docker
 {
   "round_id": 12409,
   "replay_seed": 7,
-  "max_bet": 700
+  "max_bet": 700,
+  "max_bet_unlimited": false,
+  "min_bet": 1
 }
 ```
+
+Размера кассы здесь нет (как и в `GET /api/rocket/bankroll`): `bankroll` —
+внутренняя админская цифра, и её утечка в клиент позволяла игроку оценивать запас
+стола. Публичные ответы прогоняются через `publicRocketLimits()`.
 
 `crash_at` здесь **нет намеренно** — точка взрыва приходит только в `crash` / `cashout_result`,
 когда раунд уже закрыт. Анимация полёта строится от `replay_seed` и времени, точка взрыва
@@ -845,7 +852,7 @@ esbuild-бандлом, поэтому работают на Node 20 из Docker
     "participants_count": 20, "winners_count": 11,
     "status": "collecting", "bonus": false,
     "code": null, "drum_speeds": null, "code_reveal_in_ms": null,
-    "time_to_crack_ms": 15732000, "crack_at_msk": "21:00"
+    "time_to_crack_ms": 15732000, "crack_at_msk": "18:00"
   },
   "my_deposit": { "id": 15, "amount": 10, "crack_time_ms": null, "prize": 0 },
   "collecting_safe": { "id": 49, "bank": 120, "participants_count": 4, "time_to_crack_ms": 86400000 },
@@ -972,7 +979,7 @@ The pre-auth general limiter keys on `X-Device-Id` (IP fallback) and allows 300 
 
 ### Share attribution and resilient UI actions
 
-Replay URLs may carry `?player=@username`; the backend still returns immutable round facts, while the public client validates the requested hero against replay participants. Monetary outcome fields (`payout`, `profit`, participant `net`, Safe rank/prize) make share cards self-explanatory. Rocket distinguishes `cashout_at` from `crash_at` and exposes `was_beautiful`, preventing a post-cashout visual extension from being mistaken for a payout discrepancy.
+Replay URLs may carry `?player=@username`; the backend still returns immutable round facts, while the public client validates the requested hero against replay participants. Monetary outcome fields (`payout`, `profit`, participant `net`, Safe rank/prize) make share cards self-explanatory. Rocket distinguishes `cashout_at` from `crash_at`, so a post-cashout visual extension is never mistaken for a payout discrepancy. (The `was_beautiful` flag used to travel in the same envelope and has since been removed — see the UI revision section below.)
 
 Deposit address acquisition has bounded retries, visibility recovery and explicit retry UI. Duel acceptance sets a short client transition lock before the request, preventing its own persisted result event from flashing a modal in the lobby. Rematch notification actions call the same authoritative accept/decline endpoints and then mark the notification read.
 
@@ -989,3 +996,100 @@ Rocket history applies spoiler protection only when a row matches the locally he
 Project statistics have a dedicated `/stats` route backed by public `/api/stats/summary`; Home no longer owns its polling or detailed balance breakdown. `/api/vault/accruals` reads immutable per-day accrual rows for the authenticated user. Reconciliation remains admin-only and presents invariant counts with explicit refresh. API 401 responses emit a token-scoped browser event; App discards only the matching current JWT and reruns its single-flight bootstrap, remounting Deposit and other private screens safely.
 
 Home exposes the `/stats` route through one navigation tile only, avoiding duplicate calls to the same destination.
+
+## UI revision: UI-kit, user card and bet limits
+
+**Единый UI-kit вместо эмодзи и нативных диалогов.** `frontend/src/components/ui/Icon.tsx` —
+инлайновый набор SVG-иконок (без внешних шрифтов и без `<img>`: иконка наследует цвет текста и
+не мигает при загрузке). `frontend/src/components/ui/Dialog.tsx` — очередь модальных окон
+`confirm`/`prompt` поверх `DialogHost` в `App.tsx`: `window.confirm`/`window.prompt` из кода
+удалены полностью (в Telegram WebView они блокируются или рисуются системным окном поверх
+Mini App, а ввод теряется). Все пользовательские эмодзи в компонентах заменены на `<Icon/>`
+или убраны из тостов; остались только отладочный `dev/scenes.tsx` и canvas-текстуры.
+
+**Карточка пользователя в админке** (`GET /api/admin/users/:id`) собирает баланс, статистику
+игр, дуэли, сейф и вклад одним запросом, а рефералов — одним `LEFT JOIN … GROUP BY` вместо
+N+1 коррелированных подзапросов (на рефоводе с сотней приглашённых карточка подвешивала
+запрос на секунды). В ответе — имена рефералов, их оборот и реферальные начисления; в панели
+строка «Заморожено (дуэли)» переименована в «Дуэли».
+
+**Лимит ставки Ракеты.** `rocket_max_bet_percent` по умолчанию **100** (было 50), допустимый
+диапазон `[0, 1000000]`:
+- `100` — можно поставить всю кассу;
+- `> 100` — ставка может превышать кассу (осознанный риск админа: точка взрыва упирается в
+  `bankroll / bet`, раунд почти всегда падает мгновенно);
+- `0` — лимита нет, `max_bet` возвращается как `null`, а клиент пишет «Макс: **без лимита**»
+  вместо бессмысленного `$0`.
+Значение округляется `roundDownClean()`, поэтому в `/api/rocket/bankroll` всегда «красивая»
+сумма, а `/api/config` отдаёт сам процент — по нему клиент понимает, показывать лимит или нет.
+
+**Взлом сейфа в 18:00 МСК.** `safe_crack_hour` по умолчанию **18** (было 21); окно взлома,
+дедлайн и подпись `crack_at_msk` считаются от той же настройки, миграция в `src/index.ts`
+переводит существующие БД на новое значение.
+
+**Деньги на экранах.** `common/BalancePanel.tsx` — один блок «доступно + где ещё лежат средства»
+(пилюли frozen/сейф/вклад) вместо разнобойных строк «Текущий баланс: $50.00 ❄️ Заморожено…»;
+используется на `/deposit`, `/withdraw` и в играх. `common/AmountChips.tsx` + `utils/betChips.ts` —
+кнопки быстрого выбора суммы: считаются от доступного баланса (25/50/75% + «Всё»), округляются
+вниз до первой значащей цифры и отбрасываются, если не проходят минимальную ставку.
+`common/PlatformFootnote.tsx` — служебная сноска «Комиссия игр · Вывод · USDT (TON)»
+без акцентного цвета; цифры берутся из `/api/config`, а не захардкожены.
+
+**Реплеи.** Подпись «✨ Красивый полёт… призрак долетел до ×N» удалена вместе с полем
+`was_beautiful` из `services/replay.ts` и `api/routes/rocket.ts`: внутренний шанс 3%
+(`beautiful_flight_chance`) не должен быть виден игроку. Визуал призрака в живом раунде
+сохранён. В `common/Replay.tsx` добавлен `sfx.unlock()` на рестарте — без жеста браузер не
+создаёт `AudioContext`, поэтому в реплеях не было звука, а в обычном запуске он был.
+Дуэль в реплее показывает чистую прибыль `profit = prize − amount` (при ставке $50 и призе
+$70 — «+$20», а не «+$5»).
+
+**Сессия.** `utils/tokenStorage.ts` держит JWT ещё и в памяти вкладки: в приватном режиме и в
+WebView с заблокированными сторонними хранилищами `sessionStorage` бросает SecurityError,
+токен «исчезал» сразу после входа, и демо-пополнение отвечало 401 до перезагрузки страницы.
+`Deposit` при 401 ждёт восстановления сессии и повторяет запрос один раз.
+
+**Тесты.** `backend/tests/smoke.cjs` дополнен проверками `/api/config`, валидатора настроек
+(`rocket_max_bet_percent` 0/250/−5), карточки пользователя с рефералами, лимитов Ракеты
+(100% / 250% / 0 = безлимит, ставка больше кассы при 0) и денежного итога реплея дуэли.
+DDL тестовой in-memory БД синхронизирована с `init.sql`.
+
+## Второй проход: нераскрытие кассы, живые суммы по умолчанию, запуск БД
+
+**Касса Ракеты — только серверная величина.** `getRocketLimits()` по-прежнему
+возвращает `bankroll` (он нужен для проверки ставки и расчёта точки взрыва), но в
+HTTP-ответы попадает `publicRocketLimits()` — `{min_bet, max_bet, max_bet_percent}`.
+Поле `bankroll` убрано и из результата `placeBet()`. Смоук-набор `money` проверяет
+отсутствие ключа в обоих местах, чтобы регрессия не вернулась.
+
+**Сумма по умолчанию считается от баланса.** `frontend/src/utils/betChips.ts` →
+`defaultAmount(available, min, max, preferred)` и хук `utils/useAmountField.ts`:
+желаемая сумма экрана (минимум игры, исторические $10/$25) остаётся, если она по
+карману; иначе подставляется средний номинал кнопок `amountChips()` (25%
+доступного, `roundDownClean()`); если ставить нечего — поле пустое. Хук хранит
+`touched` ref, поэтому пришедший по сокету новый баланс не стирает введённую
+игроком сумму. Применено в Сейфе, Ракете, Дуэли и Вкладе.
+
+**Модалка «Отложить выигрыш в сейф?»** берёт уже внесённую сумму из
+`my_collecting_deposit` в `/api/safe/current` и считает прогноз приза от
+`already + amount`, а не только от нового взноса: второй взнос в тот же раунд
+участвует в розыгрыше целиком. Нижняя часть модалки разделена на группу «внести»
+(зелёная кнопка + чекбокс автовклада) и группу «не вносить» (контурная кнопка
+«Пропустить» + тихий чекбокс «больше не предлагать»).
+
+**Бейдж плитки игры** (`components/layout/Home.tsx`) выведен из `position: absolute`
+в поток колонки (`align-self: flex-end` + отрицательные поля): прежняя плашка
+исключалась из потока и не резервировала место, из-за чего «PvP 50/50» наезжала на
+иконку мечей. Бейдж Дуэли получил `tile-badge--cyan` — цвет идентичности зала.
+
+**Запуск БД.** Healthcheck `db` в `docker-compose.yml` проверяет готовность по TCP
+(`pg_isready -h 127.0.0.1 -U … -d …`): официальный образ postgres выполняет
+`init.sql` на временном сервере, слушающем только unix-сокет, поэтому сокетная
+проверка зеленела до окончания инициализации. `depends_on: service_healthy`
+после этого действительно гарантирует применённую схему, и backend больше не
+стартует в цикл `[DB] Attempt N/30 failed … Retrying`. Добавлены `start_period: 20s`
+и 60 попыток, а `waitForDb()` логирует одну строку раз в пять попыток.
+
+**3D-ассеты.** Требования к моделям, якорям, клипам анимаций, бюджету бандла,
+контракту `three/lib/models.ts` и критериям приёмки вынесены в отдельный документ
+[`TZ-3D-MODELS.md`](./TZ-3D-MODELS.md): работа передана отдельному исполнителю,
+процедурная геометрия остаётся в репозитории как fallback для `quality: 'low'`.

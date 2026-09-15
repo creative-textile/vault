@@ -4,6 +4,7 @@ import { releaseBalance } from '../../utils/balanceHold';
 import { hasFreshDuelResults } from '../../stores/notifications';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Header from '../layout/Header';
+import Icon from '../ui/Icon';
 import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, safeApi } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -206,9 +207,9 @@ export default function DuelGame() {
   if (loadErr) {
     return (
       <>
-        <Header title="⚔️ Дуэль" />
+        <Header title="Дуэль" icon="swords" />
         <div className="text-center mt text-red">{loadErr}</div>
-        <button className="btn mt" onClick={() => nav('/')}>🏠 НА ГЛАВНУЮ</button>
+        <button className="btn mt" onClick={() => nav('/')}><Icon name="home" size={16} strokeWidth={2} /> На главную</button>
       </>
     );
   }
@@ -217,7 +218,7 @@ export default function DuelGame() {
 
   return (
     <>
-      <Header title="⚔️ Дуэль" />
+      <Header title="Дуэль" icon="swords" />
       {/* onFinish срабатывает в момент касания пола (не по таймеру экрана),
           поэтому звон монеты совпадает с картинкой даже на 120 Гц */}
       <DuelScene phase={phase as any} result={result} trajectory={traj} onFinish={() => sfx.coinLand()} />
@@ -230,27 +231,27 @@ export default function DuelGame() {
               оформленный проигрыш читался бы как издевательство. */}
           {won ? (
             <div className="bigwin">
-              <div className="bigwin__label">🏆 вы победили · {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}</div>
+              <div className="bigwin__label"><Icon name="trophy" size={15} strokeWidth={2.1} /> вы победили · {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}</div>
               <div className="bigwin__amount">+${profit.toFixed(2)}</div>
               <div className="text-dim" style={{ fontSize: 13 }}>банк ${prize.toFixed(2)} · ставка ${amount.toFixed(2)}</div>
             </div>
           ) : (
             <>
-              <div className="result-text lose">❌ ВЫ ПРОИГРАЛИ</div>
-              <div className="text-center" style={{ fontSize: 20 }}>
-                🪙 {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}
+              <div className="result-text lose"><Icon name="close" size={22} strokeWidth={2.4} /> Вы проиграли</div>
+              <div className="text-center duel-coin">
+                <Icon name="coins" size={17} strokeWidth={2} /> {result === 'heads' ? 'ОРЁЛ' : 'РЕШКА'}
               </div>
               <div className="result-text lose">-${amount.toFixed(2)}</div>
             </>
           )}
           {replayOf && (
-            <div className="text-dim text-center" style={{fontSize:12, marginBottom:6}}>
-              📼 Повтор дуэли от {replayOf} МСК
+            <div className="text-dim text-center duel-replay-of">
+              <Icon name="replay" size={13} /> Повтор дуэли от {replayOf} МСК
             </div>
           )}
           {autoDeposited > 0 && (
-            <div className="text-center text-green" style={{fontSize:14, marginTop:-8, marginBottom:8}}>
-              🔒 ${autoDeposited.toFixed(2)} автоматически переведено в Сейф
+            <div className="text-center text-green duel-autosafe">
+              <Icon name="lock" size={14} strokeWidth={2} /> ${autoDeposited.toFixed(2)} автоматически переведено в Сейф
             </div>
           )}
 
@@ -271,18 +272,18 @@ export default function DuelGame() {
           <MoneyBreakdown />
 
           <div className="btn-row">
-            <button className="btn" onClick={() => rematch(1)}>⚔️ РЕВАНШ ${amount}</button>
-            <button className="btn btn-secondary" onClick={() => rematch(2)}>⚔️ ×2</button>
+            <button className="btn" onClick={() => rematch(1)}><Icon name="swords" size={17} strokeWidth={2} /> Реванш ${amount}</button>
+            <button className="btn btn-secondary" onClick={() => rematch(2)}><Icon name="swords" size={16} strokeWidth={2} /> ×2</button>
           </div>
           <button className="btn btn-secondary" onClick={() => {
             const url=`${location.origin}/replay/duel/${id}?player=${encodeURIComponent('@'+(user?.username||'user'))}`;
             if(navigator.share) navigator.share({title:'Повтор дуэли VAULT',url}); else navigator.clipboard?.writeText(url).then(()=>showToast('Ссылка скопирована'));
-          }}>📤 ПОДЕЛИТЬСЯ РЕПЛЕЕМ</button>
-          <button className="btn btn-secondary mt" onClick={goBack}>↩️ К ЛОББИ</button>
-          <button className="btn btn-secondary mt" onClick={goHome}>🏠 НА ГЛАВНУЮ</button>
+          }}><Icon name="share" size={16} strokeWidth={2} /> Поделиться повтором</button>
+          <button className="btn btn-secondary mt" onClick={goBack}><Icon name="chevronLeft" size={16} strokeWidth={2.2} /> К лобби</button>
+          <button className="btn btn-secondary mt" onClick={goHome}><Icon name="home" size={16} strokeWidth={2} /> На главную</button>
           {won && profit >= 1 && (user?.auto_safe_percent || 0) === 0 && (
-            <button className="btn mt" style={{background:'var(--violet)', color:'var(--text)'}} onClick={() => setShowSafe(true)}>
-              🔒 ВЛОЖИТЬ ВЫИГРЫШ В СЕЙФ
+            <button className="btn btn-violet mt" onClick={() => setShowSafe(true)}>
+              <Icon name="lock" size={17} strokeWidth={2} /> Вложить выигрыш в сейф
             </button>
           )}
         </>

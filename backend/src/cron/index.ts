@@ -26,7 +26,7 @@ import { processDeadBalances } from '../services/dead-balances';
  * был взломан), и следующий взлом — завтра.
  */
 async function maybeStartCrack(lastCrackDate: string): Promise<string> {
-  const hour = parseInt(await getSetting('safe_crack_hour') || '21');
+  const hour = parseInt(await getSetting('safe_crack_hour') || '18');
   const minute = parseInt(await getSetting('safe_crack_minute') || '0');
   const now = nowMSK();
   const today = todayMSK();

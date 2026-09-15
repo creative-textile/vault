@@ -1,8 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import MoneyBreakdown from '../common/MoneyBreakdown';
+import AmountChips from '../common/AmountChips';
 import { holdBalance, releaseBalance } from '../../utils/balanceHold';
 import { Link, useNavigate } from 'react-router-dom';
 import Header from '../layout/Header';
+import Icon from '../ui/Icon';
+import { formatAmount } from '../../utils/betChips';
+import { useAmountField } from '../../utils/useAmountField';
 import DuelScene from '../../three/duel/DuelScene';
 import { duelApi, publicConfig } from '../../api/client';
 import { useAuth } from '../../stores/auth';
@@ -19,20 +23,29 @@ interface LobbyItem {
   parent_duel_id?: number;
 }
 
-const CHIPS_DEFAULTS = [5, 10, 25, 50, 100, 500];
 
 export default function Duel() {
   const { user, refreshUser, showToast } = useAuth();
   const nav = useNavigate();
   const [lobby, setLobby] = useState<LobbyItem[]>([]);
   const [history, setHistory] = useState<any[]>([]);
-  const [amount, setAmount] = useState('25');
-  const [creating, setCreating] = useState(false);
   const [minBet, setMinBet] = useState(1);
+  // Ставка по умолчанию считается от доступного баланса: прежние $25 стояли и
+  // у игрока с $3 (невозможная ставка), и у игрока с $10 000 (мелочь). Если
+  // $25 по карману — остаются $25, иначе средний номинал кнопок ниже.
+  const available = Number(user?.available ?? ((user?.balance || 0) - (user?.frozen_balance || 0))) || 0;
+  const [amount, setAmount] = useAmountField({ available, min: minBet, preferred: 25 });
+  const [creating, setCreating] = useState(false);
+  /** Какая доля банка достаётся победителю (100 − комиссия игр). */
+  const [winnerShare, setWinnerShare] = useState(90);
 
   useEffect(() => {
     publicConfig().then(c => {
       setMinBet(c.min_bet || 1);
+      // Доля победителя зависит от комиссии игр в настройках: подпись «90%»
+      // расходилась с реальностью, как только админ менял комиссию
+      const fee = Number(c?.commission_percent);
+      if (Number.isFinite(fee) && fee >= 0 && fee < 100) setWinnerShare(100 - fee);
     }).catch(()=>{});
   }, []);
 
@@ -64,7 +77,7 @@ export default function Duel() {
       // Вызов брошен: фишка на стол и скрещивание клинков
       sfx.betPlace();
       sfx.sword();
-      showToast('✅ Вызов создан — ждите соперника');
+      showToast('Вызов создан — ждите соперника');
       await refreshUser();
       load();
     } catch (e: any) {
@@ -120,51 +133,66 @@ export default function Duel() {
     return `${Math.floor(diff/60)}ч`;
   }
 
+  // Ставка в дуэли делается из доступных денег (баланс минус уже висящие вызовы)
+
   return (
     <>
-      <Header title="⚔️ Дуэль" />
+      <Header title="Дуэль" icon="swords" />
       <DuelScene phase="idle" />
 
-      <div style={{padding:'8px 0', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:14}}>
+      <div className="avail-line">
         {/* Вызов создаётся из «доступно»: баланс при уже висящих вызовах
             обещал больше, чем можно поставить */}
-        <span className="text-dim">Доступно:</span>
-        <span className="text-accent" style={{fontWeight:700, fontSize:18}}>${((user?.balance || 0) - (user?.frozen_balance || 0)).toFixed(2)}</span>
+        <span className="avail-line__label"><Icon name="wallet" size={14} /> Доступно</span>
+        <span className="avail-line__value">${formatAmount(available)}</span>
       </div>
       <MoneyBreakdown />
 
       <div className="card">
-        <div className="card-title">Создать вызов</div>
-        <input type="number" className="input" value={amount} onChange={e => setAmount(e.target.value)} min={1} />
-        <div className="bet-chips">
-          {CHIPS_DEFAULTS.filter(x => x >= minBet).slice(0,6).map(c => (
-            <div key={c} className="chip" onClick={() => { sfx.chip(); setAmount(String(c)); }}>${c}</div>
-          ))}
+        <div className="card-title"><Icon name="swords" size={16} /> Создать вызов</div>
+        <input
+          type="number" className="input input--amount" value={amount} inputMode="decimal"
+          onChange={e => setAmount(e.target.value)} min={minBet}
+        />
+        {/* Номиналы считаются от доступного баланса, а не из фиксированного
+            списка: у игрока с $12 больше нет кнопки «$500» */}
+        <AmountChips available={available} value={amount} onChange={setAmount} min={minBet} />
+        <div className="duel-terms">
+          <span className="duel-terms__item">
+            <Icon name="trophy" size={13} strokeWidth={2.1} />
+            победитель забирает {winnerShare}% банка
+          </span>
+          <span className="duel-terms__item">мин. ${formatAmount(minBet)}</span>
         </div>
-        <div className="text-dim text-center" style={{fontSize:13}}>Победитель получает 90% · Мин. ${minBet}</div>
-        <button className="btn mt" onClick={create} disabled={creating}>⚔️ СОЗДАТЬ ВЫЗОВ</button>
+        <button className="btn mt" onClick={create} disabled={creating}>
+          <Icon name="swords" size={17} strokeWidth={2} /> Создать вызов
+        </button>
       </div>
 
       <div className="card">
-        <div className="card-title">⚔️ Открытые вызовы</div>
+        <div className="card-title"><Icon name="list" size={16} /> Открытые вызовы</div>
         {lobby.length === 0 && <div className="text-dim text-center" style={{padding:20}}>Пока нет вызовов — создайте первый!</div>}
         <div className="scroll-list" style={{maxHeight:280, overflowY:'auto'}}>
           {lobby.map(l => (
             <div key={l.id} className="lobby-item">
               <div>
-                <div style={{fontWeight:700}}>
-                  {l.is_mine ? '🟢 Ваш вызов' : l.parent_duel_id ? `🔁 Реванш от ${l.creator_name}` : l.creator_name}
+                <div style={{fontWeight:700}} className="lobby-item__name">
+                  {l.is_mine
+                    ? <><span className="live-dot" /> Ваш вызов</>
+                    : l.parent_duel_id
+                      ? <><Icon name="refresh" size={13} strokeWidth={2.1} /> Реванш от {l.creator_name}</>
+                      : l.creator_name}
                 </div>
                 <div className="text-dim" style={{fontSize:12}}>{timeAgo(l.created_at)} назад</div>
               </div>
               <div style={{display:'flex', alignItems:'center', gap:8}}>
                 <div className="text-accent" style={{fontWeight:900, fontSize:18}}>${l.amount.toFixed(0)}</div>
                 {l.is_mine ? (
-                  <button className="btn btn-small btn-danger" onClick={() => cancel(l.id)}>✖</button>
+                  <button className="btn btn-small btn-danger" onClick={() => cancel(l.id)} aria-label="Отменить вызов"><Icon name="close" size={14} strokeWidth={2.4} /></button>
                 ) : (
                   <>
                     <button className="btn btn-small btn-green" onClick={() => accept(l.id)}>ПРИНЯТЬ</button>
-                    {l.parent_duel_id && <button className="btn btn-small btn-danger" onClick={() => decline(l.id)}>✖</button>}
+                    {l.parent_duel_id && <button className="btn btn-small btn-danger" onClick={() => decline(l.id)} aria-label="Отклонить реванш"><Icon name="close" size={14} strokeWidth={2.4} /></button>}
                   </>
                 )}
               </div>
@@ -174,12 +202,12 @@ export default function Duel() {
       </div>
 
       <div className="card">
-        <div className="card-title">📜 Последние дуэли</div>
+        <div className="card-title"><Icon name="list" size={16} /> Последние дуэли</div>
         <div className="scroll-list" style={{maxHeight:200, overflowY:'auto'}}>
           {history.slice(0, 10).map(h => (
             <div key={h.id} className="history-item" style={{fontSize:13}}>
-              <Link state={{replayFrom:'/duel'}} to={`/replay/duel/${h.id}`}>📼 {h.creator} vs {h.opponent || '?'}</Link>
-              <span>${h.amount.toFixed(0)} · 🏆 {h.winner}</span>
+              <Link className="history-item__replay" state={{replayFrom:'/duel'}} to={`/replay/duel/${h.id}`}><Icon name="replay" size={13} /> {h.creator} vs {h.opponent || '?'}</Link>
+              <span>${h.amount.toFixed(0)} · <Icon name="trophy" size={12} className="text-gold" /> {h.winner}</span>
             </div>
           ))}
         </div>

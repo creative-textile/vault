@@ -4,6 +4,7 @@ import { useNotifications, Notification } from '../../stores/notifications';
 import { useAuth } from '../../stores/auth';
 import { duelApi } from '../../api/client';
 import { setDuelAccepting } from '../../utils/duelTransition';
+import Icon from '../ui/Icon';
 
 export default function NotificationsModal() {
   const { notifications, unreadCount, fetchNotifications, markAsRead, markAllAsRead } = useNotifications();
@@ -161,7 +162,7 @@ export default function NotificationsModal() {
               alignItems: 'center',
               marginBottom: 16
             }}>
-              <h2 style={{ color: 'var(--gold)', margin: 0, fontSize: 20 }}>⚔️ Уведомления</h2>
+              <h2 className="notif-title"><Icon name="bell" size={18} strokeWidth={2} /> Уведомления</h2>
               <button 
                 onClick={handleClose}
                 style={{
@@ -172,7 +173,7 @@ export default function NotificationsModal() {
                   cursor: 'pointer'
                 }}
               >
-                ✖
+                <Icon name="close" size={20} strokeWidth={2.4} />
               </button>
             </div>
 
@@ -191,7 +192,7 @@ export default function NotificationsModal() {
                     {duelNotifications.length > 0 && (
                       <div style={{ marginBottom: 16 }}>
                         <h3 style={{ color: 'var(--text)', fontSize: 16, marginBottom: 8 }}>
-                          🎲 Результаты дуэлей
+                          <Icon name="dice" size={14} strokeWidth={2} /> Результаты дуэлей
                         </h3>
                         {duelNotifications.map((notification: Notification) => (
                           <div 
@@ -235,7 +236,7 @@ export default function NotificationsModal() {
                     {otherNotifications.length > 0 && (
                       <div>
                         <h3 style={{ color: 'var(--text)', fontSize: 16, marginBottom: 8 }}>
-                          📢 Другие уведомления
+                          <Icon name="megaphone" size={14} strokeWidth={2} /> Другие уведомления
                         </h3>
                         {otherNotifications.map((notification: Notification) => (
                           <div 
@@ -254,8 +255,8 @@ export default function NotificationsModal() {
                               {notification.message}
                             </div>
                             {notification.type==='duel_rematch' && <div style={{display:'flex',gap:8,marginTop:10}}>
-                              <button className="btn btn-small btn-green" onClick={()=>handleRematch(notification,true)}>⚔️ Принять</button>
-                              <button className="btn btn-small btn-danger" onClick={()=>handleRematch(notification,false)}>✖ Отклонить</button>
+                              <button className="btn btn-small btn-green" onClick={()=>handleRematch(notification,true)}><Icon name="swords" size={13} strokeWidth={2.2} /> Принять</button>
+                              <button className="btn btn-small btn-danger" onClick={()=>handleRematch(notification,false)}><Icon name="close" size={13} strokeWidth={2.4} /> Отклонить</button>
                             </div>}
                           </div>
                         ))}

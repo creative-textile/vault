@@ -575,6 +575,20 @@
 .history-item a { color: var(--text-dim); text-decoration: none; transition: color var(--t-mid); }
 .history-item a:hover { color: var(--gold); }
 
+/* Кнопка-ссылка внутри строки списка.
+   Правило выше (`.history-item a`, специфичность 0-1-1) перебивало цвет текста
+   у `.btn` (0-1-0): ссылка «УСТАНОВИТЬ» в блоке «Безопасность» рисовалась
+   тускло-серым по золотому градиенту и почти не читалась. Возвращаем кнопкам
+   их собственный контрастный цвет, сохраняя цвета вариантов. */
+.history-item a.btn { color: #1a1206; }
+.history-item a.btn:hover { color: #1a1206; }
+.history-item a.btn-secondary,
+.history-item a.btn-ghost { color: var(--text); }
+.history-item a.btn-danger,
+.history-item a.btn-violet { color: #fff; }
+.history-item a.btn-green,
+.history-item a.btn-cyan { color: #04240f; }
+
 .lobby-item {
   display: flex;
   justify-content: space-between;
@@ -1303,4 +1317,836 @@
 /* Узкие экраны: три плитки в ряд не помещаются — возвращаем две */
 @media (max-width: 340px) {
   .game-grid--3 { grid-template-columns: 1fr 1fr; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   КОМПОНЕНТЫ ИНТЕРФЕЙСА v2
+   Иконки вместо эмодзи, единый блок баланса, динамические номиналы ставок,
+   кастомные диалоги, сноска о комиссиях, админка и повторы.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Иконка в тексте ──────────────────────────────────────────────────────
+   SVG наследует цвет текста и выравнивается по базовой линии: именно этого
+   не хватало эмодзи, из-за чего заголовки «прыгали». */
+.icon {
+  display: inline-block;
+  vertical-align: -0.16em;
+  flex: 0 0 auto;
+}
+
+/* ── Шапка экрана ──────────────────────────────────────────────────────── */
+.header-title { display: flex; align-items: center; gap: 8px; }
+.header-title__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 9px;
+  color: var(--gold);
+  background: linear-gradient(168deg, rgba(245,197,66,.16), rgba(245,197,66,.04));
+  border: 1px solid rgba(245,197,66,.26);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 14px rgba(245,197,66,.14);
+}
+.back-btn { display: inline-flex; align-items: center; justify-content: center; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.topbar__icon-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 12px;
+  color: var(--text-2); text-decoration: none;
+  background: linear-gradient(168deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-1), var(--shadow-inset);
+  transition: color var(--t-mid), border-color var(--t-mid), transform var(--t-fast) var(--ease-spring);
+}
+.topbar__icon-link:hover { color: var(--gold); border-color: rgba(245,197,66,.4); }
+.topbar__icon-link:active { transform: scale(.94); }
+
+/* ── Единый блок баланса ───────────────────────────────────────────────── */
+.balance {
+  position: relative;
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.balance--hero {
+  padding: 16px 18px 14px;
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgba(245,197,66,.16), transparent 58%),
+    linear-gradient(168deg, rgba(255,255,255,.08), rgba(255,255,255,.018)),
+    rgba(11,13,31,.8);
+  border: 1px solid rgba(245,197,66,.22);
+  box-shadow: var(--shadow-2), var(--shadow-inset);
+  animation: rise-in .34s var(--ease-out) both;
+}
+.balance--strip {
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: linear-gradient(168deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-1), var(--shadow-inset);
+}
+.balance__main { min-width: 0; }
+.balance__label {
+  font-size: 10px; letter-spacing: .22em; text-transform: uppercase;
+  color: var(--text-faint); font-family: var(--font-head);
+}
+.balance__value {
+  font-family: var(--font-num);
+  font-size: clamp(30px, 9vw, 40px);
+  font-weight: 700; line-height: 1.06;
+  color: var(--gold-hi);
+  text-shadow: 0 0 24px rgba(245,197,66,.32);
+}
+.balance--strip .balance__value { font-size: 22px; text-shadow: none; }
+.balance__total { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.balance__aside {
+  font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 4px 9px; border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,.04);
+}
+.balance__net {
+  font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--cyan);
+  padding: 5px 10px; border-radius: var(--radius-pill);
+  border: 1px solid rgba(34,211,238,.28);
+  background: rgba(34,211,238,.08);
+}
+.balance__footnote { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+
+/* «Где ещё деньги»: пилюли с иконкой. Появляются только при ненулевой сумме. */
+.balance__locked {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 12px; padding-top: 11px;
+  border-top: 1px dashed rgba(255,255,255,.1);
+}
+.balance__locked--inline { margin: -4px 0 12px; padding-top: 0; border-top: none; }
+.balance__locked-hint {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.lock-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: var(--radius-pill);
+  font-size: 11px; font-weight: 600; color: var(--text-2);
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,.045);
+  box-shadow: var(--shadow-1);
+}
+.lock-pill b { font-family: var(--font-num); font-weight: 700; color: var(--text); }
+.lock-pill--cyan  { border-color: rgba(34,211,238,.3);  color: var(--cyan);     background: rgba(34,211,238,.09); }
+.lock-pill--gold  { border-color: rgba(245,197,66,.32); color: var(--gold);     background: rgba(245,197,66,.09); }
+.lock-pill--violet{ border-color: rgba(168,85,247,.32); color: var(--violet-hi);background: rgba(168,85,247,.1); }
+.lock-pill--cyan b, .lock-pill--gold b, .lock-pill--violet b { color: inherit; }
+
+/* Полная раскладка средств (профиль) */
+.money-rows { display: grid; gap: 2px; margin: 10px 0 2px; }
+.money-rows__line {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 2px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.money-rows__line:last-child { border-bottom: none; }
+.money-rows__label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--text-dim);
+}
+.money-rows__label .icon { color: var(--text-faint); }
+.money-rows__value { font-family: var(--font-num); font-size: 14px; font-weight: 700; color: var(--text); }
+.money-rows__value--gold { color: var(--gold); font-size: 16px; }
+.money-rows__line--total { border-top: 1px solid rgba(245,197,66,.18); margin-top: 2px; padding-top: 11px; }
+.money-rows__line--total .money-rows__label { color: var(--text-2); }
+.money-rows__line--total .money-rows__label .icon { color: var(--gold); }
+
+/* Компактная строка «Доступно» в играх */
+.avail-line {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 2px;
+}
+.avail-line__label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.avail-line__label .icon { color: var(--text-faint); }
+.avail-line__value { font-family: var(--font-num); font-size: 20px; font-weight: 700; color: var(--gold); }
+
+/* ── Поля ввода сумм ───────────────────────────────────────────────────── */
+.input--amount { font-family: var(--font-num); letter-spacing: .01em; }
+.input--mono { font-family: var(--font-num); font-size: 14px; text-align: left; word-break: break-all; }
+
+/* ── Номиналы ставок ───────────────────────────────────────────────────── */
+.chip--all {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-color: rgba(34,224,122,.34);
+  color: var(--green);
+  background:
+    radial-gradient(circle at 50% 30%, rgba(34,224,122,.2), transparent 64%),
+    linear-gradient(168deg, rgba(34,224,122,.12), rgba(34,224,122,.03));
+}
+.chip--all:hover { border-color: rgba(34,224,122,.6); box-shadow: var(--shadow-2), 0 0 12px rgba(34,224,122,.28); }
+.chip--all.chip--on { background: var(--grad-green); color: #04240f; border-color: rgba(255,255,255,.4); }
+
+/* Подпись лимитов под полем суммы */
+.limits-line {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-top: 10px; font-size: 12px; color: var(--text-dim);
+}
+.limits-line__item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.limits-line__item b { font-family: var(--font-num); color: var(--text-2); font-weight: 700; }
+.limits-line__item .text-accent { color: var(--gold); }
+.limits-line__sep { width: 1px; height: 12px; background: rgba(255,255,255,.14); }
+.limits-line__action {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: none; padding: 2px 0; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 700;
+  color: var(--gold); letter-spacing: .02em;
+  transition: opacity var(--t-mid);
+}
+.limits-line__action:hover { text-decoration: underline; }
+.limits-line__action:disabled { opacity: .4; cursor: not-allowed; text-decoration: none; }
+.limits-hint {
+  margin-top: 8px; text-align: center;
+  font-size: 11px; line-height: 1.5; color: var(--text-faint);
+}
+
+/* ── Сноска о комиссиях ────────────────────────────────────────────────── */
+.fee-strip {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 8px; margin: 14px 0 6px; padding: 9px 12px;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.028);
+  border: 1px solid rgba(255,255,255,.055);
+}
+.fee-strip__item {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; letter-spacing: .06em; color: var(--text-faint);
+  text-transform: lowercase;
+}
+.fee-strip__item .icon { opacity: .8; }
+.fee-strip__dot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,.18); }
+
+/* ── Плитки игр ────────────────────────────────────────────────────────── */
+.game-icon { display: flex; align-items: center; justify-content: center; color: var(--tile-glow, var(--gold)); }
+.game-icon--sm { font-size: 0; }
+.game-tile--compact { padding: 12px; }
+
+/* Бейдж плитки: «до ×90» читается как потолок выплаты, а не как служебная пометка */
+.tile-badge {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.tile-badge__pre { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; opacity: .72; }
+.tile-badge__mult {
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 900; letter-spacing: .01em;
+  line-height: 1;
+}
+
+/* ── Вклад VAULT ───────────────────────────────────────────────────────── */
+.vault-tile__title { display: inline-flex; align-items: center; gap: 7px; color: var(--violet-hi); margin: 0; }
+.vault-tile__amount {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 8px 0; font-family: var(--font-num); font-size: 15px; color: var(--text-2);
+}
+.vault-tile__lead { font-size: 12.5px; line-height: 1.55; color: var(--text-dim); }
+.vault-tile__pool {
+  margin: 8px 0 4px; font-size: 13px; color: var(--text-dim);
+}
+.vault-tile__pool b { font-family: var(--font-num); font-size: 17px; color: var(--gold); margin-left: 4px; }
+.vault-tile__meta { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: var(--text-faint); }
+.vault-tile__rate { display: inline-flex; align-items: center; gap: 5px; color: var(--green); font-weight: 700; }
+.vault-tile__cap { white-space: nowrap; }
+.vault-tile__note {
+  margin-top: 10px; padding-top: 9px;
+  border-top: 1px dashed rgba(255,255,255,.1);
+  font-size: 11px; line-height: 1.5; color: var(--text-faint);
+}
+
+.vault-pitch { text-align: left; }
+.vault-pitch__head { text-align: center; }
+.vault-pitch__badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px; border-radius: var(--radius-pill);
+  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--violet-hi);
+  border: 1px solid rgba(168,85,247,.3);
+  background: rgba(168,85,247,.1);
+}
+.vault-pitch__title {
+  margin: 10px 0 6px;
+  font-family: var(--font-head); font-size: 17px; font-weight: 400; line-height: 1.3;
+  color: var(--text);
+}
+.vault-pitch__text { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--text-dim); }
+.vault-pitch__stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-top: 14px; padding-top: 13px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.vault-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 9px 8px; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.035);
+  border: 1px solid rgba(255,255,255,.06);
+  text-align: center;
+}
+.vault-stat__label { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); }
+.vault-stat__value { font-family: var(--font-num); font-size: 16px; font-weight: 700; color: var(--gold); }
+.vault-stat__hint { font-size: 9.5px; color: var(--text-faint); opacity: .8; }
+@media (max-width: 360px) {
+  .vault-pitch__stats { grid-template-columns: 1fr; }
+  .vault-stat { flex-direction: row; align-items: center; justify-content: space-between; text-align: left; }
+  .vault-stat__hint { display: none; }
+}
+
+.vault-active__title { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 18px; color: var(--violet-hi); }
+.vault-active__amount { margin: 6px 0 2px; font-family: var(--font-num); font-size: 21px; font-weight: 700; color: var(--text); }
+.vault-active__mult { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.vault-note {
+  display: flex; align-items: flex-start; gap: 9px;
+  font-size: 12px; line-height: 1.6; color: var(--text-dim);
+}
+.vault-note .icon { margin-top: 2px; color: var(--gold); flex: 0 0 auto; }
+
+.term-card__days { display: flex; align-items: center; gap: 8px; font-family: var(--font-head); font-size: 17px; font-weight: 400; }
+.term-card__hot {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  font-family: var(--font-body); font-size: 9.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--accent-2);
+  border: 1px solid rgba(255,122,61,.34);
+  background: rgba(255,122,61,.12);
+}
+.term-card__mult { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+
+/* ── Депозит / вывод ───────────────────────────────────────────────────── */
+.deposit-title { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.address-box {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 12px 0; padding: 14px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(0,0,0,.42), rgba(0,0,0,.22));
+  border: 1px solid rgba(255,255,255,.1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.address-box__value { font-family: var(--font-num); font-size: 14px; line-height: 1.45; word-break: break-all; color: var(--text); }
+.deposit-facts {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px;
+  font-size: 11.5px; color: var(--text-dim);
+}
+.deposit-facts span { display: inline-flex; align-items: center; gap: 5px; }
+.deposit-facts .icon { color: var(--text-faint); }
+.deposit-warn {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin-top: 12px; padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px; line-height: 1.5;
+  color: #ffd9df;
+  background: rgba(255,59,92,.1);
+  border: 1px solid rgba(255,59,92,.26);
+}
+.deposit-warn .icon { margin-top: 2px; color: var(--red); flex: 0 0 auto; }
+.demo-row { display: flex; gap: 8px; align-items: stretch; }
+.demo-row .input { flex: 1; min-width: 0; }
+.demo-row .btn { width: auto; white-space: nowrap; padding: 14px 18px; }
+
+.fee-card__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 14px; padding: 6px 0;
+}
+.fee-card__row span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.fee-card__row--total {
+  margin-top: 6px; padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.09);
+  font-family: var(--font-head); font-size: 18px;
+}
+.fee-card__row--total span:last-child { font-family: var(--font-num); font-size: 22px; }
+
+/* ── PIN ───────────────────────────────────────────────────────────────── */
+.pin-head { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 16px; }
+.pin-head__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 52px; height: 52px; border-radius: 50%;
+  color: var(--gold);
+  background: radial-gradient(circle at 50% 34%, rgba(245,197,66,.22), rgba(245,197,66,.05));
+  border: 1px solid rgba(245,197,66,.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 0 22px rgba(245,197,66,.16);
+}
+.pin-head__title { font-family: var(--font-head); font-size: 18px; color: var(--text); }
+.pin-head__text { font-size: 12.5px; line-height: 1.55; color: var(--text-dim); max-width: 34ch; }
+.pin-note {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  margin-top: 14px; font-size: 11px; color: var(--text-faint); text-align: left;
+}
+.pin-missing { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; }
+
+/* ── Сейф ──────────────────────────────────────────────────────────────── */
+.safe-whoami {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 2px 0 8px; font-size: 12px; color: var(--text-dim);
+}
+.safe-whoami .icon { color: var(--text-faint); }
+.safe-line__title { display: inline-flex; align-items: center; gap: 7px; }
+.safe-line__cta {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: var(--gold); white-space: nowrap; font-weight: 700;
+}
+.lobby-item__name { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── Дуэль ─────────────────────────────────────────────────────────────── */
+.duel-terms {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 6px 12px; margin-top: 10px;
+  font-size: 12px; color: var(--text-dim); text-align: center;
+}
+.duel-terms__item { display: inline-flex; align-items: center; gap: 5px; }
+.duel-terms__item .icon { color: var(--gold); }
+
+/* Подпись кнопки в две строки (пояснение под основным текстом) */
+.btn__sub {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 11.5px; font-weight: 500; letter-spacing: 0;
+  text-transform: none; opacity: .82; margin-top: 3px;
+}
+
+/* ── Кастомные диалоги (вместо confirm/prompt/alert) ───────────────────── */
+.dialog {
+  width: min(92vw, 400px);
+  padding: 22px 20px 18px;
+  text-align: center;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,.07), transparent 60%),
+    linear-gradient(168deg, rgba(20,23,52,.98), rgba(9,11,26,.98));
+  border: 1px solid var(--glass-hi);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3), var(--shadow-inset);
+  animation: dialog-pop .22s var(--ease-spring) both;
+}
+@keyframes dialog-pop { from { transform: scale(.9) translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+.dialog__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 54px; height: 54px; margin-bottom: 12px;
+  border-radius: 50%;
+  color: var(--gold);
+  background: radial-gradient(circle at 50% 34%, rgba(245,197,66,.2), rgba(245,197,66,.04));
+  border: 1px solid rgba(245,197,66,.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 0 24px rgba(245,197,66,.16);
+}
+.dialog__icon--danger {
+  color: var(--red);
+  background: radial-gradient(circle at 50% 34%, rgba(255,59,92,.2), rgba(255,59,92,.04));
+  border-color: rgba(255,59,92,.32);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 24px rgba(255,59,92,.18);
+}
+.dialog__icon--success {
+  color: var(--green);
+  background: radial-gradient(circle at 50% 34%, rgba(34,224,122,.2), rgba(34,224,122,.04));
+  border-color: rgba(34,224,122,.32);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 24px rgba(34,224,122,.18);
+}
+.dialog__title {
+  font-family: var(--font-head);
+  font-size: 19px; line-height: 1.3; color: var(--text);
+  margin-bottom: 8px;
+}
+.dialog__message {
+  font-size: 13.5px; line-height: 1.6; color: var(--text-2);
+  margin-bottom: 16px;
+}
+.dialog__message b { color: var(--text); }
+.dialog__message .text-accent { color: var(--gold); }
+.dialog__message .text-red { color: var(--red); }
+.dialog__input { margin-bottom: 16px; font-size: 16px; }
+.dialog__actions { display: grid; gap: 8px; }
+.dialog__actions .btn { width: 100%; }
+.dialog--danger { border-color: rgba(255,59,92,.34); }
+.dialog--success { border-color: rgba(34,224,122,.32); }
+.dialog--gold { border-color: rgba(245,197,66,.36); }
+
+/* ── Модалка «вложить в сейф» ──────────────────────────────────────────── */
+.safe-prompt {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  background: rgba(3,4,12,.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: dialog-pop .2s var(--ease-out) both;
+}
+.safe-prompt__card {
+  position: relative;
+  width: min(94vw, 420px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 24px 20px 18px;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(110% 70% at 50% 0%, rgba(245,197,66,.12), transparent 62%),
+    linear-gradient(168deg, rgba(20,23,52,.98), rgba(9,11,26,.98));
+  border: 1px solid rgba(245,197,66,.28);
+  box-shadow: var(--shadow-3), var(--shadow-inset);
+}
+.safe-prompt__close {
+  position: absolute; top: 12px; right: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: var(--text-dim); cursor: pointer;
+  transition: color var(--t-mid), background var(--t-mid);
+}
+.safe-prompt__close:hover { color: var(--text); background: rgba(255,255,255,.12); }
+.safe-prompt__head { text-align: center; margin-bottom: 16px; }
+.safe-prompt__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 56px; height: 56px; margin-bottom: 10px;
+  border-radius: 50%;
+  color: var(--gold);
+  background: radial-gradient(circle at 50% 34%, rgba(245,197,66,.24), rgba(245,197,66,.05));
+  border: 1px solid rgba(245,197,66,.34);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 0 26px rgba(245,197,66,.2);
+}
+.safe-prompt__title { font-family: var(--font-head); font-size: 19px; line-height: 1.3; color: var(--text); }
+.safe-prompt__sub { margin-top: 6px; font-size: 12.5px; color: var(--text-dim); }
+.safe-prompt__sub b { font-family: var(--font-num); color: var(--gold); }
+
+.safe-prompt__sums {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 14px 12px; margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07);
+}
+.safe-prompt__sum { display: flex; flex-direction: column; gap: 3px; text-align: center; min-width: 0; }
+.safe-prompt__sum-label { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); }
+.safe-prompt__sum-value { font-family: var(--font-num); font-size: 21px; font-weight: 700; color: var(--text); }
+.safe-prompt__sum-value--green { color: var(--green); text-shadow: 0 0 18px rgba(34,224,122,.28); }
+.safe-prompt__arrow { color: var(--text-faint); flex: 0 0 auto; }
+.safe-prompt__note { font-size: 11.5px; line-height: 1.55; color: var(--text-faint); text-align: center; margin-bottom: 14px; }
+
+.safe-prompt__percents { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.safe-prompt__percent {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 6px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(168deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+  border: 1px solid rgba(255,255,255,.14);
+  color: var(--text); cursor: pointer;
+  font-family: var(--font-head); font-size: 15px;
+  transition: transform var(--t-fast) var(--ease-spring), border-color var(--t-mid), background var(--t-mid);
+}
+.safe-prompt__percent small { font-family: var(--font-num); font-size: 11px; color: var(--text-dim); }
+.safe-prompt__percent:hover { transform: translateY(-2px); border-color: rgba(245,197,66,.45); }
+.safe-prompt__percent:active { transform: scale(.96); }
+.safe-prompt__percent--on {
+  background: var(--grad-gold);
+  border-color: rgba(255,255,255,.42);
+  color: #1a1206;
+  box-shadow: 0 0 18px rgba(245,197,66,.36), inset 0 1px 0 rgba(255,255,255,.5);
+}
+.safe-prompt__percent--on small { color: rgba(26,18,6,.72); }
+
+.safe-prompt__check {
+  display: flex; align-items: flex-start; gap: 9px;
+  margin-top: 12px; font-size: 12px; line-height: 1.45;
+  color: var(--text-2); cursor: pointer;
+}
+.safe-prompt__check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.safe-prompt__box {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  width: 18px; height: 18px; margin-top: 1px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.22);
+  background: rgba(255,255,255,.05);
+  color: transparent;
+  transition: color var(--t-mid), background var(--t-mid), border-color var(--t-mid);
+}
+.safe-prompt__check input:checked + .safe-prompt__box {
+  color: #1a1206;
+  background: var(--grad-gold);
+  border-color: rgba(255,255,255,.45);
+}
+.safe-prompt__check input:focus-visible + .safe-prompt__box { box-shadow: 0 0 0 3px rgba(245,197,66,.28); }
+.safe-prompt__check--muted { color: var(--text-faint); }
+
+/* ── Профиль ───────────────────────────────────────────────────────────── */
+.profile-head { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.profile-head__avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 64px; height: 64px; border-radius: 50%;
+  color: var(--gold);
+  background: radial-gradient(circle at 50% 32%, rgba(245,197,66,.22), rgba(245,197,66,.04));
+  border: 1px solid rgba(245,197,66,.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 0 26px rgba(245,197,66,.16);
+}
+.profile-head__name { font-family: var(--font-head); font-size: 21px; color: var(--text); }
+.profile-head__ids { display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-faint); font-family: var(--font-num); }
+.profile-head__dot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,.22); }
+.profile-balance { font-family: var(--font-num); font-size: 30px; font-weight: 700; color: var(--gold); margin-bottom: 4px; }
+.row-label { display: inline-flex; align-items: center; gap: 7px; }
+.row-label .icon { color: var(--text-faint); }
+
+/* ── Админ-панель ──────────────────────────────────────────────────────── */
+.admin-tabs {
+  display: flex; gap: 6px;
+  margin-bottom: 12px; padding: 4px 2px 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  position: sticky; top: 0; z-index: 10;
+  background: linear-gradient(180deg, var(--bg-2) 80%, transparent);
+}
+.admin-tab {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 13px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 600;
+  letter-spacing: .01em; white-space: nowrap; cursor: pointer;
+  transition: color var(--t-mid), background var(--t-mid), border-color var(--t-mid), transform var(--t-fast) var(--ease-spring);
+}
+.admin-tab:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+.admin-tab:active { transform: scale(.96); }
+.admin-tab--active {
+  background: var(--grad-gold);
+  border-color: rgba(255,255,255,.4);
+  color: #1a1206;
+  box-shadow: 0 0 16px rgba(245,197,66,.34), inset 0 1px 0 rgba(255,255,255,.5);
+}
+
+.admin-stats {
+  margin: 14px 0 4px; padding: 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.035);
+  border: 1px solid rgba(255,255,255,.07);
+}
+.admin-stats__title {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-faint); margin-bottom: 8px;
+}
+.admin-verdict {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; margin-bottom: 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text-2);
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+}
+.admin-verdict b { font-family: var(--font-num); font-size: 19px; color: var(--text); }
+.admin-verdict--plus { border-color: rgba(34,224,122,.34); background: rgba(34,224,122,.1); color: var(--green); }
+.admin-verdict--plus b { color: var(--green); }
+.admin-verdict--minus { border-color: rgba(255,59,92,.34); background: rgba(255,59,92,.1); color: #ffd0d8; }
+.admin-verdict--minus b { color: var(--red); }
+.admin-stats__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.admin-stats__grid > div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.05);
+  font-size: 12px; color: var(--text-dim);
+}
+.admin-stats__grid b { font-family: var(--font-num); font-size: 13px; color: var(--text); }
+.admin-games { display: grid; gap: 6px; }
+.admin-game {
+  display: grid; grid-template-columns: 74px 1fr auto; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 10px;
+  background: rgba(255,255,255,.035);
+  border: 1px solid rgba(255,255,255,.06);
+}
+.admin-game__name { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.admin-game__rows { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--text-faint); }
+.admin-game__rows b { font-family: var(--font-num); color: var(--text-2); }
+.admin-game__net { font-family: var(--font-num); font-size: 14px; font-weight: 700; white-space: nowrap; }
+@media (max-width: 380px) {
+  .admin-game { grid-template-columns: 1fr auto; }
+  .admin-game__rows { grid-column: 1 / -1; }
+}
+
+.admin-refs {
+  margin: 12px 0 4px; padding: 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.035);
+  border: 1px solid rgba(255,255,255,.07);
+}
+.admin-refs__earned { font-size: 10.5px; letter-spacing: .04em; text-transform: none; color: var(--gold); }
+
+/* ── Повтор раунда ─────────────────────────────────────────────────────── */
+.replay-topbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.replay-back { flex: 1; }
+.replay-sound { width: 46px; flex: 0 0 auto; padding: 14px 0; }
+.replay-loading { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text-dim); }
+.replay-error { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-2); }
+.replay-error .icon { color: var(--red); }
+
+.replay-headline { border: 1px solid rgba(245,197,66,.3); text-align: center; }
+.replay-headline__label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--text-faint);
+}
+.replay-headline__text { margin-top: 8px; font-family: var(--font-head); font-size: 19px; line-height: 1.35; color: var(--text); }
+
+.replay-timeline { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+.replay-timeline__bar {
+  flex: 1; height: 4px; border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.09); overflow: hidden;
+}
+.replay-timeline__fill {
+  height: 100%; border-radius: inherit;
+  background: var(--grad-gold);
+  box-shadow: 0 0 12px rgba(245,197,66,.5);
+  transition: width .1s linear;
+}
+.replay-timeline__again {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 12px; border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-2); font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  cursor: pointer; font-family: inherit;
+  transition: color var(--t-mid), border-color var(--t-mid);
+}
+.replay-timeline__again:hover:not(:disabled) { color: var(--gold); border-color: rgba(245,197,66,.4); }
+.replay-timeline__again:disabled { opacity: .45; cursor: default; }
+
+.replay-verdict {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  font-size: 13px; color: var(--text-2);
+}
+.replay-verdict b { font-family: var(--font-head); color: var(--gold); }
+.replay-verdict__prize { font-size: 12px; color: var(--text-dim); }
+.replay-safe-row { align-items: flex-start; gap: 12px; padding: 12px 0; }
+.replay-safe-row__who { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; color: var(--text); }
+.replay-safe-row__who small { font-size: 11px; }
+.replay-safe-row__who .icon { color: var(--gold); }
+.replay-safe-row__money { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; flex: 0 0 auto; }
+.replay-safe-row__money small { font-size: 11px; font-weight: 800; }
+.replay-actions { display: grid; gap: 10px; margin-top: 12px; }
+
+/* ── Мелкие блоки экранов ──────────────────────────────────────────────── */
+/* Заголовок раздела в админке */
+.admin-h {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 8px;
+  font-family: var(--font-head); font-size: 14px; font-weight: 400;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-2);
+}
+.admin-h .icon { color: var(--text-faint); }
+.admin-h--gold { color: var(--gold); }
+.admin-h--gold .icon { color: var(--gold); }
+.admin-h--green { color: var(--green); }
+.admin-h--green .icon { color: var(--green); }
+.admin-h--violet { color: var(--violet-hi); }
+.admin-h--violet .icon { color: var(--violet-hi); }
+.admin-cash { display: flex; align-items: center; gap: 9px; font-size: 19px; color: var(--gold); }
+.admin-cash--blue { color: var(--blue); }
+.admin-cash--violet { color: var(--violet-hi); }
+
+/* Ссылка на повтор в списках истории */
+.history-item__replay { display: inline-flex; align-items: center; gap: 5px; }
+.history-item__replay .icon { color: var(--text-faint); }
+.history-item__replay:hover .icon { color: var(--gold); }
+
+/* Плавающий бейдж летящей ракеты */
+.flight-badge__mult {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-num); font-size: 16px; font-weight: 700;
+  color: var(--gold); white-space: nowrap;
+}
+.flight-badge__hint { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+
+/* Уведомления */
+.notif-title {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0; font-family: var(--font-head); font-size: 19px; font-weight: 400;
+  color: var(--gold);
+}
+
+/* Итог дуэли */
+.duel-result__icon {
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 6px; color: var(--gold);
+}
+.duel-coin {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  font-size: 19px; color: var(--text);
+}
+.duel-coin .icon { color: var(--gold); }
+.duel-replay-of { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; margin-bottom: 6px; }
+.duel-autosafe { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13.5px; margin: -6px 0 8px; }
+
+/* Сейф: плашка идущего взлома */
+.safe-live__title {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-head); font-size: 14px; font-weight: 400;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--red);
+}
+
+/* Статистика проекта */
+.stat-num { font-family: var(--font-num); font-size: 15px; }
+
+/* ── Модалка «Отложить выигрыш в сейф»: прогноз по всему вкладу ─────────── */
+/* Подпись под суммой: «+ $150 уже в сейфе» / «со всего вклада $235,86».
+   Высота зарезервирована, чтобы блок не «прыгал» при первом взносе. */
+.safe-prompt__sum-sub {
+  min-height: 14px;
+  font-family: var(--font-num);
+  font-size: 10.5px; line-height: 1.3;
+  color: var(--text-faint);
+}
+
+/* ── Разделение групп «внести» и «не вносить» ──────────────────────────── */
+.safe-prompt__split {
+  height: 1px; margin: 16px 0 12px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
+}
+
+/* «Пропустить» — заметная кнопка-альтернатива, а не третья бледная строка:
+   прежде она была `btn-ghost` и визуально склеивалась с тихим чекбоксом
+   «Больше не предлагать сегодня». */
+.safe-prompt__skip {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255,255,255,.26);
+  background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+  color: var(--text); cursor: pointer;
+  font-family: var(--font-head); font-size: 13px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase;
+  transition: transform var(--t-fast) var(--ease-spring), background var(--t-mid), border-color var(--t-mid);
+}
+.safe-prompt__skip:hover { background: rgba(255,255,255,.13); border-color: rgba(255,255,255,.38); }
+.safe-prompt__skip:active { transform: scale(.97); }
+.safe-prompt__skip:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(255,255,255,.18); }
+
+/* Тихая настройка под ней отделена отступом и размером */
+.safe-prompt__check--muted { margin-top: 10px; font-size: 11.5px; }
+
+/* ── Бейдж плитки игры: в потоке, а не поверх арта ─────────────────────── */
+/* Плашка была `position: absolute; top/right: 8px`, и на плитке Дуэли
+   «PvP 50/50» наезжала на иконку мечей: бейдж широкий, арт центрирован, а из
+   потока плашка исключена — места ей не резервировалось. Теперь бейдж стоит в
+   потоке первым элементом колонки и прижимается к правому краю (отрицательные
+   поля возвращают его в прежний угол), поэтому иконка всегда начинается НИЖЕ
+   него и наложение невозможно при любой ширине плитки и любой длине подписи. */
+.game-tile > .tile-badge {
+  position: static;
+  align-self: flex-end;
+  margin: -8px -2px 8px;
+  max-width: 100%;
+}
+/* Идентичность зала Дуэли: циан вместо красного (см. --tile-edge у .tile-duel) */
+.tile-badge--cyan {
+  background: linear-gradient(160deg, #7ff0ff, #22d3ee 55%, #0891b2);
+  color: #04222b;
+  box-shadow: 0 0 14px rgba(34,211,238,.45);
 }

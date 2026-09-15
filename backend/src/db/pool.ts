@@ -21,20 +21,42 @@ pool.on('error', (err: any) => {
   console.error(`[DB] Ошибка соединения в пуле (игнорируем, процесс жив): ${err.message}`);
 });
 
+/**
+ * Дождаться готовности Postgres.
+ *
+ * Лог намеренно «тихий»: первая неудача печатается подробно, дальше — одна
+ * строка раз в пять попыток. Прежде каждый промах писал отдельную строку, и
+ * за минуту ожидания в `docker logs` набегала простыня «[DB] Attempt N/30
+ * failed … Retrying in 2000ms», которая выглядела как авария, хотя это штатное
+ * ожидание инициализации БД (см. healthcheck в docker-compose.yml: он
+ * проверяет готовность по TCP, поэтому backend стартует уже после init.sql).
+ */
 export async function waitForDb(maxRetries = 30, delayMs = 2000): Promise<void> {
+  const startedAt = Date.now();
+  let lastError = '';
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const res = await pool.query('SELECT 1');
       if (res) {
-        console.log(`[DB] Connected (attempt ${attempt})`);
+        const waitedSec = Math.round((Date.now() - startedAt) / 1000);
+        console.log(
+          attempt === 1
+            ? '[DB] Connected'
+            : `[DB] Connected (попытка ${attempt}, ждали ${waitedSec} с)`
+        );
         return;
       }
     } catch (e: any) {
-      console.error(`[DB] Attempt ${attempt}/${maxRetries} failed: ${e.message}. Retrying in ${delayMs}ms...`);
+      lastError = e.message;
+      if (attempt === 1) {
+        console.error(`[DB] Attempt ${attempt}/${maxRetries} failed: ${e.message}. Retrying in ${delayMs}ms...`);
+      } else if (attempt % 5 === 0) {
+        console.error(`[DB] Still waiting for PostgreSQL… (${attempt}/${maxRetries}, ${Math.round((Date.now() - startedAt) / 1000)} s): ${e.message}`);
+      }
       await new Promise(r => setTimeout(r, delayMs));
     }
   }
-  throw new Error(`Could not connect to PostgreSQL after ${maxRetries} attempts`);
+  throw new Error(`Could not connect to PostgreSQL after ${maxRetries} attempts: ${lastError}`);
 }
 
 export function currentTransactionClient(): PoolClient | undefined { return transactionStorage.getStore()?.client; }

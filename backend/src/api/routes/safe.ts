@@ -27,7 +27,7 @@ router.get('/current', auth, async (req, res) => {
     const myDeposit = safe ? await getUserSafeDeposit(safe.id, user.id) : null;
     // Время до взлома — читается из настроек (час/минута в МСК)
     const { getSetting } = await import('../../services/revenue');
-    const hour = parseInt((await getSetting('safe_crack_hour')) || '21');
+    const hour = parseInt((await getSetting('safe_crack_hour')) || '18');
     const minute = parseInt((await getSetting('safe_crack_minute')) || '0');
     const crackAt = nextMSK(hour, minute);
     const now = new Date();
@@ -87,7 +87,7 @@ router.get('/current', auth, async (req, res) => {
       my_last_deposit: myLastDeposit,
       collecting_safe: collecting ? {
         id: collecting!.id,
-        // «взлом в 21:00 МСК» — подпись под обратным отсчётом на экранах
+        // «взлом в HH:MM МСК» — подпись под обратным отсчётом на экранах (час берётся из настроек)
         crack_at_msk: fmtMSK(crackAt),
         bank: collecting.bank,
         prize_pool: collecting.prize_pool,

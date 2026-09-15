@@ -48,6 +48,64 @@ export async function getRocketBankroll(): Promise<number> {
   return parseFloat(res.rows[0].amount);
 }
 
+/**
+ * Лимиты ставки Ракеты.
+ *
+ * `rocket_max_bet_percent` — процент от кассы Ракеты:
+ *   - **100 (по умолчанию)** — можно поставить всю кассу;
+ *   - **больше 100** — ставка может превышать кассу (осознанный риск админа:
+ *     точка взрыва в этом случае упирается в `bankroll / bet`, то есть раунд
+ *     почти всегда заканчивается мгновенным падением);
+ *   - **0** — лимита нет вовсе. `max_bet` возвращается как `null`, и клиент
+ *     показывает «Макс: без лимита» вместо бессмысленного `$0`/`$Infinity`.
+ *
+ * Значение округляется серверным `roundDownClean()` (вниз до первой значащей
+ * цифры), поэтому в ответе всегда «красивая» сумма: касса $2 470 и 100% →
+ * $2 000, а не $2 470.
+ */
+export interface RocketLimits {
+  min_bet: number;
+  /** `null` — лимита нет. */
+  max_bet: number | null;
+  max_bet_percent: number;
+  bankroll: number;
+}
+
+export async function getRocketLimits(bankrollOverride?: number): Promise<RocketLimits> {
+  const [bankroll, maxRaw, minRaw] = await Promise.all([
+    bankrollOverride == null ? getRocketBankroll() : Promise.resolve(bankrollOverride),
+    getSetting('rocket_max_bet_percent'),
+    getSetting('min_bet')
+  ]);
+  const percent = parseFloat(maxRaw || '100');
+  const unlimited = !Number.isFinite(percent) || percent <= 0;
+  const maxBet = unlimited ? null : roundDownClean(bankroll * (percent / 100));
+  const minBet = parseFloat(minRaw || '1');
+  return {
+    min_bet: Number.isFinite(minBet) && minBet > 0 ? minBet : 1,
+    max_bet: maxBet,
+    max_bet_percent: unlimited ? 0 : percent,
+    bankroll
+  };
+}
+
+/**
+ * Лимиты ставки БЕЗ кассы — то, что разрешено отдавать игроку.
+ *
+ * `getRocketLimits()` возвращает `bankroll`, потому что он нужен серверу для
+ * проверки ставки и расчёта точки взрыва. В публичный ответ его класть нельзя:
+ * размер кассы Ракеты — внутренняя (админская) цифра, и её раскрытие позволяло
+ * игроку оценивать запас стола. Все маршруты, отвечающие клиенту, обязаны
+ * прогонять лимиты через эту функцию.
+ */
+export function publicRocketLimits(limits: RocketLimits): Omit<RocketLimits, 'bankroll'> {
+  return {
+    min_bet: limits.min_bet,
+    max_bet: limits.max_bet,
+    max_bet_percent: limits.max_bet_percent
+  };
+}
+
 export async function updateRocketBankroll(delta: number) {
   const res=await query('UPDATE rocket_bankroll SET amount=amount+$1,updated_at=NOW() WHERE id=1 AND amount+$1 >= 0 RETURNING amount',[Math.round(delta*100)/100]);
   if (!res.rows.length) throw new Error('Недостаточно средств в кассе Ракеты');
@@ -58,15 +116,17 @@ async function placeBetImpl(userId: number, betAmount: number) {
   if (!user) throw new Error('Пользователь не найден');
 
   const bankroll = await getRocketBankroll();
-  const maxBetPercent = parseInt(await getSetting('rocket_max_bet_percent') || '50');
-  const rawMax = bankroll * (maxBetPercent / 100);
-  const maxBet = roundDownClean(rawMax);
+  const limits = await getRocketLimits(bankroll);
+  const maxBet = limits.max_bet;
   const available = await getAvailableBalance(userId);
 
-  const minBet = parseFloat(await getSetting('min_bet') || '1');
+  const minBet = limits.min_bet;
   if (betAmount < minBet) throw new Error(`Минимальная ставка: $${minBet}`);
   if (Math.round(betAmount * 100) > Math.round(available * 100)) throw new Error('Недостаточно средств');
-  if (betAmount > maxBet) throw new Error(`Максимальная ставка: $${maxBet}`);
+  // `max_bet === null` означает «лимита нет» (настройка 0%) — проверка не выполняется
+  if (maxBet != null && betAmount > maxBet) {
+    throw new Error(`Максимальная ставка: $${maxBet}`);
+  }
 
   // Списать ставку
   await modifyBalance(userId, -betAmount, 'bet', { gameType: 'rocket' });
@@ -98,10 +158,18 @@ async function placeBetImpl(userId: number, betAmount: number) {
   // казино превращалось в гарантированный плюс игрока. Точка взрыва уходит
   // клиенту только вместе с событием `crash` (когда раунд уже завершён) и в
   // `cashout_result` — там она нужна лишь для анимации «призрака».
+  // Кассы в ответе НЕТ намеренно: это админская цифра. Раньше она уходила
+  // клиенту вместе с лимитами, и экран Ракеты подписывал «Лимит одной ставки:
+  // 100% кассы Ракеты ($1 837,50)» — то есть любой игрок видел размер кассы
+  // (а по нему ещё и оценивал, насколько «толстый» стол). Клиенту достаточно
+  // готового `max_bet`: он уже посчитан от кассы на сервере.
   return {
     round_id: res.rows[0].id,
     replay_seed: replaySeed,
-    max_bet: maxBet
+    // `null` — лимита нет (настройка 0%): клиент рисует «Макс: без лимита»
+    max_bet: maxBet,
+    max_bet_unlimited: maxBet == null,
+    min_bet: minBet
   };
 }
 
@@ -166,13 +234,16 @@ async function processCashoutImpl(roundId: number, userId: number, elapsedSec?: 
     [currentMult, grossWin - bet, finalCrash, roundId]
   );
 
+  // `was_beautiful` в ответ не кладём: это внутренняя метка (см. комментарий
+  // в `maybeBeautifulFlight`), она не нужна ни для выплаты, ни для анимации —
+  // клиент и так получает настоящий `crash_at` и рисует полёт призрака по нему.
+  // Утечка флага через API/сокеты подсказывала бы игроку устройство раунда.
   return {
     result: 'win' as const,
     cashout_at: Math.round(currentMult * 100) / 100,
     crash_at: Math.round(finalCrash * 100) / 100,
     profit: Math.round((grossWin - bet) * 100) / 100,
-    gross_win: grossWin,
-    was_beautiful: finalCrash !== parseFloat(round.crash_at)
+    gross_win: grossWin
   };
 }
 
@@ -201,6 +272,8 @@ export async function getRocketHistory(limit = 50) {
      LIMIT $1`,
     [limit]
   );
+  // `was_beautiful` остаётся в БД для внутренней аналитики, но в публичную
+  // ленту раундов не попадает (см. `processCashoutImpl`).
   return res.rows.map(r => ({
     round_id: r.id,
     player: '@' + (r.username || 'user'),
@@ -208,7 +281,6 @@ export async function getRocketHistory(limit = 50) {
     cashout_at: r.cashout_at ? parseFloat(r.cashout_at) : null,
     crash_at: parseFloat(r.crash_at),
     profit: parseFloat(r.profit),
-    was_beautiful: r.was_beautiful,
     timestamp: r.started_at
   }));
 }

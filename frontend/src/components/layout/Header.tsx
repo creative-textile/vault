@@ -1,16 +1,23 @@
 import { useNavigate } from 'react-router-dom';
 import { useAudioSettings } from '../../audio/useAudioSettings';
 import { sfx } from '../../audio';
+import Icon, { type IconName } from '../ui/Icon';
 
 interface Props {
-  title: string;
+  title: React.ReactNode;
   back?: boolean;
   right?: React.ReactNode;
   /** Куда ведёт «←». По умолчанию — на одну запись назад по истории. */
   onBack?: () => void;
+  /**
+   * Иконка раздела. Раньше в `title` вставляли эмодзи («🚀 Ракета»): на Android
+   * и в Telegram WebView они рисуются системным шрифтом, съезжают по базовой
+   * линии и выглядят детскими наклейками рядом с тёмным «неоновым» интерфейсом.
+   */
+  icon?: IconName;
 }
 
-export default function Header({ title, back = true, right, onBack }: Props) {
+export default function Header({ title, back = true, right, onBack, icon }: Props) {
   const nav = useNavigate();
   const { settings, toggleMuted, toggleHaptics } = useAudioSettings();
 
@@ -27,8 +34,15 @@ export default function Header({ title, back = true, right, onBack }: Props) {
 
   return (
     <div className="header">
-      {back && <button className="back-btn" onClick={goBack} aria-label="Назад">←</button>}
-      <div className="header-title">{title}</div>
+      {back && (
+        <button className="back-btn" onClick={goBack} aria-label="Назад">
+          <Icon name="chevronLeft" size={20} strokeWidth={2.2} />
+        </button>
+      )}
+      <div className="header-title">
+        {icon && <span className="header-title__icon"><Icon name={icon} size={17} strokeWidth={1.9} /></span>}
+        <span>{title}</span>
+      </div>
       <div style={{ flex: 1 }} />
       {right}
       {/*
@@ -44,7 +58,7 @@ export default function Header({ title, back = true, right, onBack }: Props) {
         aria-label={settings.muted ? 'Включить звук' : 'Выключить звук'}
         title={settings.muted ? 'Звук выключен · долгое нажатие — вибрация' : 'Звук включён · долгое нажатие — вибрация'}
       >
-        {settings.muted ? '🔇' : '🔊'}
+        <Icon name={settings.muted ? 'volumeOff' : 'volume'} size={18} strokeWidth={1.9} />
       </button>
     </div>
   );
