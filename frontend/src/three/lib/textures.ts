@@ -759,6 +759,64 @@ export function ingotStamp(): THREE.CanvasTexture {
   return t;
 }
 
+/**
+ * Золотой медальон арены: компасная роза судьбы под монетой.
+ * Прозрачный фон — кладётся декалью на мрамор.
+ */
+export function arenaMedallion(): THREE.CanvasTexture {
+  const S = 1024;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d');
+  if (!g) return new THREE.CanvasTexture(c);
+  const cx = S / 2, cy = S / 2;
+
+  g.strokeStyle = 'rgba(232,196,110,0.9)';
+  g.lineWidth = 10;
+  g.beginPath(); g.arc(cx, cy, 470, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 4;
+  g.beginPath(); g.arc(cx, cy, 430, 0, Math.PI * 2); g.stroke();
+
+  // Лучи розы: 8 длинных, 16 коротких
+  g.fillStyle = 'rgba(232,196,110,0.75)';
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    g.save();
+    g.translate(cx, cy); g.rotate(a);
+    g.beginPath();
+    g.moveTo(0, -410); g.lineTo(26, -120); g.lineTo(-26, -120);
+    g.closePath(); g.fill();
+    g.restore();
+  }
+  g.fillStyle = 'rgba(232,196,110,0.4)';
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2 + Math.PI / 16;
+    g.save();
+    g.translate(cx, cy); g.rotate(a);
+    g.beginPath();
+    g.moveTo(0, -300); g.lineTo(14, -110); g.lineTo(-14, -110);
+    g.closePath(); g.fill();
+    g.restore();
+  }
+
+  // Центральное кольцо и бусины по ободу
+  g.lineWidth = 6;
+  g.strokeStyle = 'rgba(232,196,110,0.9)';
+  g.beginPath(); g.arc(cx, cy, 96, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = 'rgba(232,196,110,0.85)';
+  for (let i = 0; i < 32; i++) {
+    const a = (i / 32) * Math.PI * 2;
+    g.beginPath();
+    g.arc(cx + Math.cos(a) * 450, cy + Math.sin(a) * 450, 7, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 8;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 /* ═══════════════════════════ ПОЛ И ФОН ═════════════════════════════════ */
 
 /** Радиальное свечение на полу (неоновое кольцо арены, подсветка сейфа). */

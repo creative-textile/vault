@@ -29,7 +29,7 @@ import * as THREE from 'three';
 import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
 import { createRng, easeOutCubic } from '../lib/rng';
 import { gold, polishedGold, darkSteel, neon, additive, disposeObject } from '../lib/materials';
-import { coinFace, coinEdge, brushedMetal, arenaFloor, neonRing, radialGlow, glowSprite, smokeSprite, arenaWall, lightPillar, engravedPlate } from '../lib/textures';
+import { coinFace, coinEdge, brushedMetal, blackMarble, arenaMedallion, nebula, neonRing, radialGlow, glowSprite, smokeSprite, lightPillar, engravedPlate } from '../lib/textures';
 import { loadModel, disposeModel } from '../lib/models';
 import { ParticleField } from '../lib/particles';
 import { FLIP_MS, sampleFlip } from './flipMath';
@@ -187,20 +187,40 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       [body, edge, heads, tails].forEach((o) => { o.visible = false; });
     });
 
-    /* ══════════════════════════ АРЕНА ═══════════════════════════════════ */
-    const floorTex = arenaFloor();
-    floorTex.repeat.set(2.4, 2.4);
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(7.4, 96),
-      new THREE.MeshPhysicalMaterial({
-        map: floorTex, metalness: 0.5, roughness: 0.24, envMapIntensity: 1.3,
-        clearcoat: 0.55, clearcoatRoughness: 0.22
-      })
+    /* ══════════════════════════ ПАНТЕОН СУДЬБЫ (арена с нуля, R3) ═══════
+     * Фидбек: «всё, кроме монеты, не нравится — переделать с нуля».
+     * Новый сеттинг: храм судьбы — чёрный мрамор, золотая компасная роза,
+     * кольцо каннелированных колонн с жаровнями, открытый космос за ними.
+     */
+    // Небо: туманность за колоннадой
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(60, 32, 20),
+      new THREE.MeshBasicMaterial({ map: nebula(), side: THREE.BackSide, depthWrite: false })
     );
+    scene.add(sky);
+
+    // Пол: полированный чёрный мрамор
+    const floorMat = new THREE.MeshPhysicalMaterial({
+      map: blackMarble(), color: 0xc8c8d4, metalness: 0.46, roughness: 0.14,
+      envMapIntensity: 1.25, clearcoat: 0.85, clearcoatRoughness: 0.12
+    });
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(7.4, 96), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = FLOOR_Y;
     floor.receiveShadow = quality === 'high';
     scene.add(floor);
+
+    // Золотая компасная роза под монетой — центр композиции
+    const medallion = new THREE.Mesh(
+      new THREE.CircleGeometry(3.1, 96),
+      new THREE.MeshBasicMaterial({
+        map: arenaMedallion(), transparent: true, opacity: 0.92,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      })
+    );
+    medallion.rotation.x = -Math.PI / 2;
+    medallion.position.y = FLOOR_Y + 0.01;
+    scene.add(medallion);
 
     // Неоновые кольца на полу
     const ringOuter = new THREE.Mesh(
@@ -232,18 +252,63 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     arenaRim.castShadow = quality === 'high';
     scene.add(arenaRim);
 
-    // Стена-колизей: неоновые пилястры вместо пустоты за ареной
-    const wall = new THREE.Mesh(
-      new THREE.CylinderGeometry(15, 15, 9.5, 64, 1, true),
-      new THREE.MeshBasicMaterial({ map: arenaWall(), side: THREE.BackSide, toneMapped: false })
-    );
-    wall.position.y = FLOOR_Y + 4.4;
-    scene.add(wall);
-    // Золотая корона поверх стены — завершает «колизей»
-    const crown = new THREE.Mesh(new THREE.TorusGeometry(14.9, 0.14, 8, 96), gold());
-    crown.rotation.x = Math.PI / 2;
-    crown.position.y = FLOOR_Y + 9.0;
-    scene.add(crown);
+    /* ── Колоннада: 10 каннелированных колонн с жаровнями ──────────────── */
+    // Каннелюры — геометрией (смещение вершин по синусу угла), а не текстурой:
+    // блик реально бежит по граням при облете камеры
+    const flutedColumn = (r: number, h: number): THREE.CylinderGeometry => {
+      const geo = new THREE.CylinderGeometry(r, r * 1.06, h, 60, 4, false);
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const y = pos.getY(i);
+        const ang = Math.atan2(z, x);
+        const flute = 1 + Math.cos(ang * 14) * 0.05;
+        const entasis = 1 - (y / h + 0.5) * 0.1; // лёгкое утоньшение к верху
+        pos.setX(i, x * flute * entasis);
+        pos.setZ(i, z * flute * entasis);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+    const columnMat = new THREE.MeshStandardMaterial({
+      map: blackMarble(), color: 0x9a9ab0, roughness: 0.42, metalness: 0.2,
+      envMapIntensity: 0.75
+    });
+    const flames: Array<{ s: THREE.Sprite; ph: number }> = [];
+    const COLS = quality === 'low' ? 6 : 10;
+    for (let i = 0; i < COLS; i++) {
+      const a = (i / COLS) * Math.PI * 2 + Math.PI / COLS;
+      const x = Math.cos(a) * 10.6;
+      const z = Math.sin(a) * 10.6;
+      const col = new THREE.Group();
+      const shaft = new THREE.Mesh(flutedColumn(0.52, 6.4), columnMat);
+      shaft.position.y = 3.2;
+      shaft.castShadow = quality === 'high';
+      col.add(shaft);
+      // База и капитель: золото
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.8, 0.3, 24), gold());
+      base.position.y = 0.15;
+      col.add(base);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.6, 0.34, 24), gold());
+      cap.position.y = 6.5;
+      col.add(cap);
+      // Жаровня: чаша + живой огонь-спрайт
+      const bowl = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.1, 10, 24), darkSteel({ roughness: 0.44 }));
+      bowl.rotation.x = Math.PI / 2;
+      bowl.position.y = 6.78;
+      col.add(bowl);
+      const flame = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowSprite('#ffb347', 0.3), transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      }));
+      flame.position.y = 7.15;
+      flame.scale.setScalar(0.9);
+      col.add(flame);
+      flames.push({ s: flame, ph: i * 1.7 });
+      col.position.set(x, FLOOR_Y, z);
+      scene.add(col);
+    }
 
     // Лужа света под монетой
     const pool = new THREE.Mesh(
@@ -257,61 +322,56 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     pool.position.y = FLOOR_Y + 0.008;
     scene.add(pool);
 
-    /* ── Постаменты игроков: золото (создатель) и циан (соперник) ───────── */
+    /* ── Постаменты игроков: мрамор + золото, цвета идентичности ───────── */
     const podiums: THREE.Group[] = [];
+    const podiumMarble = new THREE.MeshStandardMaterial({
+      map: blackMarble(), color: 0xd4d4e2, roughness: 0.24, metalness: 0.3,
+      envMapIntensity: 1.0
+    });
     const makePodium = (x: number, colorHex: number, glowCss: string, label: string): THREE.Group => {
       const plateTex = engravedPlate(label);
-      plateTex.repeat.set(3, 1);
+      plateTex.repeat.set(2, 1);
       const g = new THREE.Group();
-      // Ярус 1: шестигранная стальная база
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.98, 1.14, 0.3, 6), darkSteel({ roughness: 0.5 }));
-      base.position.y = 0.15;
+      // Ярус 1: восьмигранная мраморная плита с золотым кантом
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.08, 0.22, 8), podiumMarble);
+      base.position.y = 0.11;
       base.castShadow = quality === 'high';
       base.receiveShadow = quality === 'high';
       g.add(base);
-      const baseRim = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.026, 8, 6), neon(colorHex, 1.6));
+      const baseRim = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.03, 8, 8), polishedGold());
       baseRim.rotation.x = Math.PI / 2;
-      baseRim.position.y = 0.31;
+      baseRim.position.y = 0.23;
       g.add(baseRim);
 
-      // Ярус 2: барабан из брашированного металла с гравированной лентой
-      const drumMat = darkSteel({ roughness: 0.34 });
-      drumMat.roughnessMap = brushedMetal({ base: 96, strength: 30 });
-      drumMat.metalness = 0.92;
-      const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.86, 0.62, 48), drumMat);
-      drum.position.y = 0.6;
-      drum.castShadow = quality === 'high';
-      g.add(drum);
+      // Ярус 2: каннелированный мраморный барабан с гравированной лентой
+      const shaft = new THREE.Mesh(flutedColumn(0.56, 0.72), podiumMarble);
+      shaft.position.y = 0.58;
+      shaft.castShadow = quality === 'high';
+      g.add(shaft);
       const plate = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.765, 0.765, 0.2, 48, 1, true),
+        new THREE.CylinderGeometry(0.635, 0.635, 0.2, 48, 1, true),
         new THREE.MeshStandardMaterial({
-          map: plateTex, metalness: 0.78, roughness: 0.4,
-          envMapIntensity: 1.0, side: THREE.DoubleSide
+          map: plateTex, metalness: 0.82, roughness: 0.34,
+          envMapIntensity: 1.1, side: THREE.DoubleSide
         })
       );
-      plate.position.y = 0.6;
+      plate.position.y = 0.56;
       g.add(plate);
-      const drumGoldTop = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.034, 10, 64), polishedGold());
-      drumGoldTop.rotation.x = Math.PI / 2;
-      drumGoldTop.position.y = 0.92;
-      g.add(drumGoldTop);
-      const drumGoldBottom = new THREE.Mesh(new THREE.TorusGeometry(0.86, 0.03, 10, 64), polishedGold());
-      drumGoldBottom.rotation.x = Math.PI / 2;
-      drumGoldBottom.position.y = 0.29;
-      g.add(drumGoldBottom);
+      // Золотые кольца барабана
+      for (const [ry, rr] of [[0.94, 0.6], [0.24, 0.66]] as const) {
+        const rimG = new THREE.Mesh(new THREE.TorusGeometry(rr, 0.032, 10, 64), polishedGold());
+        rimG.rotation.x = Math.PI / 2;
+        rimG.position.y = ry;
+        g.add(rimG);
+      }
 
-      // Ярус 3: светящаяся столешница с золотым кантом
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.07, 48), neon(colorHex, 1.9));
-      top.position.y = 0.97;
+      // Ярус 3: капитель и светящаяся столешница цвета игрока
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.62, 0.14, 24), podiumMarble);
+      cap.position.y = 1.0;
+      g.add(cap);
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.06, 48), neon(colorHex, 1.9));
+      top.position.y = 1.1;
       g.add(top);
-
-      const rim = new THREE.Mesh(
-        new THREE.TorusGeometry(0.84, 0.03, 10, 64),
-        polishedGold()
-      );
-      rim.rotation.x = Math.PI / 2;
-      rim.position.y = 0.99;
-      g.add(rim);
 
       const glow = new THREE.Mesh(
         new THREE.PlaneGeometry(3.6, 3.6),
@@ -325,10 +385,10 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       g.add(glow);
 
       const light = new THREE.PointLight(colorHex, 2.4, 6.5, 2);
-      light.position.y = 1.6;
+      light.position.y = 1.7;
       g.add(light);
 
-      // световой пилон за постаментом — игрок «подсветлен» как на афише
+      // Световой пилон за постаментом — игрок «подсветлен» как на афише
       const pillar = new THREE.Mesh(
         new THREE.PlaneGeometry(1.15, 4.6),
         new THREE.MeshBasicMaterial({
@@ -518,6 +578,13 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
           }
         });
       });
+      // Жаровни колоннады: живой огонь
+      for (const f of flames) {
+        const fl = 0.82 + Math.sin(elapsed * 7.3 + f.ph) * 0.12 + Math.sin(elapsed * 13.7 + f.ph * 2.3) * 0.07;
+        f.s.scale.set(0.9 * fl, 1.1 * fl, 1);
+        f.s.material.opacity = 0.75 + Math.sin(elapsed * 9.1 + f.ph) * 0.15;
+      }
+      sky.rotation.y = elapsed * 0.006;
       bounceLight.intensity += (3.2 - bounceLight.intensity) * (1 - Math.pow(0.02, dt));
 
       // Пыль в луче прожектора
