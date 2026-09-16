@@ -185,6 +185,32 @@ def build_plinth(mats):
 def build_body(mats):
     ob = add_cube('safe_body', BODY_C, (3.9, 3.6, 2.4), mats[MAT_STEEL])
     bevel(ob, 0.035)
+    # сквозной проём под дверь: при открытии виден интерьер, а не стенка
+    bpy.ops.mesh.primitive_cylinder_add(
+        radius=DOOR_R + 0.02, depth=1.6, location=(DOOR_CX, DOOR_Y, -0.35))
+    body_cutter = bpy.context.active_object
+    body_cutter.name = '_cutter_body'
+    cut = ob.modifiers.new('body_hole', 'BOOLEAN')
+    cut.object = body_cutter
+    cut.operation = 'DIFFERENCE'
+    cut.solver = 'EXACT'
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.modifier_apply(modifier='body_hole')
+    bpy.data.objects.remove(body_cutter, do_unlink=True)
+    # рёбра жёсткости по бортам — корпус читается как литая конструкция
+    ribs = []
+    for sx in (-1, 1):
+        for i in range(3):
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(sx * 1.97, 0.75 + i * 1.2, -1.35))
+            r = bpy.context.active_object
+            r.scale = (0.08, 0.5, 2.2)
+            bpy.ops.object.transform_apply(scale=True)
+            ribs.append(r)
+    for r in ribs:
+        r.select_set(True)
+    ob.select_set(True)
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.join()
     uv_cube(ob, 4.0)
     return ob
 
@@ -203,6 +229,21 @@ def build_frame(mats):
     cut.solver = 'EXACT'
     uv_cube(ob, 4.2)
     return ob, cutter
+
+
+def build_frame_bolts(mats):
+    parts = []
+    spots = [(-1.92, 1.72), (1.92, 1.72), (-1.92, -1.72), (1.92, -1.72),
+             (0, 1.84), (0, -1.84), (-2.0, 0), (2.0, 0)]
+    for px, py in spots:
+        bpy.ops.mesh.primitive_cylinder_add(
+            radius=0.07, depth=0.1, vertices=6,
+            location=(px, DOOR_Y + py, FRAME_C[2] + 0.13))
+        b = bpy.context.active_object
+        b.data.materials.append(mats[MAT_CHROME])
+        parts.append(b)
+    ob = join_objects(parts, 'frame_bolts')
+    return ob
 
 
 def build_collar(mats):
@@ -244,18 +285,64 @@ def build_interior(mats):
     bmesh.ops.reverse_faces(bm, faces=bm.faces[:])
     bm.to_mesh(ob.data)
     bm.free()
+    # полки и рёбра жёсткости на задней стенке — интерьер не «пустая коробка»
+    extras = []
+    for sy in (1.62, 2.34):
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, sy, -1.05))
+        sh = bpy.context.active_object
+        sh.scale = (2.7, 0.05, 1.0)
+        bpy.ops.object.transform_apply(scale=True)
+        extras.append(sh)
+    for i in range(4):
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(-1.05 + i * 0.7, DOOR_Y, -1.62))
+        rb = bpy.context.active_object
+        rb.scale = (0.09, 2.6, 0.06)
+        bpy.ops.object.transform_apply(scale=True)
+        extras.append(rb)
+    bpy.ops.object.select_all(action='DESELECT')
+    for e in extras:
+        e.select_set(True)
+    ob.select_set(True)
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.join()
     uv_cube(ob, 2.8)
     return ob
 
 
 def build_gold_bars(mats):
     bars = []
-    for row in range(3):
-        n = 3 - row
+    for row, n in enumerate((4, 3, 2)):
         for i in range(n):
-            x = (i - (n - 1) / 2) * 0.5 - 0.42
+            x = (i - (n - 1) / 2) * 0.52 - 0.30
             y = 0.80 + row * 0.185
-            bars.append(add_cube('gold_bar', (x, y, -1.24), (0.46, 0.17, 0.26), mats[MAT_GOLD]))
+            b = add_cube('gold_bar', (x, y, -1.24), (0.46, 0.17, 0.26), mats[MAT_GOLD])
+            b.rotation_euler = (0, 0, math.sin(i * 3.7 + row) * 0.06)
+            bars.append(b)
+    # боковая стопка слитков
+    for i in range(3):
+        b = add_cube('gold_bar', (0.95, 0.80 + (i % 2) * 0.185, -1.05 + (i // 2) * 0.19),
+                     (0.46, 0.17, 0.26), mats[MAT_GOLD])
+        b.rotation_euler = (0, 0, math.sin(i * 9.1) * 0.22)
+        bars.append(b)
+    # слитки и монеты на нижней полке — золото видно в центре проёма
+    for i in range(3):
+        b = add_cube('gold_bar', (-0.55 + i * 0.55, 1.70, -1.15),
+                     (0.46, 0.17, 0.26), mats[MAT_GOLD])
+        b.rotation_euler = (0, 0, math.sin(i * 7.7) * 0.12)
+        bars.append(b)
+    b = add_cube('gold_bar', (-0.28, 1.885, -1.15), (0.46, 0.17, 0.26), mats[MAT_GOLD])
+    b.rotation_euler = (0, 0, 0.1)
+    bars.append(b)
+    # стопки монет
+    for cx, cn in ((-1.0, 7), (0.62, 5), (1.05, 6), (0.85, 6)):
+        for i in range(cn):
+            bpy.ops.mesh.primitive_cylinder_add(
+                radius=0.14, depth=0.035, vertices=24,
+                location=(cx + math.sin(i * 5.3) * 0.02, 0.78 + i * 0.037, -1.15))
+            c = bpy.context.active_object
+            c.rotation_euler = (math.sin(i * 2.1) * 0.05, math.sin(i * 3.3) * 0.05, 0)
+            c.data.materials.append(mats[MAT_GOLD])
+            bars.append(c)
     ob = join_objects(bars, 'gold_bars')
     uv_cube(ob, 1.6)
     return ob
@@ -375,6 +462,41 @@ def build_wheel(mats):
     ob = join_objects(parts, 'safe_wheel')
     uv_cube(ob, 1.2)
     ob.location = (DOOR_CX, DOOR_Y - 0.86, DOOR_Z + HALF_T + 0.10)
+    return ob
+
+
+def build_doorback(mats):
+    parts = []
+    bpy.ops.mesh.primitive_cylinder_add(
+        radius=DOOR_R - 0.14, depth=0.07, vertices=64,
+        location=(DOOR_CX, DOOR_Y, DOOR_Z - HALF_T - 0.035))
+    dish = bpy.context.active_object
+    dish.data.materials.append(mats[MAT_STEEL])
+    parts.append(dish)
+    for i in range(8):
+        a = (i / 8) * math.pi * 2 + math.pi / 8
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0))
+        rib = bpy.context.active_object
+        rib.scale = ((DOOR_R - 0.30) * 0.9, 0.09, 0.09)
+        bpy.ops.object.transform_apply(scale=True)
+        rib.rotation_euler = (0, 0, a)
+        rib.location = (DOOR_CX + math.cos(a) * (DOOR_R - 0.30) * 0.5,
+                        DOOR_Y + math.sin(a) * (DOOR_R - 0.30) * 0.5,
+                        DOOR_Z - HALF_T - 0.07)
+        rib.data.materials.append(mats[MAT_STEEL])
+        parts.append(rib)
+    for i in range(8):
+        a = (i / 8) * math.pi * 2
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            radius=0.05, segments=12, ring_count=8,
+            location=(DOOR_CX + math.cos(a) * (DOOR_R - 0.24),
+                      DOOR_Y + math.sin(a) * (DOOR_R - 0.24),
+                      DOOR_Z - HALF_T - 0.07))
+        b = bpy.context.active_object
+        b.data.materials.append(mats[MAT_CHROME])
+        parts.append(b)
+    ob = join_objects(parts, 'safe_doorback')
+    uv_cube(ob, 2.4)
     return ob
 
 
@@ -503,9 +625,12 @@ def main():
     interior = build_interior(mats)
     bars = build_gold_bars(mats)
     indicator = build_indicator(mats)
-    static = [plinth, body, frame, collar, hinges, interior, bars, indicator]
+    frame_bolts = build_frame_bolts(mats)
+    static = [plinth, body, frame, collar, hinges, interior, bars, indicator,
+              frame_bolts]
 
     door = build_door(mats)
+    doorback = build_doorback(mats)
     rivets = build_rivets(mats)
     wheel = build_wheel(mats)
     build_bolts(mats)
@@ -530,6 +655,18 @@ def main():
         else:
             ob.rotation_euler = (0, 0, 0)
         ob.location = R4 @ ob.location
+    for nm in ('safe_collar', 'safe_wheel', 'safe_hinges', 'safe_doorback', 'frame_bolts'):
+        ob = bpy.data.objects.get(nm)
+        if ob:
+            for pgn in ob.data.polygons:
+                pgn.use_smooth = True
+            try:
+                bpy.ops.object.select_all(action='DESELECT')
+                ob.select_set(True)
+                bpy.context.view_layer.objects.active = ob
+                bpy.ops.object.shade_auto_smooth(angle=math.radians(38))
+            except Exception:
+                pass
     bpy.context.view_layer.update()
 
     # ── Иерархия: только аналитический парентинг (без ops и зависимостей от
@@ -553,7 +690,7 @@ def main():
     # Дверь: её origin и есть петля
     parent_to(door, root, Vector((0, 0, 0)))
     # Дети двери: локальная = мировая − петля (оси совпадают)
-    for ob in [rivets, wheel] + [b for (b, _, _) in bolt_registry]:
+    for ob in [rivets, wheel, doorback] + [b for (b, _, _) in bolt_registry]:
         parent_to(ob, door, ob.location.copy() - HINGE)
 
     # После парентинга запоминаем ЛОКАЛЬНЫЕ позы ригелей — анимация пишет

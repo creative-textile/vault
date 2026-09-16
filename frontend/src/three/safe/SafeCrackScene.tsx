@@ -185,6 +185,7 @@ export default function SafeCrackScene({
     const interior = new THREE.Group();
     interior.position.set(0, DOOR_Y, -0.9);
     safe.add(interior);
+    const interiorParts: THREE.Object3D[] = [];
 
     const cavity = new THREE.Mesh(
       new THREE.BoxGeometry(DOOR_R * 2 - 0.06, DOOR_R * 2 - 0.06, 1.5),
@@ -193,6 +194,7 @@ export default function SafeCrackScene({
       })
     );
     interior.add(cavity);
+    interiorParts.push(cavity);
 
     // Золотое сияние в глубине
     const innerGlow = new THREE.Mesh(
@@ -222,6 +224,7 @@ export default function SafeCrackScene({
         bar.castShadow = quality === 'high';
         interior.add(bar);
         bars.push(bar);
+        interiorParts.push(bar);
       }
     }
     // Стопка монет справа
@@ -232,6 +235,7 @@ export default function SafeCrackScene({
       c.position.set(0.72 + rng.spread(0.03), -0.9 + i * 0.038, -0.3 + rng.spread(0.03));
       c.rotation.z = rng.spread(0.06);
       interior.add(c);
+      interiorParts.push(c);
     }
     const goldLight = new THREE.PointLight(0xffc44d, 0, 7.5, 2);
     goldLight.position.set(0, DOOR_Y - 0.2, -0.7);
@@ -542,6 +546,11 @@ export default function SafeCrackScene({
       proceduralHide.forEach((o) => { o.visible = false; });
       hingeParts.forEach((o) => { o.visible = false; });
       rivets.forEach((o) => { o.visible = false; });
+      // процедурные внутренности заменяет интерьер модели; золотой свет —
+      // под Anchor_Light, чтобы бил из настоящего проёма
+      interiorParts.forEach((o) => { o.visible = false; });
+      const lightAnchor = m.anchors['Anchor_Light'];
+      if (lightAnchor) lightAnchor.attach(goldLight);
       modelActive = true;
     });
 

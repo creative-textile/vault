@@ -295,6 +295,8 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       const delta = safe.worldToLocal(want.clone()).sub(safe.worldToLocal(hv.clone()));
       modelHolder.position.add(delta);
       hideOnModel.forEach((o) => { o.visible = false; });
+      const lightAnchor = clone.getObjectByName('Anchor_Light');
+      if (lightAnchor) lightAnchor.attach(goldLight);
     });
 
     /* ═══════════════════════ МОНЕТЫ НА ОРБИТАХ ══════════════════════════ */
