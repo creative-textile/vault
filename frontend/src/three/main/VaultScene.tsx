@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
 import { createRng } from '../lib/rng';
 import { gold, polishedGold, disposeObject } from '../lib/materials';
-import { blackMarble, radialGlow, glowSprite, neonRing, ingotStamp } from '../lib/textures';
+import { blackMarble, radialGlow, radialFade, glowSprite, neonRing, ingotStamp } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { loadModel, disposeModel, acquireRoot } from '../lib/models';
 
@@ -106,6 +106,22 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       scene.add(g);
       columns.push(g);
     }
+
+    /* ═══════════════ ПОЛ ЗАЛА: мрамор, тающий к краям карточки ═══════════
+     * Фидбек: «под колоннами нет поверхности». Диск лежит на уровне базы
+     * колонн и растворяется радиальной альфой — колонны больше не висят.
+     */
+    const hallFloor = new THREE.Mesh(
+      new THREE.CircleGeometry(11, 72),
+      new THREE.MeshStandardMaterial({
+        map: blackMarble(), color: 0x3a3a4c, roughness: 0.34, metalness: 0.42,
+        envMapIntensity: 0.7, transparent: true, alphaMap: radialFade(),
+        depthWrite: true
+      })
+    );
+    hallFloor.rotation.x = -Math.PI / 2;
+    hallFloor.position.y = FLOOR_Y - 0.30;
+    scene.add(hallFloor);
 
     /* ═══════════════ ПОДИУМ: полированный мрамор с кантом ════════════════ */
     const marble = new THREE.MeshPhysicalMaterial({
@@ -281,7 +297,7 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     const podiumBars = new THREE.Group();
     scene.add(podiumBars);
     const pb1 = new THREE.Mesh(ingotGeo, ingotMat);
-    pb1.position.set(1.62, FLOOR_Y + 0.075, 0.98);
+    pb1.position.set(2.14, FLOOR_Y + 0.075, 1.12);
     pb1.rotation.y = -0.55;
     const pb1s = new THREE.Mesh(stampGeo, stampMat);
     pb1s.position.y = 0.152;
@@ -289,24 +305,30 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     pb1.add(pb1s);
     podiumBars.add(pb1);
     const pb2 = new THREE.Mesh(ingotGeo, ingotMat);
-    pb2.position.set(1.42, FLOOR_Y + 0.24, 0.86);
+    pb2.position.set(1.96, FLOOR_Y + 0.24, 0.98);
     pb2.rotation.y = -0.34;
     podiumBars.add(pb2);
     const pb3 = new THREE.Mesh(ingotGeo, ingotMat);
-    pb3.position.set(-1.78, FLOOR_Y + 0.075, 0.72);
+    pb3.position.set(-2.24, FLOOR_Y + 0.075, 0.94);
     pb3.rotation.y = 0.8;
     podiumBars.add(pb3);
-    sparkleAnchors.push(new THREE.Vector3(1.62, FLOOR_Y + 0.3, 0.98));
-    sparkleAnchors.push(new THREE.Vector3(-1.78, FLOOR_Y + 0.24, 0.72));
+    sparkleAnchors.push(new THREE.Vector3(2.14, FLOOR_Y + 0.3, 1.12));
+    sparkleAnchors.push(new THREE.Vector3(-2.24, FLOOR_Y + 0.24, 0.94));
 
     /* ═══════════════ СВЕТ: тёплый, без циана ═════════════════════════════ */
-    scene.add(new THREE.AmbientLight(0x7a6a9a, 0.7));
+    scene.add(new THREE.AmbientLight(0x8a7a66, 0.72));
     const key = new THREE.DirectionalLight(0xffd9a0, 2.6);
     key.position.set(-2.5, 3.5, 3.2);
     scene.add(key);
-    const rimViolet = new THREE.DirectionalLight(0x8b5cf6, 1.7);
-    rimViolet.position.set(3.5, 1.6, -2.8);
+    // Контровой — глубже и холоднее, светит ИЗ-ЗА сейфа, чтобы золото на
+    // переднем плане не окрашивалось в розовый
+    const rimViolet = new THREE.DirectionalLight(0x6d4fd6, 1.1);
+    rimViolet.position.set(3.2, 2.4, -4.2);
     scene.add(rimViolet);
+    // Тёплая подсветка спереди слева — слитки на подиуме остаются золотыми
+    const warmFill = new THREE.DirectionalLight(0xffc880, 0.8);
+    warmFill.position.set(-3.4, 0.6, 3.6);
+    scene.add(warmFill);
     const fillAmber = new THREE.DirectionalLight(0xff9d5c, 0.7);
     fillAmber.position.set(-3, -0.8, 2.2);
     scene.add(fillAmber);

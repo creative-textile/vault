@@ -827,6 +827,21 @@ export function arenaMedallion(): THREE.CanvasTexture {
   return t;
 }
 
+/**
+ * Радиальное затухание 1→0: альфа-карта для пола, который растворяется
+ * в фоне карточки (прозрачная сцена витрины).
+ */
+export function radialFade(): THREE.CanvasTexture {
+  return cached('radialFade', [256, 256], (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, w * 0.08, w / 2, h / 2, w * 0.5);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.62, '#ffffff');
+    g.addColorStop(1, '#000000');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
 /* ═══════════════════════════ ПОЛ И ФОН ═════════════════════════════════ */
 
 /** Радиальное свечение на полу (неоновое кольцо арены, подсветка сейфа). */
