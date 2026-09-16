@@ -176,29 +176,30 @@ def main():
         noz.append((r, y, t * 0.2))
     nozzle = lathe('rocket_nozzle', noz, 48, mats['rocket_steel'])
 
-    # ── Стабилизаторы: фаска + сужение к законцовке ──
+    # ── Стабилизаторы: стреловидные, как у настоящих ракет ──
     fins = []
+    fin_pts = [(0.30, -0.60), (0.80, -1.00), (0.70, -1.32), (0.30, -1.44)]
     for i in range(4):
         a = (i / 4) * math.pi * 2 + math.pi / 4
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0))
-        fin = bpy.context.active_object
-        fin.name = f'fin_{i + 1:02d}'
-        fin.scale = (0.62, 0.05, 0.95)
-        bpy.ops.object.transform_apply(scale=True)
+        me = bpy.data.meshes.new(f'fin_{i + 1:02d}')
         bm = bmesh.new()
-        bm.from_mesh(fin.data)
-        for v in bm.verts:
-            if v.co.z > 0.3:                      # скос законцовки
-                v.co.x *= 0.45
-        bm.to_mesh(fin.data)
+        # плоскость (радиаль, высота): после R4 высота станет вертикалью
+        vs = [bm.verts.new((x, h, 0)) for (x, h) in fin_pts]
+        bm.faces.new(vs)
+        bm.to_mesh(me)
         bm.free()
-        m = fin.modifiers.new('bev', 'BEVEL')
-        m.width = 0.02
-        m.segments = 2
+        fin = bpy.data.objects.new(f'fin_{i + 1:02d}', me)
+        bpy.context.collection.objects.link(fin)
+        sol = fin.modifiers.new('sol', 'SOLIDIFY')
+        sol.thickness = 0.04
+        sol.offset = 0
+        bev = fin.modifiers.new('bev', 'BEVEL')
+        bev.width = 0.012
+        bev.segments = 2
         bpy.context.view_layer.objects.active = fin
+        bpy.ops.object.modifier_apply(modifier='sol')
         bpy.ops.object.modifier_apply(modifier='bev')
         fin.rotation_euler = (0, 0, a)
-        fin.location = (math.cos(a) * 0.62, math.sin(a) * 0.62, -0.78)
         fin.data.materials.append(mats['rocket_red'])
         fins.append(fin)
 

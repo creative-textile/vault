@@ -32,7 +32,7 @@ import * as THREE from 'three';
 import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
 import { createRng, fbm1, easeOutCubic } from '../lib/rng';
 import { gold, chrome, darkSteel, paintedHull, paintedRed, glass, neon, additive, composite, polishedGold, disposeObject } from '../lib/materials';
-import { glowSprite, starFlare, smokeSprite, nebula, hazardStripes, neonRing, radialGlow, streakSprite } from '../lib/textures';
+import { glowSprite, starFlare, smokeSprite, nebula, hazardStripes, neonRing, radialGlow, streakSprite, concrete, fireball } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { loadModel, disposeModel } from '../lib/models';
 
@@ -295,45 +295,83 @@ function buildRocket(ghost = false): RocketParts {
 function buildPad(quality: string): THREE.Group {
   const pad = new THREE.Group();
 
-  // Основание: композитный диск с фаской
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.6, 0.26, 64), composite());
-  base.position.y = -0.13;
+  // Бетонная юбка — площадка стоит на «земле», а не висит в пустоте
+  const skirt = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.95, 3.2, 0.24, 72),
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x565a66, roughness: 0.9, metalness: 0.05 })
+  );
+  skirt.position.y = -0.5;
+  skirt.receiveShadow = quality === 'high';
+  pad.add(skirt);
+
+  // Бетонный пьедестал
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.35, 2.6, 0.3, 72),
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x6a6e7a, roughness: 0.85, metalness: 0.08 })
+  );
+  base.position.y = -0.24;
   base.receiveShadow = quality === 'high';
   pad.add(base);
 
-  // Верхняя плита с полосами опасности
-  const hazard = hazardStripes('#f5c542', '#14141c', 30);
-  hazard.repeat.set(3, 3);
+  // Металлическая палуба с расшивкой
   const top = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.1, 2.1, 0.08, 64),
-    new THREE.MeshStandardMaterial({ map: hazard, metalness: 0.5, roughness: 0.62 })
+    new THREE.CylinderGeometry(2.1, 2.16, 0.1, 72),
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x8a8fa0, metalness: 0.75, roughness: 0.5 })
   );
-  top.position.y = 0.04;
+  top.position.y = -0.04;
   top.receiveShadow = quality === 'high';
   pad.add(top);
 
-  // Внутренний золотой диск (пятачок под ракетой)
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 0.98, 0.06, 48), darkSteel({ roughness: 0.34 }));
-  disc.position.y = 0.1;
-  pad.add(disc);
+  // Кольцо опасной разметки вокруг ракеты
+  const hazard = hazardStripes('#f5c542', '#14141c', 30);
+  hazard.repeat.set(6, 1);
+  const hazardRing = new THREE.Mesh(
+    new THREE.RingGeometry(1.25, 1.62, 64),
+    new THREE.MeshStandardMaterial({ map: hazard, metalness: 0.4, roughness: 0.62, side: THREE.DoubleSide })
+  );
+  hazardRing.rotation.x = -Math.PI / 2;
+  hazardRing.position.y = 0.015;
+  pad.add(hazardRing);
 
-  // Неоновое кольцо по кромке
+  // Газоотводный колодец под соплом: тёмная воронка со стальным кантом
+  const duct = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.92, 0.7, 0.5, 48, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x0a0b10, roughness: 0.95, metalness: 0.2, side: THREE.DoubleSide })
+  );
+  duct.position.y = -0.12;
+  pad.add(duct);
+  const ductRim = new THREE.Mesh(new THREE.TorusGeometry(0.94, 0.05, 12, 64), darkSteel({ roughness: 0.4 }));
+  ductRim.rotation.x = Math.PI / 2;
+  ductRim.position.y = 0.02;
+  pad.add(ductRim);
+
+  // Неоновое кольцо по кромке палубы
   const ringTex = neonRing('#22d3ee', 0.055);
   const ring = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 6.4), new THREE.MeshBasicMaterial({
-    map: ringTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    map: ringTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.7
   }));
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.09;
+  ring.position.y = 0.02;
   pad.add(ring);
 
-  // Второе, золотое кольцо внутри
+  // Золотое кольцо вокруг колодца
   const ring2Tex = neonRing('#f5c542', 0.04);
   const ring2 = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 3.1), new THREE.MeshBasicMaterial({
-    map: ring2Tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    map: ring2Tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.55
   }));
   ring2.rotation.x = -Math.PI / 2;
-  ring2.position.y = 0.13;
+  ring2.position.y = 0.06;
   pad.add(ring2);
+
+  // Трубопроводы от края к центру — площадка «обслуживается»
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.5;
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1.5, 10), darkSteel({ roughness: 0.5 }));
+    pipe.rotation.z = Math.PI / 2;
+    pipe.rotation.y = -a;
+    pipe.position.set(Math.cos(a) * 1.6, 0.05, Math.sin(a) * 1.6);
+    pad.add(pipe);
+  }
 
   // Три опорных пилона с огнями
   for (let i = 0; i < 3; i++) {
@@ -355,10 +393,10 @@ function buildPad(quality: string): THREE.Group {
   // Свечение под платформой (мягкая лужа света)
   const poolTex = radialGlow('#4f8dff', 0.1);
   const pool = new THREE.Mesh(new THREE.PlaneGeometry(11, 11), new THREE.MeshBasicMaterial({
-    map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.5, toneMapped: false
+    map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.4, toneMapped: false
   }));
   pool.rotation.x = -Math.PI / 2;
-  pool.position.y = -0.24;
+  pool.position.y = -0.6;
   pad.add(pool);
 
   return pad;
@@ -588,6 +626,25 @@ export default function RocketScene({
     const blastLight = new THREE.PointLight(0xff7a2a, 0, 40, 2);
     scene.add(blastLight);
 
+    // Огненный шар: два перекрещенных билборда с турбулентной текстурой
+    const fireMat = () => new THREE.MeshBasicMaterial({
+      map: fireball(), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      side: THREE.DoubleSide
+    });
+    const fireA = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+    const fireB = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+    fireA.visible = fireB.visible = false;
+    scene.add(fireA, fireB);
+
+    // Вторая ударная волна — догоняет первую
+    const shock2 = new THREE.Mesh(
+      new THREE.RingGeometry(0.4, 0.62, 64),
+      additive(0xfff0d0, 0)
+    );
+    shock2.visible = false;
+    scene.add(shock2);
+
     /* ── Состояние анимации ─────────────────────────────────────────────── */
     let altitude = 0;
     let flightT = 0;
@@ -629,8 +686,22 @@ export default function RocketScene({
       flash.visible = true;
       shock.position.copy(at);
       shock.visible = true;
+      shock2.position.copy(at);
+      shock2.visible = false;
+      fireA.position.copy(at);
+      fireB.position.copy(at);
+      fireA.visible = fireB.visible = true;
+      fireA.scale.setScalar(0.6);
+      fireB.scale.setScalar(0.6);
+      (fireA.material as THREE.MeshBasicMaterial).opacity = 1;
+      (fireB.material as THREE.MeshBasicMaterial).opacity = 1;
       blastLight.position.copy(at);
-      shake = 1;
+      // Первый кадр: плотный выброс дыма из точки взрыва
+      for (let i = 0; i < (quality === 'low' ? 20 : 60); i++) {
+        const [vx, vy, vz] = rng.onSphere(1);
+        smoke.emit(at, tmp.set(vx * rng.range(0.4, 1.4), Math.abs(vy) * rng.range(0.5, 1.6), vz * rng.range(0.4, 1.4)), rng.range(1.8, 3.4), rng.range(0.9, 1.9));
+      }
+      shake = 1.6;
     };
 
     const stopLoop = startLoop(stage, (dt, elapsed) => {
@@ -884,14 +955,21 @@ export default function RocketScene({
 
       function runExplosion(dt: number, elapsed: number) {
         explodedAt += dt;
-        // Обломки: гравитация + кувыркание
+        // Обломки: гравитация + сопротивление + огненные шлейфы
+        const trailOn = explodedAt < 1.15;
         for (const d of debris) {
           if (!d.mesh.visible) continue;
           d.v.y -= 5.4 * dt;
+          d.v.multiplyScalar(1 - 0.35 * dt);
           d.mesh.position.addScaledVector(d.v, dt);
           d.mesh.rotation.x += d.vr.x * dt;
           d.mesh.rotation.y += d.vr.y * dt;
           d.mesh.rotation.z += d.vr.z * dt;
+          if (trailOn) {
+            tmp.copy(d.mesh.position);
+            tmp2.copy(d.v).multiplyScalar(-0.16);
+            sparks.emit(tmp, tmp2, rng.range(0.14, 0.3), rng.range(0.05, 0.12));
+          }
           if (explodedAt > 2.6) d.mesh.visible = false;
         }
         // Вспышка гаснет за ~0.4 с
@@ -900,18 +978,52 @@ export default function RocketScene({
         flash.scale.setScalar(1 + explodedAt * 2.4);
         flash.lookAt(camera.position);
         flash.visible = f > 0.01;
-        // Ударное кольцо расходится и тает
+        // Огненный шар растёт и тает, билборды к камере
+        const ft = explodedAt;
+        const fscale = 0.6 + easeOutCubic(Math.min(1, ft / 0.55)) * 7.5;
+        const fop = Math.max(0, 1 - ft / 0.95);
+        fireA.visible = fireB.visible = fop > 0.01;
+        if (fireA.visible) {
+          fireA.scale.setScalar(fscale * (1 + Math.sin(elapsed * 31) * 0.05));
+          fireB.scale.setScalar(fscale * (1 + Math.cos(elapsed * 27) * 0.05));
+          (fireA.material as THREE.MeshBasicMaterial).opacity = fop * fop;
+          (fireB.material as THREE.MeshBasicMaterial).opacity = fop * fop * 0.85;
+          fireA.lookAt(camera.position);
+          fireB.lookAt(camera.position);
+          fireB.rotateZ(Math.PI / 2);
+        }
+        // Дымовая колонна поднимается ещё полторы секунды
+        if (ft < 1.6) {
+          smokeTimer += dt;
+          if (smokeTimer > 0.03) {
+            smokeTimer = 0;
+            tmp.copy(debrisGroup.position);
+            tmp.x += rng.spread(0.5); tmp.y += rng.range(0, 0.6); tmp.z += rng.spread(0.5);
+            tmp2.set(rng.spread(0.4), rng.range(1.2, 2.6), rng.spread(0.4));
+            smoke.emit(tmp, tmp2, rng.range(1.6, 3), rng.range(0.8, 1.7));
+          }
+        }
+        // Ударные кольца: первое + догоняющая вторая волна
         const sr = Math.max(0, 1 - explodedAt / 0.95);
         (shock.material as THREE.MeshBasicMaterial).opacity = sr * 0.8;
         shock.scale.setScalar(1 + easeOutCubic(Math.min(1, explodedAt / 0.95)) * 16);
         shock.lookAt(camera.position);
         shock.visible = sr > 0.01;
-        blastLight.intensity = Math.max(0, 26 * (1 - explodedAt / 0.7));
-        // Камера отъезжает и слегка дрожит
+        const s2t = Math.max(0, explodedAt - 0.14);
+        const s2r = Math.max(0, 1 - s2t / 0.8);
+        (shock2.material as THREE.MeshBasicMaterial).opacity = s2r * 0.55;
+        shock2.scale.setScalar(1 + easeOutCubic(Math.min(1, s2t / 0.8)) * 22);
+        shock2.lookAt(camera.position);
+        shock2.visible = s2r > 0.01;
+        // Свет: главный пик + вторичный от огненного шара
+        blastLight.intensity = Math.max(0, 26 * (1 - explodedAt / 0.7)) +
+          (ft > 0.1 ? 14 * Math.max(0, 1 - Math.abs(ft - 0.3) / 0.5) : 0);
+        // Камера отъезжает и дрожит с лёгким креном — удар ощущается
         const back = 8.6 + Math.min(2.4, explodedAt * 1.4);
         camTarget.set(0, debrisGroup.position.y + 0.4, back);
         camera.position.lerp(camTarget, 1 - Math.pow(0.02, dt));
         camera.lookAt(debrisGroup.position.x, debrisGroup.position.y, debrisGroup.position.z);
+        if (explodedAt < 0.9) camera.rotateZ(Math.sin(elapsed * 37) * 0.02 * (0.9 - explodedAt));
         void elapsed;
       }
     });

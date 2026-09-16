@@ -532,6 +532,82 @@ export function engravedPlate(label: string, sub = ''): THREE.CanvasTexture {
   });
 }
 
+
+/** Бетон стартовой площадки: детерминированный шум + потёки (без Math.random). */
+export function concrete(): THREE.CanvasTexture {
+  return cached('concrete:v1', [512, 512], (ctx, w, h) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    ctx.fillStyle = '#3a3d46';
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 240; i++) {
+      const x = rnd(i) * w, y = rnd(i + 500) * h, r = 6 + rnd(i + 900) * 46;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const dark = rnd(i + 77) > 0.5;
+      g.addColorStop(0, dark ? 'rgba(20,22,28,.16)' : 'rgba(120,124,134,.10)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    for (let i = 0; i < 5200; i++) {
+      const v = 40 + rnd(i * 3) * 60;
+      ctx.fillStyle = `rgba(${v | 0},${v | 0},${(v + 6) | 0},${0.05 + rnd(i) * 0.08})`;
+      ctx.fillRect(rnd(i + 1) * w, rnd(i + 2) * h, 1.4, 1.4);
+    }
+    ctx.strokeStyle = 'rgba(18,20,26,.35)';
+    for (let i = 0; i < 14; i++) {
+      ctx.lineWidth = 0.7 + rnd(i + 40) * 1.4;
+      ctx.beginPath();
+      let x = rnd(i + 60) * w, y = 0;
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 9; k++) {
+        x += (rnd(i * 9 + k) - 0.5) * 46;
+        y += h / 9;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(12,14,18,.5)';
+    ctx.lineWidth = 3;
+    for (let i = 1; i < 4; i++) {
+      ctx.beginPath(); ctx.moveTo((w / 4) * i, 0); ctx.lineTo((w / 4) * i, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
+    }
+  });
+}
+
+/** Огненный шар взрыва: турбулентные лепестки вокруг ядра (детерминированно). */
+export function fireball(): THREE.CanvasTexture {
+  return cached('fireball:v1', [256, 256], (ctx, w) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 91.7 + 47.3) * 24634.6345;
+      return x - Math.floor(x);
+    };
+    const c = w / 2;
+    ctx.clearRect(0, 0, w, w);
+    for (let i = 0; i < 46; i++) {
+      const a = rnd(i) * Math.PI * 2;
+      const d = rnd(i + 9) * c * 0.62;
+      const r = c * (0.16 + rnd(i + 21) * 0.30);
+      const x = c + Math.cos(a) * d, y = c + Math.sin(a) * d;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const hot = rnd(i + 33) > 0.42;
+      g.addColorStop(0, hot ? 'rgba(255,214,120,.9)' : 'rgba(255,106,26,.8)');
+      g.addColorStop(0.55, 'rgba(255,84,20,.34)');
+      g.addColorStop(1, 'rgba(120,20,10,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    const core = ctx.createRadialGradient(c, c, 0, c, c, c * 0.5);
+    core.addColorStop(0, 'rgba(255,246,214,1)');
+    core.addColorStop(1, 'rgba(255,160,60,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(c, c, c * 0.5, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
 /* ═══════════════════════════ ПОЛ И ФОН ═════════════════════════════════ */
 
 /** Радиальное свечение на полу (неоновое кольцо арены, подсветка сейфа). */
