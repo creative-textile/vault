@@ -33,7 +33,7 @@ import {
 } from '../lib/materials';
 import {
   digitPlate, dialGraduation, engravedPlate, brushedMetal,
-  radialGlow, glowSprite, smokeSprite, blackMarble, lightPillar
+  radialGlow, glowSprite, smokeSprite, blackMarble
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { loadModel, disposeModel, playClip, scrubClip, type LoadedModel } from '../lib/models';
@@ -65,7 +65,18 @@ interface Props {
  */
 function softChrome(): THREE.MeshPhysicalMaterial {
   const m = chrome();
-  m.roughness = 0.3;
+  m.roughness = 0.34;
+  m.envMapIntensity = 0.55;
+  return m;
+}
+
+/**
+ * Матовое золото: фидбек раунда T — «всё металлическое через чур блестит».
+ * Полированное золото из lib оставляем для крошечных акцентов, крупные
+ * детали получаем с приглушёнными отражениями.
+ */
+function softGold(): THREE.MeshPhysicalMaterial {
+  const m = gold({ roughness: 0.4 });
   m.envMapIntensity = 0.7;
   return m;
 }
@@ -109,9 +120,9 @@ export default function SafeCrackScene({
       fog: { color: 0x0a0812, density: 0.048 },
       fov: 40,
       position: [0.35, 0.62, 6.6],
-      bloom: quality === 'high' ? 0.7 : quality === 'medium' ? 0.45 : 0,
-      bloomRadius: 0.55,
-      bloomThreshold: 0.66,
+      bloom: quality === 'high' ? 0.5 : quality === 'medium' ? 0.36 : 0,
+      bloomRadius: 0.5,
+      bloomThreshold: 0.74,
       exposure: 1.06,
       statsId: 'safe'
     });
@@ -141,14 +152,14 @@ export default function SafeCrackScene({
     // Золотая инкрустация: большое кольцо вокруг сейфа
     const inlay = new THREE.Mesh(
       new THREE.RingGeometry(3.2, 3.34, 96),
-      new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.32, envMapIntensity: 1.0 })
+      new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.5, envMapIntensity: 0.6 })
     );
     inlay.rotation.x = -Math.PI / 2;
     inlay.position.y = FLOOR_Y + 0.012;
     scene.add(inlay);
     const inlay2 = new THREE.Mesh(
       new THREE.RingGeometry(4.6, 4.66, 96),
-      new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.4, envMapIntensity: 0.8 })
+      new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.56, envMapIntensity: 0.5 })
     );
     inlay2.rotation.x = -Math.PI / 2;
     inlay2.position.y = FLOOR_Y + 0.011;
@@ -178,7 +189,7 @@ export default function SafeCrackScene({
     for (const ex of [-1.34, 1.34]) {
       const edge = new THREE.Mesh(
         new THREE.PlaneGeometry(0.08, 6.4),
-        new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.36 })
+        new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.52 })
       );
       edge.rotation.x = -Math.PI / 2;
       edge.position.set(ex, FLOOR_Y + 0.016, 2.6);
@@ -205,27 +216,6 @@ export default function SafeCrackScene({
       pil.position.set(px, 1.4, -4.32);
       scene.add(pil);
     }
-    // Тёплые бра между пилястрами: ореол + сам светильник
-    const sconces: THREE.Sprite[] = [];
-    for (const sx of [-4.5, 4.5]) {
-      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: glowSprite('#ffb347', 0.4), transparent: true, opacity: 0.5,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
-      }));
-      halo.scale.setScalar(2.6);
-      halo.position.set(sx, 2.9, -4.2);
-      scene.add(halo);
-      sconces.push(halo);
-      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.34, 16), softChrome());
-      lamp.position.set(sx, 2.9, -4.25);
-      scene.add(lamp);
-    }
-    const sconceL = new THREE.PointLight(0xffb060, 3.2, 7.5, 2);
-    sconceL.position.set(-4.5, 3.0, -3.6);
-    scene.add(sconceL);
-    const sconceR = new THREE.PointLight(0xffb060, 3.2, 7.5, 2);
-    sconceR.position.set(4.5, 3.0, -3.6);
-    scene.add(sconceR);
 
     // Каннелированные мраморные колонны по бокам зала
     const flutedColumn = (r: number, h: number): THREE.CylinderGeometry => {
@@ -254,44 +244,65 @@ export default function SafeCrackScene({
       shaft.position.y = 3.7;
       shaft.castShadow = quality === 'high';
       col.add(shaft);
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.68, 0.26, 24), gold({ roughness: 0.34 }));
+      const colGold = softGold();
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.68, 0.26, 24), colGold);
       base.position.y = 0.13;
       col.add(base);
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.5, 0.3, 24), gold({ roughness: 0.34 }));
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.5, 0.3, 24), colGold);
       cap.position.y = 7.5;
       col.add(cap);
       col.position.set(cx, FLOOR_Y, cz);
       scene.add(col);
     }
 
-    // Световые пилоны между колоннами — тёплая глубина зала
-    for (const px of [-6.8, 6.8]) {
-      const pillar = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.5, 7.5),
-        new THREE.MeshBasicMaterial({
-          map: lightPillar('#ffd76a'), transparent: true, opacity: 0.34,
-          blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-          side: THREE.DoubleSide
-        })
-      );
-      pillar.position.set(px, FLOOR_Y + 4.0, -4.1);
-      scene.add(pillar);
-    }
+    /* ── Новая световая концепция (T2): сейф — экспонат под музейным лучом ─
+     * Мягкий тёплый ореол за сейфом даёт глубину без кричащих светильников,
+     * а верхний прожектор с псевдообъёмным конусом ставит световой акцент.
+     */
+    const backHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowSprite('#ff9d3e', 0.45), transparent: true, opacity: 0.4,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    backHalo.scale.set(10, 7.4, 1);
+    backHalo.position.set(0, 1.7, -4.0);
+    scene.add(backHalo);
 
-    // Золотой портал за сейфом: рама, в которой сейф — экспонат
-    const portalMat = gold({ roughness: 0.3 });
-    portalMat.envMapIntensity = 0.85;
-    const portalW = 5.6;
-    const portalH = 5.2;
-    const portalT = 0.18;
-    for (const [w, h, x, y] of [
-      [portalW, portalT, 0, portalH / 2], [portalW, portalT, 0, -portalH / 2],
-      [portalT, portalH, -portalW / 2, 0], [portalT, portalH, portalW / 2, 0]
-    ] as const) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.22), portalMat);
-      bar.position.set(x, DOOR_Y + 0.9 + y, -3.4);
-      scene.add(bar);
-    }
+    const topSpot = new THREE.SpotLight(0xffe2ac, 46, 22, Math.PI / 7.4, 0.55, 1.6);
+    topSpot.position.set(0.3, 8.4, 0.9);
+    topSpot.target.position.set(0, DOOR_Y, 0);
+    scene.add(topSpot);
+    scene.add(topSpot.target);
+
+    // Псевдообъёмный конус луча (та же техника, что в дуэли)
+    const beamH = 8.2;
+    const beamGeo = new THREE.ConeGeometry(2.4, beamH, 36, 1, true);
+    const beamMat = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.13 } },
+      vertexShader: /* glsl */`
+        varying float vFall;
+        varying vec3 vNormalV;
+        void main() {
+          vFall = (${(beamH / 2).toFixed(1)} - position.y) / ${beamH.toFixed(1)};
+          vNormalV = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        varying float vFall;
+        varying vec3 vNormalV;
+        void main() {
+          float edge = 1.0 - abs(dot(normalize(vNormalV), vec3(0.0, 0.0, 1.0)));
+          float a = uOpacity * pow(clamp(vFall, 0.0, 1.0), 1.8) * pow(edge, 1.4);
+          gl_FragColor = vec4(uColor, a);
+        }`,
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending
+    });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.set(0.3, 8.4 - beamH / 2, 0.6);
+    beam.rotation.z = 0.03;
+    scene.add(beam);
 
     /* ═══════════════════════════ КОРПУС СЕЙФА ═══════════════════════════ */
     const safe = new THREE.Group();
@@ -471,7 +482,7 @@ export default function SafeCrackScene({
 
     const panelTrim = new THREE.Mesh(
       new THREE.BoxGeometry(2.98, 1.14, 0.05),
-      polishedGold()
+      softGold()
     );
     panelTrim.position.set(-HINGE_X, DRUM_Y, halfT - 0.075);
     doorPivot.add(panelTrim);
@@ -494,9 +505,11 @@ export default function SafeCrackScene({
     const drums: Drum[] = [];
     const drumBodyGeo = new THREE.CylinderGeometry(DRUM_R, DRUM_R, DRUM_W, 56, 1);
     drumBodyGeo.rotateZ(Math.PI / 2);                    // ось барабана → X
+    // Круговая карта браширования читалась как «непонятные отметины» —
+    // барабан стал ровнее и матовее
     const drumBodyMat = new THREE.MeshStandardMaterial({
-      map: brushedMetal({ base: 118, strength: 30, circular: true }),
-      metalness: 0.85, roughness: 0.44, envMapIntensity: 0.7
+      map: brushedMetal({ base: 104, strength: 14 }),
+      metalness: 0.68, roughness: 0.52, envMapIntensity: 0.45
     });
     const plateGeo = new THREE.PlaneGeometry(DRUM_W * 0.92, DRUM_R * 1.34);
 
@@ -529,7 +542,7 @@ export default function SafeCrackScene({
       for (const sx of [-1, 1]) {
         const ring = new THREE.Mesh(
           new THREE.TorusGeometry(DRUM_R + 0.018, 0.028, 10, 44),
-          polishedGold()
+          softGold()
         );
         ring.rotation.y = Math.PI / 2;
         ring.position.x = sx * (DRUM_W / 2);
@@ -573,7 +586,7 @@ export default function SafeCrackScene({
     const dialDisc = new THREE.Mesh(
       new THREE.CircleGeometry(0.66, 64),
       new THREE.MeshStandardMaterial({
-        map: dialGraduation(), metalness: 0.95, roughness: 0.32, envMapIntensity: 1.3
+        map: dialGraduation(), metalness: 0.85, roughness: 0.46, envMapIntensity: 0.8
       })
     );
     dialDisc.position.z = -0.06;
@@ -581,7 +594,7 @@ export default function SafeCrackScene({
 
     const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.055, 12, 56), softChrome());
     wheel.add(wheelRim);
-    const wheelHub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.16, 32), polishedGold());
+    const wheelHub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.16, 32), softGold());
     wheelHub.rotation.x = Math.PI / 2;
     wheel.add(wheelHub);
     for (let i = 0; i < 3; i++) {
@@ -614,7 +627,7 @@ export default function SafeCrackScene({
       const hinge = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.62, 0.42), softChrome());
       hinge.position.set(HINGE_X + 0.02, DOOR_Y + hy, -0.02);
       safe.add(hinge);
-      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.74, 18), polishedGold());
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.74, 18), softGold());
       pin.position.set(HINGE_X + 0.02, DOOR_Y + hy, 0.16);
       safe.add(pin);
       hingeParts.push(hinge, pin);
@@ -933,11 +946,6 @@ export default function SafeCrackScene({
       doorGrazing.intensity = 3.4 + (alarmOn ? Math.sin(elapsed * 7.5) * 1.4 : 0);
       doorGrazing.color.setHex(alarmOn ? 0xff5a4a : 0xffd76a);
 
-      // Бра дышат тёплым светом
-      sconces.forEach((sc, i) => {
-        sc.material.opacity = 0.42 + Math.sin(elapsed * 1.3 + i * 2.4) * 0.1;
-      });
-
       /* ── Частицы ──────────────────────────────────────────────────────── */
       dustTimer += dt;
       if (dustTimer > 0.2) {
@@ -1003,6 +1011,8 @@ export default function SafeCrackScene({
       sparks.dispose(); dust.dispose(); goldMotes.dispose(); smoke.dispose();
       barGeo.dispose(); coinGeo.dispose();
       drumBodyGeo.dispose(); plateGeo.dispose(); rivetGeo.dispose(); boltGeo.dispose();
+      beamGeo.dispose();
+      beamMat.dispose();
       disposeObject(safe);
       disposeObject(scene);
       stage.dispose();
