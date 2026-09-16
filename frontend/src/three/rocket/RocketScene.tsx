@@ -645,6 +645,26 @@ export default function RocketScene({
     shock2.visible = false;
     scene.add(shock2);
 
+    /* ── Q4: облако огненных шаров — взрыв «объёмный», а не плоский ─────── */
+    interface CloudBall { mesh: THREE.Mesh; off: THREE.Vector3; delay: number; spin: number; rise: number }
+    const fireCloud: CloudBall[] = [];
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+      m.visible = false;
+      scene.add(m);
+      fireCloud.push({
+        mesh: m,
+        off: new THREE.Vector3(rng.spread(1.5), rng.range(0, 1.1), rng.spread(1.5)),
+        delay: rng.range(0, 0.22),
+        spin: rng.spread(2.6),
+        rise: rng.range(1.1, 2.6)
+      });
+    }
+    // Столб пламени: вертикальный билборд, растёт и тает — «ядерный гриб»
+    const flameCol = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+    flameCol.visible = false;
+    scene.add(flameCol);
+
     /* ── Состояние анимации ─────────────────────────────────────────────── */
     let altitude = 0;
     let flightT = 0;
@@ -696,6 +716,25 @@ export default function RocketScene({
       (fireA.material as THREE.MeshBasicMaterial).opacity = 1;
       (fireB.material as THREE.MeshBasicMaterial).opacity = 1;
       blastLight.position.copy(at);
+      // Облако огненных шаров вокруг эпицентра + столб пламени
+      for (const b of fireCloud) {
+        b.mesh.visible = true;
+        b.mesh.position.copy(at).add(b.off);
+        b.mesh.scale.setScalar(0.5);
+        (b.mesh.material as THREE.MeshBasicMaterial).opacity = 0;
+      }
+      flameCol.visible = true;
+      flameCol.position.copy(at);
+      flameCol.scale.set(1.4, 0.6, 1);
+      (flameCol.material as THREE.MeshBasicMaterial).opacity = 1;
+      // Фонтан раскалённых углей вверх — взрыв не только вширь, но и вверх
+      for (let i = 0; i < (quality === 'low' ? 22 : 64); i++) {
+        const a = rng.rand() * Math.PI * 2;
+        const rr = rng.range(0, 0.5);
+        tmp.set(at.x + Math.cos(a) * rr, at.y, at.z + Math.sin(a) * rr);
+        tmp2.set(Math.cos(a) * rng.range(0.3, 1.7), rng.range(2.8, 7.4), Math.sin(a) * rng.range(0.3, 1.7));
+        embers.emit(tmp, tmp2, rng.range(0.7, 1.6), rng.range(0.2, 0.5));
+      }
       // Первый кадр: плотный выброс дыма из точки взрыва
       for (let i = 0; i < (quality === 'low' ? 20 : 60); i++) {
         const [vx, vy, vz] = rng.onSphere(1);
@@ -730,6 +769,8 @@ export default function RocketScene({
         shock.visible = false;
         blastLight.intensity = 0;
         debris.forEach((d) => { d.mesh.visible = false; });
+        fireCloud.forEach((b) => { b.mesh.visible = false; });
+        flameCol.visible = false;
         smoke.clear(); embers.clear(); sparks.clear(); speedLines.clear();
 
         // Предстартовое покачивание + лёгкое дрожание (двигатель на холостых)
@@ -778,6 +819,8 @@ export default function RocketScene({
         shock.visible = false;
         blastLight.intensity = 0;
         debris.forEach((d) => { d.mesh.visible = false; });
+        fireCloud.forEach((b) => { b.mesh.visible = false; });
+        flameCol.visible = false;
 
         // Набор высоты логарифмический: ракета уходит вверх, но остаётся в кадре
         const targetAlt = Math.log(1 + flightT * 0.62) * 4.2;
@@ -992,6 +1035,31 @@ export default function RocketScene({
           fireB.lookAt(camera.position);
           fireB.rotateZ(Math.PI / 2);
         }
+        // Облако огненных шаров: растёт, поднимается, вращается, гаснет с задержкой
+        for (const b of fireCloud) {
+          const bt = explodedAt - b.delay;
+          if (bt < 0) { b.mesh.visible = false; continue; }
+          const bScale = 0.5 + easeOutCubic(Math.min(1, bt / 0.5)) * (2.4 + b.delay * 3);
+          const bOp = Math.max(0, 1 - bt / 1.35);
+          b.mesh.visible = bOp > 0.01;
+          if (b.mesh.visible) {
+            b.mesh.position.y += b.rise * dt;
+            b.mesh.scale.setScalar(bScale * (1 + Math.sin(elapsed * 23 + b.delay * 40) * 0.07));
+            (b.mesh.material as THREE.MeshBasicMaterial).opacity = bOp * bOp * 0.9;
+            b.mesh.lookAt(camera.position);
+            b.mesh.rotateZ(b.spin * elapsed);
+          }
+        }
+        // Столб пламени: быстро растёт вверх, гаснет за 0.7 с
+        const colT = explodedAt;
+        const colOp = Math.max(0, 1 - colT / 0.7);
+        flameCol.visible = colOp > 0.01;
+        if (flameCol.visible) {
+          flameCol.scale.set(1.4 + colT * 1.2, 0.6 + easeOutCubic(Math.min(1, colT / 0.4)) * 7.5, 1);
+          flameCol.position.y = debrisGroup.position.y + flameCol.scale.y * 0.32;
+          (flameCol.material as THREE.MeshBasicMaterial).opacity = colOp * colOp;
+          flameCol.lookAt(camera.position);
+        }
         // Дымовая колонна поднимается ещё полторы секунды
         if (ft < 1.6) {
           smokeTimer += dt;
@@ -1020,6 +1088,10 @@ export default function RocketScene({
           (ft > 0.1 ? 14 * Math.max(0, 1 - Math.abs(ft - 0.3) / 0.5) : 0);
         // Камера отъезжает и дрожит с лёгким креном — удар ощущается
         const back = 8.6 + Math.min(2.4, explodedAt * 1.4);
+        // Зум-панч: в первые 0.3 с камера резко расширяет поле зрения
+        const punch = Math.max(0, 1 - explodedAt / 0.3) * 9;
+        camera.fov += (60 + punch - camera.fov) * (1 - Math.pow(0.01, dt));
+        camera.updateProjectionMatrix();
         camTarget.set(0, debrisGroup.position.y + 0.4, back);
         camera.position.lerp(camTarget, 1 - Math.pow(0.02, dt));
         camera.lookAt(debrisGroup.position.x, debrisGroup.position.y, debrisGroup.position.z);
