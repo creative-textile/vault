@@ -417,44 +417,54 @@ export function coinEdge(): THREE.CanvasTexture {
 export function digitPlate(digit: number, opts: { face?: string; accent?: string } = {}): THREE.CanvasTexture {
   const { face = '#0d1024', accent = '#f5c542' } = opts;
   return cached(`digit:${digit}:${face}:${accent}`, [256, 256], (ctx, w, h) => {
-    // Фон плашки: тёмный металл с виньеткой
+    // Детерминированный шум вместо Math.random (ограничение ТЗ): риски
+    // металла обязаны быть одинаковыми от кадра к кадру и между клиентами.
+    let rs = (digit + 7) * 2654435761 % 4294967296;
+    const rnd = () => {
+      rs = (rs * 1664525 + 1013904223) % 4294967296;
+      return rs / 4294967296;
+    };
+
+    // Фон плашки: почти чёрный — цифра светится на нём как табло
     const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#1c2144');
+    g.addColorStop(0, '#141833');
     g.addColorStop(0.45, face);
-    g.addColorStop(1, '#05060f');
+    g.addColorStop(1, '#03040a');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
     // Тонкие риски металла — только тёмные, чтобы не сбивать контраст цифры
-    ctx.globalAlpha = 0.1;
-    for (let i = 0; i < 120; i++) {
+    ctx.globalAlpha = 0.09;
+    for (let i = 0; i < 100; i++) {
       ctx.strokeStyle = '#000000';
-      ctx.lineWidth = Math.random() * 1.4;
-      const y = Math.random() * h;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + (Math.random() - 0.5) * 3); ctx.stroke();
+      ctx.lineWidth = rnd() * 1.3;
+      const y = rnd() * h;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + (rnd() - 0.5) * 3); ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
-    // Цифра с тиснением: крупная, контрастная, читается с любого расстояния
+    // Цифра: раскалённо-белая с золотым низом и ореолом — читается в любом
+    // свете. Крупная (0.86 высоты), жирная, с тёмным тиснением.
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `700 ${Math.round(h * 0.8)}px 'Orbitron', 'Russo One', ui-monospace, monospace`;
+    ctx.font = `800 ${Math.round(h * 0.86)}px 'Orbitron', 'Russo One', ui-monospace, monospace`;
     ctx.fillStyle = 'rgba(0,0,0,0.95)';
-    ctx.fillText(String(digit), w / 2 + 4, h / 2 + 10);
-    const tg = ctx.createLinearGradient(0, h * 0.12, 0, h * 0.88);
-    tg.addColorStop(0, '#fffdf2');
-    tg.addColorStop(0.42, accent);
+    ctx.fillText(String(digit), w / 2 + 4, h / 2 + 12);
+    const tg = ctx.createLinearGradient(0, h * 0.08, 0, h * 0.92);
+    tg.addColorStop(0, '#ffffff');
+    tg.addColorStop(0.35, '#ffe9a8');
+    tg.addColorStop(0.75, accent);
     tg.addColorStop(1, '#c08a12');
     ctx.fillStyle = tg;
     ctx.fillText(String(digit), w / 2, h / 2 + 2);
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,248,221,0.7)';
-    ctx.strokeText(String(digit), w / 2, h / 2);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(255,248,221,0.85)';
+    ctx.strokeText(String(digit), w / 2, h / 2 + 2);
 
-    // Свечение вокруг цифры
+    // Ореол вокруг цифры — свечение видно даже в тени
     ctx.globalCompositeOperation = 'lighter';
-    const halo = ctx.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w * 0.46);
-    halo.addColorStop(0, withAlpha(accent, 0.24));
+    const halo = ctx.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w * 0.52);
+    halo.addColorStop(0, withAlpha(accent, 0.4));
     halo.addColorStop(1, withAlpha(accent, 0));
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, w, h);

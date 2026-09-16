@@ -58,6 +58,18 @@ interface Props {
   taps?: (number | undefined)[];
 }
 
+/**
+ * Хром без «вырвиглазных» бликов: фидбек раунда R — на сейфе странные
+ * резкие отражения. Глобальный chrome() не трогаем (он и в ракете),
+ * приглушаем только здесь.
+ */
+function softChrome(): THREE.MeshPhysicalMaterial {
+  const m = chrome();
+  m.roughness = 0.3;
+  m.envMapIntensity = 0.7;
+  return m;
+}
+
 /* ── Геометрия: всё подогнано под контейнер 4:3 и камеру на z = 6.6 ─────── */
 const FLOOR_Y = -1.78;
 const DOOR_R = 1.42;
@@ -143,12 +155,52 @@ export default function SafeCrackScene({
     hazard.position.set(0, FLOOR_Y + 0.015, 1.75);
     scene.add(hazard);
 
+    /* ── Стена хранилища: панели, золотой профиль, тёплые бра (R4) ─────── */
+    const wallMat = new THREE.MeshStandardMaterial({
+      map: concrete(), color: 0x2c2f42, roughness: 0.9, metalness: 0.06,
+      envMapIntensity: 0.25
+    });
+    wallMat.map!.repeat.set(4, 2);
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(26, 12), wallMat);
+    wall.position.set(0, 1.6, -4.4);
+    wall.receiveShadow = quality === 'high';
+    scene.add(wall);
+    // Вертикальные золотые пилястры на стене
+    const pilasterMat = gold({ roughness: 0.34 });
+    pilasterMat.envMapIntensity = 0.7;
+    for (const px of [-5.6, -3.4, 3.4, 5.6]) {
+      const pil = new THREE.Mesh(new THREE.BoxGeometry(0.16, 8.4, 0.1), pilasterMat);
+      pil.position.set(px, 1.4, -4.32);
+      scene.add(pil);
+    }
+    // Тёплые бра между пилястрами: ореол + сам светильник
+    const sconces: THREE.Sprite[] = [];
+    for (const sx of [-4.5, 4.5]) {
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowSprite('#ffb347', 0.4), transparent: true, opacity: 0.5,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      }));
+      halo.scale.setScalar(2.6);
+      halo.position.set(sx, 2.9, -4.2);
+      scene.add(halo);
+      sconces.push(halo);
+      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.34, 16), softChrome());
+      lamp.position.set(sx, 2.9, -4.25);
+      scene.add(lamp);
+    }
+    const sconceL = new THREE.PointLight(0xffb060, 3.2, 7.5, 2);
+    sconceL.position.set(-4.5, 3.0, -3.6);
+    scene.add(sconceL);
+    const sconceR = new THREE.PointLight(0xffb060, 3.2, 7.5, 2);
+    sconceR.position.set(4.5, 3.0, -3.6);
+    scene.add(sconceR);
+
     /* ═══════════════════════════ КОРПУС СЕЙФА ═══════════════════════════ */
     const safe = new THREE.Group();
     scene.add(safe);
 
-    const bodyMat = darkSteel({ roughness: 0.6 });
-    bodyMat.envMapIntensity = 0.5;
+    const bodyMat = darkSteel({ roughness: 0.64 });
+    bodyMat.envMapIntensity = 0.38;
     bodyMat.map = brushedMetal({ base: 62, strength: 22 });
     const body = new THREE.Mesh(new THREE.BoxGeometry(3.9, 3.6, 2.4, 1, 1, 1), bodyMat);
     body.position.set(0, 0.15, -1.35);
@@ -157,8 +209,8 @@ export default function SafeCrackScene({
     safe.add(body);
 
     // Передняя рама: чуть больше корпуса, с золотистой фаской — «дорогой» сейф
-    const frameMat = darkSteel({ roughness: 0.46 });
-    frameMat.envMapIntensity = 0.65;
+    const frameMat = darkSteel({ roughness: 0.5 });
+    frameMat.envMapIntensity = 0.45;
     frameMat.map = brushedMetal({ base: 74, strength: 18 });
     const frame = new THREE.Mesh(new THREE.BoxGeometry(4.14, 3.84, 0.26), frameMat);
     frame.position.set(0, 0.15, -0.14);
@@ -176,7 +228,7 @@ export default function SafeCrackScene({
     // Кольцо-обойма вокруг дверного проёма (признак настоящей двери хранилища)
     const collar = new THREE.Mesh(
       new THREE.TorusGeometry(DOOR_R + 0.20, 0.155, 14, 72),
-      chrome()
+      softChrome()
     );
     collar.position.set(0, DOOR_Y, -0.02);
     safe.add(collar);
@@ -271,8 +323,8 @@ export default function SafeCrackScene({
 
     const doorGeo = new THREE.LatheGeometry(doorProfile, 96);
     doorGeo.rotateX(Math.PI / 2);                       // ось двери → Z
-    const doorMat = darkSteel({ roughness: 0.42 });
-    doorMat.envMapIntensity = 0.75;
+    const doorMat = darkSteel({ roughness: 0.48 });
+    doorMat.envMapIntensity = 0.45;
     doorMat.map = brushedMetal({ base: 86, strength: 20, circular: true });
     const door = new THREE.Mesh(doorGeo, doorMat);
     door.position.x = -HINGE_X;                          // центр двери в мире = 0
@@ -281,7 +333,7 @@ export default function SafeCrackScene({
 
     // Заклёпки по периметру — деталь, по которой сейф узнают мгновенно
     const rivetGeo = new THREE.SphereGeometry(0.055, 14, 10);
-    const rivetMat = chrome();
+    const rivetMat = softChrome();
     const rivets: THREE.Mesh[] = [];
     for (let i = 0; i < 14; i++) {
       const a = (i / 14) * Math.PI * 2 + Math.PI / 14;
@@ -335,6 +387,12 @@ export default function SafeCrackScene({
       bezel: THREE.Mesh;
       windowGlow: THREE.Mesh;
     }
+    // Тёплый прожектор, направленный на барабаны: цифры не должны тонуть
+    // в тени при любом окружающем свете
+    const drumLight = new THREE.PointLight(0xffe3b0, 6.5, 4.6, 2);
+    drumLight.position.set(-HINGE_X, DRUM_Y + 0.5, halfT + 1.35);
+    doorPivot.add(drumLight);
+
     const drums: Drum[] = [];
     const drumBodyGeo = new THREE.CylinderGeometry(DRUM_R, DRUM_R, DRUM_W, 56, 1);
     drumBodyGeo.rotateZ(Math.PI / 2);                    // ось барабана → X
@@ -357,10 +415,12 @@ export default function SafeCrackScene({
       for (let d = 0; d < 10; d++) {
         const place = drumPlateTransform(d, DRUM_R + 0.004);
         const tex = digitPlate(d, { face: '#0b0e20', accent: '#f5c542' });
+        // Цифры обязаны читаться всегда: почти диэлектрик + собственное
+        // тёплое свечение 0.6 (в раунде Q было 0.22 — не хватило)
         const p2 = new THREE.Mesh(plateGeo, new THREE.MeshStandardMaterial({
-          map: tex, bumpMap: tex, bumpScale: 0.01,
-          metalness: 0.25, roughness: 0.55, envMapIntensity: 0.35,
-          emissive: 0xffe2a0, emissiveIntensity: 0.22, emissiveMap: tex
+          map: tex,
+          metalness: 0.12, roughness: 0.62, envMapIntensity: 0.3,
+          emissive: 0xfff0c8, emissiveIntensity: 0.6, emissiveMap: tex
         }));
         p2.position.set(...place.position);
         p2.rotation.x = place.rotationX;
@@ -421,13 +481,13 @@ export default function SafeCrackScene({
     dialDisc.position.z = -0.06;
     wheel.add(dialDisc);
 
-    const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.055, 12, 56), chrome());
+    const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.055, 12, 56), softChrome());
     wheel.add(wheelRim);
     const wheelHub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.16, 32), polishedGold());
     wheelHub.rotation.x = Math.PI / 2;
     wheel.add(wheelHub);
     for (let i = 0; i < 3; i++) {
-      const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.05, 0.5, 14), chrome());
+      const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.05, 0.5, 14), softChrome());
       spoke.position.set(Math.cos((i / 3) * Math.PI * 2) * 0.25, Math.sin((i / 3) * Math.PI * 2) * 0.25, 0);
       spoke.rotation.z = (i / 3) * Math.PI * 2 + Math.PI / 2;
       wheel.add(spoke);
@@ -453,7 +513,7 @@ export default function SafeCrackScene({
     /* ── Петли и ригели ─────────────────────────────────────────────────── */
     const hingeParts: THREE.Mesh[] = [];
     for (const hy of [-0.72, 0.92]) {
-      const hinge = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.62, 0.42), chrome());
+      const hinge = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.62, 0.42), softChrome());
       hinge.position.set(HINGE_X + 0.02, DOOR_Y + hy, -0.02);
       safe.add(hinge);
       const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.74, 18), polishedGold());
@@ -467,7 +527,7 @@ export default function SafeCrackScene({
     const boltGeo = new THREE.CylinderGeometry(0.075, 0.075, 0.42, 18);
     boltGeo.rotateZ(Math.PI / 2);                        // ось вдоль X
     for (const by of [-0.95, -0.35, 0.55, 1.15]) {
-      const b = new THREE.Mesh(boltGeo, chrome());
+      const b = new THREE.Mesh(boltGeo, softChrome());
       b.position.set(-HINGE_X + DOOR_R + 0.1, by, halfT - 0.02);
       doorPivot.add(b);
       bolts.push(b);
@@ -525,6 +585,17 @@ export default function SafeCrackScene({
       if (cancelled || !m) return;
       safeModel = m;
       modelHolder.add(m.root);
+      // R4: блики на модели были слишком резкими — приглушаем отражения всех
+      // материалов модели, пусть сцена освещает её мягче
+      m.root.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const mat of mats) {
+          const sm = mat as THREE.MeshStandardMaterial;
+          if (typeof sm.envMapIntensity === 'number') sm.envMapIntensity *= 0.55;
+        }
+      });
       modelHolder.updateMatrixWorld(true);
       // Лоадер центрирует bbox и ставит низ на пол; возвращаем петлю (root
       // модели) на сценную ось двери — габариты авторены 1:1 со сценой.
@@ -764,6 +835,11 @@ export default function SafeCrackScene({
       doorGrazing.intensity = 3.4 + (alarmOn ? Math.sin(elapsed * 7.5) * 1.4 : 0);
       doorGrazing.color.setHex(alarmOn ? 0xff5a4a : 0xffd76a);
 
+      // Бра дышат тёплым светом
+      sconces.forEach((sc, i) => {
+        sc.material.opacity = 0.42 + Math.sin(elapsed * 1.3 + i * 2.4) * 0.1;
+      });
+
       /* ── Частицы ──────────────────────────────────────────────────────── */
       dustTimer += dt;
       if (dustTimer > 0.2) {
@@ -798,7 +874,7 @@ export default function SafeCrackScene({
         lookTarget.set(0, DOOR_Y - 0.05, 0);
       } else if (phaseNow === 'spinning') {
         // Крупнее на барабанах: игрок должен видеть цифры
-        camTarget.set(0.1 + Math.sin(elapsed * 0.7) * 0.05, DRUM_Y + 0.34, 5.35);
+        camTarget.set(0.1 + Math.sin(elapsed * 0.7) * 0.05, DRUM_Y + 0.3, 4.95);
         lookTarget.set(0, DRUM_Y, 0.1);
       } else {
         // Заезжаем справа и чуть сбоку, чтобы заглянуть в открытый сейф
@@ -809,7 +885,7 @@ export default function SafeCrackScene({
       camera.position.lerp(camTarget, 1 - Math.pow(phaseNow === 'spinning' ? 0.02 : 0.006, dt));
       lookNow.lerp(lookTarget, 1 - Math.pow(0.01, dt));
       camera.lookAt(lookNow);
-      const wantFov = phaseNow === 'spinning' ? 36 : openSeq >= 0 ? 38.5 : 40;
+      const wantFov = phaseNow === 'spinning' ? 33.5 : openSeq >= 0 ? 38.5 : 40;
       camera.fov += (wantFov - camera.fov) * (1 - Math.pow(0.05, dt));
       camera.updateProjectionMatrix();
 
