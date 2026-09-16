@@ -33,7 +33,7 @@ import {
 } from '../lib/materials';
 import {
   digitPlate, dialGraduation, engravedPlate, brushedMetal, hazardStripes,
-  radialGlow, glowSprite, smokeSprite
+  radialGlow, glowSprite, smokeSprite, concrete
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { loadModel, disposeModel, playClip, scrubClip, type LoadedModel } from '../lib/models';
@@ -107,12 +107,12 @@ export default function SafeCrackScene({
     const { scene, camera } = stage;
 
     /* ═══════════════════════ ПОЛ И ФОНОВАЯ НИША ═════════════════════════ */
-    const floorTex = brushedMetal({ base: 26, strength: 16, circular: false });
-    floorTex.repeat.set(6, 6);
+    const floorTex = concrete();
+    floorTex.repeat.set(5, 5);
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(24, 24),
       new THREE.MeshStandardMaterial({
-        map: floorTex, color: 0x2a2c40, metalness: 0.55, roughness: 0.42, envMapIntensity: 0.5
+        map: floorTex, color: 0x43465a, metalness: 0.12, roughness: 0.82, envMapIntensity: 0.35
       })
     );
     floor.rotation.x = -Math.PI / 2;
@@ -147,8 +147,8 @@ export default function SafeCrackScene({
     const safe = new THREE.Group();
     scene.add(safe);
 
-    const bodyMat = darkSteel({ roughness: 0.52 });
-    bodyMat.envMapIntensity = 0.75;
+    const bodyMat = darkSteel({ roughness: 0.6 });
+    bodyMat.envMapIntensity = 0.5;
     bodyMat.map = brushedMetal({ base: 62, strength: 22 });
     const body = new THREE.Mesh(new THREE.BoxGeometry(3.9, 3.6, 2.4, 1, 1, 1), bodyMat);
     body.position.set(0, 0.15, -1.35);
@@ -157,8 +157,8 @@ export default function SafeCrackScene({
     safe.add(body);
 
     // Передняя рама: чуть больше корпуса, с золотистой фаской — «дорогой» сейф
-    const frameMat = darkSteel({ roughness: 0.34 });
-    frameMat.envMapIntensity = 1.1;
+    const frameMat = darkSteel({ roughness: 0.46 });
+    frameMat.envMapIntensity = 0.65;
     frameMat.map = brushedMetal({ base: 74, strength: 18 });
     const frame = new THREE.Mesh(new THREE.BoxGeometry(4.14, 3.84, 0.26), frameMat);
     frame.position.set(0, 0.15, -0.14);
@@ -271,8 +271,8 @@ export default function SafeCrackScene({
 
     const doorGeo = new THREE.LatheGeometry(doorProfile, 96);
     doorGeo.rotateX(Math.PI / 2);                       // ось двери → Z
-    const doorMat = darkSteel({ roughness: 0.3 });
-    doorMat.envMapIntensity = 1.25;
+    const doorMat = darkSteel({ roughness: 0.42 });
+    doorMat.envMapIntensity = 0.75;
     doorMat.map = brushedMetal({ base: 86, strength: 20, circular: true });
     const door = new THREE.Mesh(doorGeo, doorMat);
     door.position.x = -HINGE_X;                          // центр двери в мире = 0
@@ -340,7 +340,7 @@ export default function SafeCrackScene({
     drumBodyGeo.rotateZ(Math.PI / 2);                    // ось барабана → X
     const drumBodyMat = new THREE.MeshStandardMaterial({
       map: brushedMetal({ base: 118, strength: 30, circular: true }),
-      metalness: 1, roughness: 0.3, envMapIntensity: 1.4
+      metalness: 0.85, roughness: 0.44, envMapIntensity: 0.7
     });
     const plateGeo = new THREE.PlaneGeometry(DRUM_W * 0.92, DRUM_R * 1.34);
 
@@ -359,7 +359,8 @@ export default function SafeCrackScene({
         const tex = digitPlate(d, { face: '#0b0e20', accent: '#f5c542' });
         const p2 = new THREE.Mesh(plateGeo, new THREE.MeshStandardMaterial({
           map: tex, bumpMap: tex, bumpScale: 0.01,
-          metalness: 0.85, roughness: 0.36, envMapIntensity: 1.2
+          metalness: 0.25, roughness: 0.55, envMapIntensity: 0.35,
+          emissive: 0xffe2a0, emissiveIntensity: 0.22, emissiveMap: tex
         }));
         p2.position.set(...place.position);
         p2.rotation.x = place.rotationX;

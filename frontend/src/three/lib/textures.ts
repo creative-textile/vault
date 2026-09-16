@@ -425,30 +425,30 @@ export function digitPlate(digit: number, opts: { face?: string; accent?: string
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    // Риски металла
-    ctx.globalAlpha = 0.14;
-    for (let i = 0; i < 220; i++) {
-      ctx.strokeStyle = Math.random() > 0.5 ? '#ffffff' : '#000000';
-      ctx.lineWidth = Math.random() * 1.6;
+    // Тонкие риски металла — только тёмные, чтобы не сбивать контраст цифры
+    ctx.globalAlpha = 0.1;
+    for (let i = 0; i < 120; i++) {
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = Math.random() * 1.4;
       const y = Math.random() * h;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + (Math.random() - 0.5) * 3); ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
-    // Цифра с тиснением: тень снизу, светлая кромка сверху
+    // Цифра с тиснением: крупная, контрастная, читается с любого расстояния
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `700 ${Math.round(h * 0.62)}px 'Orbitron', 'Russo One', ui-monospace, monospace`;
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillText(String(digit), w / 2 + 3, h / 2 + 8);
-    const tg = ctx.createLinearGradient(0, h * 0.18, 0, h * 0.82);
+    ctx.font = `700 ${Math.round(h * 0.8)}px 'Orbitron', 'Russo One', ui-monospace, monospace`;
+    ctx.fillStyle = 'rgba(0,0,0,0.95)';
+    ctx.fillText(String(digit), w / 2 + 4, h / 2 + 10);
+    const tg = ctx.createLinearGradient(0, h * 0.12, 0, h * 0.88);
     tg.addColorStop(0, '#fffdf2');
-    tg.addColorStop(0.4, accent);
-    tg.addColorStop(1, '#a9720a');
+    tg.addColorStop(0.42, accent);
+    tg.addColorStop(1, '#c08a12');
     ctx.fillStyle = tg;
     ctx.fillText(String(digit), w / 2, h / 2 + 2);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,248,221,0.55)';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,248,221,0.7)';
     ctx.strokeText(String(digit), w / 2, h / 2);
 
     // Свечение вокруг цифры

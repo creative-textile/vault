@@ -38,8 +38,8 @@ export function chrome(): THREE.MeshPhysicalMaterial {
   return new THREE.MeshPhysicalMaterial({
     color: 0xdfe4f2,
     metalness: 1,
-    roughness: 0.13,
-    envMapIntensity: 1.8
+    roughness: 0.22,
+    envMapIntensity: 1.25
   });
 }
 

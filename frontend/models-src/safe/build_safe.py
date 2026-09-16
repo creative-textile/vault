@@ -116,16 +116,16 @@ def make_material(name, base_rgba, metallic, roughness,
 def build_materials():
     mats = {}
     mats[MAT_STEEL] = make_material(
-        MAT_STEEL, (0.045, 0.052, 0.098, 1.0), 0.94, 0.46,
+        MAT_STEEL, (0.045, 0.052, 0.098, 1.0), 0.94, 0.56,
         map_img=load_image('steel_map.png', True),
         orm_img=load_image('steel_orm.png', False),
         normal_img=load_image('steel_normal.png', False))
     mats[MAT_GOLD] = make_material(
-        MAT_GOLD, (0.927, 0.564, 0.055, 1.0), 1.0, 0.22,
+        MAT_GOLD, (0.927, 0.564, 0.055, 1.0), 1.0, 0.3,
         map_img=load_image('gold_map.png', True),
         orm_img=load_image('gold_orm.png', False))
     mats[MAT_CHROME] = make_material(
-        MAT_CHROME, (0.74, 0.78, 0.88, 1.0), 1.0, 0.13)
+        MAT_CHROME, (0.74, 0.78, 0.88, 1.0), 1.0, 0.24)
     mats[MAT_IND] = make_material(
         MAT_IND, (0.01, 0.012, 0.02, 1.0), 0.2, 0.4,
         emissive=(0.133, 0.827, 0.933, 1.0), emissive_strength=2.4)  # циан #22d3ee
