@@ -188,7 +188,17 @@ export default function Replay() {
     setRunId((x) => x + 1);
     tickRef.current = createTickTracker();
     sfx.unlock();
-    if (soundOnRef.current) sfx.transition();
+    if (soundOnRef.current) {
+      sfx.transition();
+      // Эффект, заводящий турбину, исполняется только на загрузку данных
+      // ([r, soundOn]) — после «Смотреть заново» его никто не повторит,
+      // поэтому зажигаем двигатель прямо здесь
+      if (r?.game === 'rocket') {
+        sfx.engineStop();
+        sfx.ignite();
+        sfx.engineStart();
+      }
+    }
   };
 
   return (
