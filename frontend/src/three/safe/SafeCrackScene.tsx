@@ -33,7 +33,7 @@ import {
 } from '../lib/materials';
 import {
   digitPlate, dialGraduation, engravedPlate, brushedMetal,
-  radialGlow, glowSprite, smokeSprite, blackMarble
+  radialGlow, radialFade, glowSprite, smokeSprite, blackMarble
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { loadModel, disposeModel, playClip, scrubClip, type LoadedModel } from '../lib/models';
@@ -254,6 +254,18 @@ export default function SafeCrackScene({
       col.position.set(cx, FLOOR_Y, cz);
       scene.add(col);
     }
+
+    // Контактная тень (псевдо-AO): мягкое тёмное пятно прижимает сейф к полу
+    const contact = new THREE.Mesh(
+      new THREE.PlaneGeometry(6.4, 4.6),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, alphaMap: radialFade(),
+        opacity: 0.62, depthWrite: false
+      })
+    );
+    contact.rotation.x = -Math.PI / 2;
+    contact.position.set(0, FLOOR_Y + 0.02, -1.0);
+    scene.add(contact);
 
     /* ── Новая световая концепция (T2): сейф — экспонат под музейным лучом ─
      * Мягкий тёплый ореол за сейфом даёт глубину без кричащих светильников,
@@ -750,10 +762,12 @@ export default function SafeCrackScene({
     scene.add(key);
     scene.add(key.target);
 
-    const rim = new THREE.DirectionalLight(0x8b5cf6, 2.3);
+    // Раунд U: никакой «кислотной» подсветки — только тёплый контровой и
+    // слабый нейтральный заполняющий, чтобы сталь оставалась сталью
+    const rim = new THREE.DirectionalLight(0xffc088, 1.6);
     rim.position.set(4.5, 2.2, -3.5);
     scene.add(rim);
-    const fill = new THREE.DirectionalLight(0x22d3ee, 0.9);
+    const fill = new THREE.DirectionalLight(0xc8d4f0, 0.45);
     fill.position.set(-4, -1, 3);
     scene.add(fill);
     const doorGrazing = new THREE.PointLight(0xffd76a, 3.4, 8, 2);
