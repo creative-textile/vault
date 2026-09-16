@@ -1,0 +1,21 @@
+coin.glb — VAULT duel coin
+==========================
+
+Источник: сгенерировано полностью скриптом (Blender 4.2 via bpy, headless).
+Автор: VAULT project / исполнитель задачи TZ-3D-MODELS (AI-агент на Arena.ai).
+Дата: 2026-09-16.
+
+Лицензия: CC0 1.0 Universal (Public Domain Dedication). Ограничений нет.
+
+Состав:
+  - frontend/public/models/coin.glb — монета Дуэли: аверс (звезда в лучах),
+    реверс (штурвал хранилища), фаска + гурт с насечкой; 3 PBR-материала
+    (золото, map/normal/ORM); 864 треугольника; 414 КБ.
+  - frontend/public/models/coin.preview.jpg — превью (Cycles CPU).
+  - frontend/models-src/coin/ — исходник (build_coin.py, gen_coin_textures.py,
+    render_coin_preview.py, coin.blend, текстуры).
+
+Габариты совпадают с процедурной монетой сцены (R=1.18, T=0.16), ось чеканки
+в glTF — +Z (на камеру), как coinFlip в DuelScene.
+
+Сторонних ассетов не использовано.
