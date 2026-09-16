@@ -586,22 +586,51 @@ export default function RocketScene({
     });
     scene.add(speedLines.points);
 
-    /* ── Обломки (взрыв) ────────────────────────────────────────────────── */
+    /* ── Обломки (взрыв): не коробочки, а фрагменты самой ракеты ─────────
+     * Изогнутые куски обшивки (открытые цилиндры), рваный носовой конус,
+     * осколок киля, кольца силового набора, раскалённые «внутренности».
+     * Открытые поверхности — DoubleSide, иначе куски «исчезают» с изнанки.
+     */
     const debrisGroup = new THREE.Group();
-    const debrisMats = [paintedHull(), paintedRed(), darkSteel(), gold({ roughness: 0.35 })];
-    const debrisGeos = [
-      new THREE.BoxGeometry(0.2, 0.14, 0.22),
-      new THREE.TetrahedronGeometry(0.16),
-      new THREE.CylinderGeometry(0.05, 0.09, 0.3, 8),
-      new THREE.BoxGeometry(0.3, 0.05, 0.16)
-    ];
-    const DEBRIS = quality === 'low' ? 18 : 34;
+    const hullMatD = paintedHull(); hullMatD.side = THREE.DoubleSide;
+    const redMatD = paintedRed(); redMatD.side = THREE.DoubleSide;
+    // Раскалённый металл: тёмная сталь с остывающим свечением кромки
+    const charMat = new THREE.MeshStandardMaterial({
+      color: 0x24262e, roughness: 0.78, metalness: 0.85,
+      emissive: 0xff5a1f, emissiveIntensity: 0.55
+    });
+    const tankMat = new THREE.MeshStandardMaterial({
+      color: 0xc8ccd8, roughness: 0.34, metalness: 1, side: THREE.DoubleSide
+    });
+    const debrisMats = [hullMatD, redMatD, darkSteel(), gold({ roughness: 0.35 }), charMat, tankMat];
+
+    // Кусок обшивки: открытый цилиндр с углом охвата ~90°
+    const hullShard = new THREE.CylinderGeometry(0.32, 0.34, 0.3, 10, 1, true, 0.4, 1.5);
+    // Рваный фрагмент носового конуса
+    const noseShard = new THREE.ConeGeometry(0.3, 0.42, 10, 1, true, 2.1, 1.4);
+    // Осколок киля: тонкий выдавленный треугольник
+    const finShape = new THREE.Shape();
+    finShape.moveTo(0, 0);
+    finShape.lineTo(0.34, -0.06);
+    finShape.quadraticCurveTo(0.4, -0.22, 0.26, -0.4);
+    finShape.lineTo(0, -0.3);
+    finShape.closePath();
+    const finShard = new THREE.ExtrudeGeometry(finShape, { depth: 0.02, bevelEnabled: false });
+    // Осколки силового кольца и соплового раструба
+    const ringShard = new THREE.TorusGeometry(0.26, 0.035, 8, 14, 2.1);
+    const ductShard = new THREE.TorusGeometry(0.2, 0.055, 8, 14, 1.7);
+    // Внутренности: раскалённый многогранник и осколок топливного бака
+    const charShard = new THREE.TetrahedronGeometry(0.17);
+    const tankShard = new THREE.SphereGeometry(0.24, 10, 8, 0, 2.3, 0.5, 1.5);
+    const debrisGeos = [hullShard, noseShard, finShard, ringShard, ductShard, charShard, tankShard];
+    const DEBRIS = quality === 'low' ? 18 : 38;
     const debris: Array<{ mesh: THREE.Mesh; v: THREE.Vector3; vr: THREE.Vector3 }> = [];
     for (let i = 0; i < DEBRIS; i++) {
       const mesh = new THREE.Mesh(
         debrisGeos[i % debrisGeos.length],
         debrisMats[rng.int(0, debrisMats.length - 1)]
       );
+      mesh.scale.setScalar(rng.range(0.72, 1.45));
       mesh.visible = false;
       debrisGroup.add(mesh);
       debris.push({ mesh, v: new THREE.Vector3(), vr: new THREE.Vector3() });
@@ -689,8 +718,8 @@ export default function RocketScene({
         d.mesh.visible = true;
         d.mesh.position.set(rng.spread(0.2), rng.spread(0.2), rng.spread(0.2));
         const [vx, vy, vz] = rng.onSphere(1);
-        d.v.set(vx * rng.range(2.4, 6.4), Math.abs(vy) * rng.range(1.6, 5.2), vz * rng.range(2.4, 6.4));
-        d.vr.set(rng.spread(9), rng.spread(9), rng.spread(9));
+        d.v.set(vx * rng.range(2.2, 7), Math.abs(vy) * rng.range(1.4, 5.6), vz * rng.range(2.2, 7));
+        d.vr.set(rng.spread(5.5), rng.spread(5.5), rng.spread(5.5));
       }
       // Искры и дым взрыва
       for (let i = 0; i < (quality === 'low' ? 46 : 110); i++) {
@@ -998,9 +1027,12 @@ export default function RocketScene({
 
       function runExplosion(dt: number, elapsed: number) {
         explodedAt += dt;
-        // Обломки: гравитация + сопротивление + огненные шлейфы
-        const trailOn = explodedAt < 1.15;
-        for (const d of debris) {
+        // Обломки: гравитация + сопротивление + огненные шлейфы.
+        // Куски кувыркаются медленно (крупные детали так и летят), шлейф
+        // искр тянется дольше, а самые большие оставляют дымный след.
+        const trailOn = explodedAt < 1.7;
+        for (let di = 0; di < debris.length; di++) {
+          const d = debris[di];
           if (!d.mesh.visible) continue;
           d.v.y -= 5.4 * dt;
           d.v.multiplyScalar(1 - 0.35 * dt);
@@ -1011,9 +1043,13 @@ export default function RocketScene({
           if (trailOn) {
             tmp.copy(d.mesh.position);
             tmp2.copy(d.v).multiplyScalar(-0.16);
-            sparks.emit(tmp, tmp2, rng.range(0.14, 0.3), rng.range(0.05, 0.12));
+            if (rng.rand() < 0.5) sparks.emit(tmp, tmp2, rng.range(0.16, 0.34), rng.range(0.05, 0.12));
+            // Каждый третий кусок — «крупный»: дымный след
+            if (di % 3 === 0 && rng.rand() < 0.3) {
+              smoke.emit(tmp, tmp2.multiplyScalar(0.3), rng.range(0.5, 0.9), rng.range(0.3, 0.6));
+            }
           }
-          if (explodedAt > 2.6) d.mesh.visible = false;
+          if (explodedAt > 3.2) d.mesh.visible = false;
         }
         // Вспышка гаснет за ~0.4 с
         const f = Math.max(0, 1 - explodedAt / 0.4);
@@ -1138,14 +1174,8 @@ export default function RocketScene({
 
       {ghostActive && (
         <div className="scene-hud">
-          <div className="scene-hud__top">
-            <div className="hud-pill hud-pill--green">
-              кэшаут x{cashoutAt.toFixed(2)}
-            </div>
-            <div className={`hud-pill ${ghostDone ? 'hud-pill--red' : 'hud-pill--gold'}`}>
-              {ghostDone ? 'финальная точка' : 'призрак летит'}
-            </div>
-          </div>
+          {/* Верхние плашки ушли в Rocket.tsx: два наложенных .scene-hud
+              (этот и внешний) дрались за правый верхний угол */}
           <div style={{ margin: '0 auto', textAlign: 'center' }}>
             <div
               className="mult"

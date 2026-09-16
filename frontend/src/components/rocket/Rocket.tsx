@@ -359,9 +359,10 @@ export default function Rocket() {
         )}
         {phase === 'win' && (
           <div className="scene-hud">
+            {/* Пилюля только слева: справа на узких экранах она наезжала на
+                плашку призрака из внутреннего HUD сцены */}
             <div className="scene-hud__top">
               <span className="mult-pill mult-pill--huge">ЗАБРАНО x{cashoutMult.toFixed(2)}</span>
-              {!ghostDone && <span className="mult-pill"><Icon name="ghost" size={13} /> призрак летит…</span>}
             </div>
             {ghostDone && (
               <div className="scene-hud__bottom">
