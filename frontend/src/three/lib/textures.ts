@@ -608,6 +608,62 @@ export function fireball(): THREE.CanvasTexture {
   });
 }
 
+
+/** Стена арены: тёмный цилиндр с неоновыми пилястрами (глубина вместо пустоты). */
+export function arenaWall(): THREE.CanvasTexture {
+  return cached('arenaWall:v1', [1024, 256], (ctx, w, h) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 57.3 + 11.9) * 34621.4321;
+      return x - Math.floor(x);
+    };
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#05030c');
+    g.addColorStop(0.72, '#0b0718');
+    g.addColorStop(1, '#160f2b');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // пилястры: чередование фиолетовых и циановых полос, тающих вверх
+    for (let i = 0; i < 24; i++) {
+      const x = (i + 0.5) * (w / 24);
+      const col = i % 2 ? '34,211,238' : '168,85,247';
+      const hh = h * (0.35 + rnd(i) * 0.4);
+      const lg = ctx.createLinearGradient(0, h, 0, h - hh);
+      lg.addColorStop(0, `rgba(${col},.5)`);
+      lg.addColorStop(1, `rgba(${col},0)`);
+      ctx.fillStyle = lg;
+      ctx.fillRect(x - 3, h - hh, 6, hh);
+      ctx.fillStyle = `rgba(${col},.8)`;
+      ctx.fillRect(x - 1.2, h - 14, 2.4, 14);
+    }
+    // нижняя световая линия
+    const bl = ctx.createLinearGradient(0, h, 0, h - 10);
+    bl.addColorStop(0, 'rgba(245,197,66,.8)');
+    bl.addColorStop(1, 'rgba(245,197,66,0)');
+    ctx.fillStyle = bl;
+    ctx.fillRect(0, h - 10, w, 10);
+  });
+}
+
+/** Вертикальный световой пилон: мягкая колонна света (альфа тает вверх). */
+export function lightPillar(color = '#22d3ee'): THREE.CanvasTexture {
+  return cached(`pillar:${color}`, [128, 256], (ctx, w, h) => {
+    const lg = ctx.createLinearGradient(0, h, 0, 0);
+    lg.addColorStop(0, withAlpha(color, 0.85));
+    lg.addColorStop(0.5, withAlpha(color, 0.28));
+    lg.addColorStop(1, withAlpha(color, 0));
+    ctx.fillStyle = lg;
+    ctx.fillRect(0, 0, w, h);
+    // мягкие края по горизонтали
+    ctx.globalCompositeOperation = 'destination-in';
+    const hg = ctx.createLinearGradient(0, 0, w, 0);
+    hg.addColorStop(0, 'rgba(0,0,0,0)');
+    hg.addColorStop(0.5, 'rgba(0,0,0,1)');
+    hg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
 /* ═══════════════════════════ ПОЛ И ФОН ═════════════════════════════════ */
 
 /** Радиальное свечение на полу (неоновое кольцо арены, подсветка сейфа). */
