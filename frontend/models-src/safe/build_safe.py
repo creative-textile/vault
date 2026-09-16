@@ -517,14 +517,16 @@ def main():
     R4 = Matrix.Rotation(math.pi / 2, 4, 'X')
     R4q = R4.to_quaternion()
     for ob in bpy.data.objects:
-        if ob.type == 'MESH':
+        if ob.type == 'MESH' and not ob.name.startswith('bolt_'):
             me = ob.data
             me.transform(R4)
             me.update()
         if ob.rotation_mode == 'QUATERNION' and (
                 ob.rotation_quaternion.x or ob.rotation_quaternion.y or
                 ob.rotation_quaternion.z or abs(ob.rotation_quaternion.w - 1) > 1e-9):
-            ob.rotation_quaternion = R4q @ ob.rotation_quaternion
+            # сопряжение: локальный фрейм двери/корня = Blender-оси после
+            # поворота иерархии; в glTF локаль уйдёт через conv = R4^-1
+            ob.rotation_quaternion = R4q @ ob.rotation_quaternion @ R4q.inverted()
         else:
             ob.rotation_euler = (0, 0, 0)
         ob.location = R4 @ ob.location

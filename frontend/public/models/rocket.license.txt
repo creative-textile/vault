@@ -1,0 +1,19 @@
+rocket.glb — VAULT game rocket
+===============================
+
+Источник: сгенерировано полностью скриптом (Blender 4.2 via bpy, headless).
+Автор: VAULT project / исполнитель задачи TZ-3D-MODELS (AI-агент на Arena.ai).
+Дата: 2026-09-16.
+
+Лицензия: CC0 1.0 Universal (Public Domain Dedication). Ограничений нет.
+
+Состав:
+  - frontend/public/models/rocket.glb — корпус (тело вращения с оживалой),
+    красный обтекатель, раструб сопла, 4 стабилизатора с фаской, иллюминатор
+    (кольцо + стекло transmission); якоря Anchor_Flame / Anchor_Nose;
+    4 PBR-материала; 3 625 треугольников; 765 КБ.
+  - frontend/public/models/rocket.preview.jpg — превью (Cycles CPU).
+  - frontend/models-src/rocket/ — исходник (build_rocket.py,
+    gen_rocket_textures.py, render_rocket_preview.py, rocket.blend, текстуры).
+
+Сторонних ассетов не использовано.
