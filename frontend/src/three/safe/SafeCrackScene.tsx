@@ -32,8 +32,8 @@ import {
   gold, polishedGold, chrome, darkSteel, paintedRed, glass, neon, disposeObject
 } from '../lib/materials';
 import {
-  digitPlate, dialGraduation, engravedPlate, brushedMetal, hazardStripes,
-  radialGlow, glowSprite, smokeSprite, concrete
+  digitPlate, dialGraduation, engravedPlate, brushedMetal,
+  radialGlow, glowSprite, smokeSprite, blackMarble, lightPillar
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { loadModel, disposeModel, playClip, scrubClip, type LoadedModel } from '../lib/models';
@@ -105,8 +105,8 @@ export default function SafeCrackScene({
       container,
       preset: 'safe',
       quality,
-      background: 0x08060f,
-      fog: { color: 0x08060f, density: 0.055 },
+      background: 0x0a0812,
+      fog: { color: 0x0a0812, density: 0.048 },
       fov: 40,
       position: [0.35, 0.62, 6.6],
       bloom: quality === 'high' ? 0.7 : quality === 'medium' ? 0.45 : 0,
@@ -118,19 +118,41 @@ export default function SafeCrackScene({
     if (!stage) return;
     const { scene, camera } = stage;
 
-    /* ═══════════════════════ ПОЛ И ФОНОВАЯ НИША ═════════════════════════ */
-    const floorTex = concrete();
-    floorTex.repeat.set(5, 5);
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(24, 24),
-      new THREE.MeshStandardMaterial({
-        map: floorTex, color: 0x43465a, metalness: 0.12, roughness: 0.82, envMapIntensity: 0.35
-      })
-    );
+    /* ═══════════════════════ МРАМОРНЫЙ ЗАЛ (переработка S3) ═════════════
+     * Фидбек: «зал сейфа самый некачественный, выглядит халтурно — должен
+     * быть самым презентабельным». Бетон и разметка уступают место
+     * полированному чёрному мрамору, золотой инкрустации и ковровой дорожке.
+     */
+    // blackMarble() — кэш-общая текстура; клонируем, чтобы повтор не уехал
+    // в остальные сцены, где она используется с repeat 1×1
+    const floorMarbleTex = blackMarble().clone();
+    floorMarbleTex.repeat.set(3, 3);
+    floorMarbleTex.needsUpdate = true;
+    const floorMat = new THREE.MeshPhysicalMaterial({
+      map: floorMarbleTex, color: 0xb4b4c4, metalness: 0.44, roughness: 0.16,
+      envMapIntensity: 1.1, clearcoat: 0.8, clearcoatRoughness: 0.14
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(26, 26), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = FLOOR_Y;
     floor.receiveShadow = quality === 'high';
     scene.add(floor);
+
+    // Золотая инкрустация: большое кольцо вокруг сейфа
+    const inlay = new THREE.Mesh(
+      new THREE.RingGeometry(3.2, 3.34, 96),
+      new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.32, envMapIntensity: 1.0 })
+    );
+    inlay.rotation.x = -Math.PI / 2;
+    inlay.position.y = FLOOR_Y + 0.012;
+    scene.add(inlay);
+    const inlay2 = new THREE.Mesh(
+      new THREE.RingGeometry(4.6, 4.66, 96),
+      new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.4, envMapIntensity: 0.8 })
+    );
+    inlay2.rotation.x = -Math.PI / 2;
+    inlay2.position.y = FLOOR_Y + 0.011;
+    scene.add(inlay2);
 
     // Лужа тёплого света под сейфом — иначе он висит в черноте
     const floorPool = new THREE.Mesh(
@@ -144,23 +166,33 @@ export default function SafeCrackScene({
     floorPool.position.set(0, FLOOR_Y + 0.01, 0.4);
     scene.add(floorPool);
 
-    // Опасная разметка перед сейфом: читается как «зона хранилища»
-    const hazardTex = hazardStripes('#f5c542', '#101018', 40);
-    hazardTex.repeat.set(6, 1);
-    const hazard = new THREE.Mesh(
-      new THREE.PlaneGeometry(8.4, 0.42),
-      new THREE.MeshStandardMaterial({ map: hazardTex, roughness: 0.7, metalness: 0.1 })
+    // Ковровая дорожка к сейфу: бордовый бархат с золотой каймой
+    const carpet = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 6.4),
+      new THREE.MeshStandardMaterial({ color: 0x4a1522, roughness: 0.96, metalness: 0.02 })
     );
-    hazard.rotation.x = -Math.PI / 2;
-    hazard.position.set(0, FLOOR_Y + 0.015, 1.75);
-    scene.add(hazard);
+    carpet.rotation.x = -Math.PI / 2;
+    carpet.position.set(0, FLOOR_Y + 0.014, 2.6);
+    carpet.receiveShadow = quality === 'high';
+    scene.add(carpet);
+    for (const ex of [-1.34, 1.34]) {
+      const edge = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.08, 6.4),
+        new THREE.MeshStandardMaterial({ color: 0xd9b464, metalness: 1, roughness: 0.36 })
+      );
+      edge.rotation.x = -Math.PI / 2;
+      edge.position.set(ex, FLOOR_Y + 0.016, 2.6);
+      scene.add(edge);
+    }
 
     /* ── Стена хранилища: панели, золотой профиль, тёплые бра (R4) ─────── */
+    const wallMarbleTex = blackMarble().clone();
+    wallMarbleTex.repeat.set(4, 2);
+    wallMarbleTex.needsUpdate = true;
     const wallMat = new THREE.MeshStandardMaterial({
-      map: concrete(), color: 0x2c2f42, roughness: 0.9, metalness: 0.06,
-      envMapIntensity: 0.25
+      map: wallMarbleTex, color: 0x50506a, roughness: 0.52, metalness: 0.3,
+      envMapIntensity: 0.45
     });
-    wallMat.map!.repeat.set(4, 2);
     const wall = new THREE.Mesh(new THREE.PlaneGeometry(26, 12), wallMat);
     wall.position.set(0, 1.6, -4.4);
     wall.receiveShadow = quality === 'high';
@@ -194,6 +226,72 @@ export default function SafeCrackScene({
     const sconceR = new THREE.PointLight(0xffb060, 3.2, 7.5, 2);
     sconceR.position.set(4.5, 3.0, -3.6);
     scene.add(sconceR);
+
+    // Каннелированные мраморные колонны по бокам зала
+    const flutedColumn = (r: number, h: number): THREE.CylinderGeometry => {
+      const geo = new THREE.CylinderGeometry(r, r * 1.06, h, 48, 4, false);
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const y = pos.getY(i);
+        const ang = Math.atan2(z, x);
+        const flute = 1 + Math.cos(ang * 14) * 0.05;
+        const entasis = 1 - (y / h + 0.5) * 0.08;
+        pos.setX(i, x * flute * entasis);
+        pos.setZ(i, z * flute * entasis);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+    const hallColumnMat = new THREE.MeshStandardMaterial({
+      map: blackMarble(), color: 0x9a9ab0, roughness: 0.4, metalness: 0.22,
+      envMapIntensity: 0.7
+    });
+    for (const [cx, cz] of [[-6.1, -2.6], [6.1, -2.6], [-7.4, -4.0], [7.4, -4.0]] as const) {
+      const col = new THREE.Group();
+      const shaft = new THREE.Mesh(flutedColumn(0.44, 7.4), hallColumnMat);
+      shaft.position.y = 3.7;
+      shaft.castShadow = quality === 'high';
+      col.add(shaft);
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.68, 0.26, 24), gold({ roughness: 0.34 }));
+      base.position.y = 0.13;
+      col.add(base);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.5, 0.3, 24), gold({ roughness: 0.34 }));
+      cap.position.y = 7.5;
+      col.add(cap);
+      col.position.set(cx, FLOOR_Y, cz);
+      scene.add(col);
+    }
+
+    // Световые пилоны между колоннами — тёплая глубина зала
+    for (const px of [-6.8, 6.8]) {
+      const pillar = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.5, 7.5),
+        new THREE.MeshBasicMaterial({
+          map: lightPillar('#ffd76a'), transparent: true, opacity: 0.34,
+          blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+          side: THREE.DoubleSide
+        })
+      );
+      pillar.position.set(px, FLOOR_Y + 4.0, -4.1);
+      scene.add(pillar);
+    }
+
+    // Золотой портал за сейфом: рама, в которой сейф — экспонат
+    const portalMat = gold({ roughness: 0.3 });
+    portalMat.envMapIntensity = 0.85;
+    const portalW = 5.6;
+    const portalH = 5.2;
+    const portalT = 0.18;
+    for (const [w, h, x, y] of [
+      [portalW, portalT, 0, portalH / 2], [portalW, portalT, 0, -portalH / 2],
+      [portalT, portalH, -portalW / 2, 0], [portalT, portalH, portalW / 2, 0]
+    ] as const) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.22), portalMat);
+      bar.position.set(x, DOOR_Y + 0.9 + y, -3.4);
+      scene.add(bar);
+    }
 
     /* ═══════════════════════════ КОРПУС СЕЙФА ═══════════════════════════ */
     const safe = new THREE.Group();
