@@ -1,29 +1,49 @@
 /**
- * 🏦 ВИТРИНА ХРАНИЛИЩА — герой-сцена онбординга (v3, переписана с нуля).
+ * 🏦 ВИТРИНА ХРАНИЛИЩА — герой-сцена онбординга (v4).
  *
- * Первое, что видит игрок — сцена обязана интриговать. Композиция:
- *  - полированный чёрный мраморный подиум с золотым кантом — отражает сейф;
- *  - настоящий сейф v2 с распахнутой дверью: золото внутри, луч света из
- *    проёма с пылью, свет под Anchor_Light;
- *  - ФОНТАН МОНЕТ из проёма — дуги к зрителю, всегда ПЕРЕД сейфом (не сквозь
- *    дверь), плюс стопки монет на подиуме;
- *  - колонны зала и мягкие ореолы для глубины; тёплый свет БЕЗ циана —
- *    золото не зеленеет.
+ * Фидбек раунда Q: «монеты из сейфа выглядят странно, лучше наполнить сейф
+ * красивыми слитками». Концепция: ХРАНИЛИЩЕ, полное золота. Композиция:
+ *  - полированный чёрный мраморный подиум с золотым кантом;
+ *  - сейф v2 с распахнутой дверью; внутри — ПИРАМИДА ЗОЛОТЫХ СЛИТКОВ
+ *    (процедурные, с клеймом «VAULT 999.9»), тёплый луч из проёма;
+ *  - пара слитков небрежно лежит на подиуме у сейфа — богатство «выплёскивается»;
+ *  - колонны зала и мягкие ореолы для глубины; тёплый свет БЕЗ циана.
  *
+ * Монет больше нет вообще: фонтан и стопки удалены — они читались как мусор.
  * Техника: прозрачный фон (сцена встроена в карточку), bloom выключен —
  * свечение спрайтами и аддитивными плоскостями с круглой альфой.
- * Без WebGL/модели — подиум, ореолы и стопки монет: достойно даже в фолбэке.
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
 import { createRng } from '../lib/rng';
 import { gold, polishedGold, disposeObject } from '../lib/materials';
-import { blackMarble, radialGlow, glowSprite, neonRing, coinFace } from '../lib/textures';
+import { blackMarble, radialGlow, glowSprite, neonRing, ingotStamp } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { loadModel, disposeModel, acquireRoot } from '../lib/models';
 
 const FLOOR_Y = -1.22;
+
+/* ═══════════════ СЛИТОК ══════════════════════════════════════════════ */
+
+/** Геометрия слитка: трапеция в сечении, лёгкая фаска — как настоящий. */
+function buildIngotGeometry(): THREE.ExtrudeGeometry {
+  const w = 0.42;   // низ
+  const tw = 0.30;  // верх
+  const h = 0.15;   // высота
+  const shape = new THREE.Shape();
+  shape.moveTo(-w / 2, 0);
+  shape.lineTo(w / 2, 0);
+  shape.lineTo(tw / 2, h);
+  shape.lineTo(-tw / 2, h);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.62, bevelEnabled: true, bevelThickness: 0.014,
+    bevelSize: 0.012, bevelSegments: 2
+  });
+  geo.translate(0, 0, -0.31); // центр по длине
+  return geo;
+}
 
 export default function VaultScene({ size = 300 }: { size?: number }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -128,7 +148,7 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     spill.position.set(0.2, FLOOR_Y + 0.012, 0.6);
     scene.add(spill);
 
-    /* ═══════════════ СЕЙФ v2: распахнут, золото внутри ═══════════════════ */
+    /* ═══════════════ СЕЙФ v2: распахнут, внутри золото ═══════════════════ */
     const safe = new THREE.Group();
     safe.position.y = FLOOR_Y + 0.02;
     safe.rotation.y = -0.34;
@@ -148,6 +168,40 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     shaft.rotation.x = Math.PI / 2 - 0.28;
     shaft.position.set(0.1, 0.9, 1.5);
     safe.add(shaft);
+
+    /* ═══════════════ СЛИТКИ: пирамида в сейфе + пара на подиуме ══════════
+     * Кладём после загрузки модели — позиция считается от реального бокса
+     * интерьера (узел `safe_interior`), поэтому не зависит от нормализации.
+     */
+    const ingotGeo = buildIngotGeometry();
+    const ingotMat = new THREE.MeshPhysicalMaterial({
+      color: 0xf0b429, metalness: 1, roughness: 0.2, envMapIntensity: 1.3,
+      clearcoat: 0.34, clearcoatRoughness: 0.22
+    });
+    const stampTex = ingotStamp();
+    const stampMat = new THREE.MeshBasicMaterial({
+      map: stampTex, transparent: true, toneMapped: false, depthWrite: false
+    });
+    const stampGeo = new THREE.PlaneGeometry(0.44, 0.15);
+    const ingotGroup = new THREE.Group();
+    safe.add(ingotGroup);
+    /** Верхние точки слитков — источники бликов-искр. */
+    const sparkleAnchors: THREE.Vector3[] = [];
+
+    /** Положить слиток; `stamped` — клеймо на верхней грани. */
+    const placeIngot = (x: number, y: number, z: number, rotY = 0, rotX = 0, stamped = false): THREE.Mesh => {
+      const bar = new THREE.Mesh(ingotGeo, ingotMat);
+      bar.position.set(x, y, z);
+      bar.rotation.set(rotX, rotY, 0);
+      if (stamped) {
+        const st = new THREE.Mesh(stampGeo, stampMat);
+        st.position.y = 0.152;
+        st.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
+        bar.add(st);
+      }
+      ingotGroup.add(bar);
+      return bar;
+    };
 
     let cancelled = false;
     let modelHolder: THREE.Group | null = null;
@@ -173,53 +227,77 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       if (lightAnchor) lightAnchor.attach(goldLight);
       goldLight.position.set(0, 1.0, -0.4);
       (shaft.material as THREE.MeshBasicMaterial).opacity = 0.15;
-    });
 
-    /* ═══════════════ МОНЕТЫ: фонтан из проёма + стопки ═══════════════════
-     * Дуги всегда впереди сейфа (z ≥ 0.8) и правее раскрытой двери — монеты
-     * физически не могут пересечь дверцу. Тёплый PBR без циана — без зелени.
-     */
-    const coinGeo = new THREE.CylinderGeometry(0.155, 0.155, 0.028, 40);
-    coinGeo.rotateX(Math.PI / 2);
-    const coinMatHeads = new THREE.MeshPhysicalMaterial({
-      map: coinFace('heads'), metalness: 1, roughness: 0.26, envMapIntensity: 1.15, clearcoat: 0.3
-    });
-    const coinMatTails = new THREE.MeshPhysicalMaterial({
-      map: coinFace('tails'), metalness: 1, roughness: 0.26, envMapIntensity: 1.15, clearcoat: 0.3
-    });
-    const coinSide = gold({ roughness: 0.24 });
+      /* ── Наполнение: от бокса интерьера в локальных координатах сейфа ── */
+      const interior = clone.getObjectByName('safe_interior');
+      const ib = interior
+        ? new THREE.Box3().setFromObject(interior)
+        : bb.clone();
+      const min = safe.worldToLocal(ib.min.clone());
+      const max = safe.worldToLocal(ib.max.clone());
+      const floorY = min.y + 0.02;
+      const frontZ = max.z - 0.42;         // передний ряд у самого проёма
+      const rowZ = 0.66;                    // шаг рядов вглубь
+      const stepX = 0.46;                   // шаг слитков по X
+      const barH = 0.178;                   // высота слитка с фаской
 
-    interface Fountain { mesh: THREE.Mesh; ox: number; vy: number; vz: number; vx: number; ph: number; spin: number; }
-    const fountains: Fountain[] = [];
-    const FN = quality === 'low' ? 7 : 12;
-    for (let i = 0; i < FN; i++) {
-      const mesh = new THREE.Mesh(coinGeo, [coinSide, i % 2 ? coinMatHeads : coinMatTails, i % 2 ? coinMatTails : coinMatHeads]);
-      scene.add(mesh);
-      fountains.push({
-        mesh,
-        ox: rng.range(-0.15, 0.5),
-        vx: rng.range(0.25, 0.8),
-        vy: rng.range(0.9, 1.5),
-        vz: rng.range(1.5, 2.3),
-        ph: i / FN,
-        spin: rng.range(2, 5) * (rng.rand() < 0.5 ? -1 : 1)
-      });
-    }
-    // стартовая точка фонтана — у проёма, в мировых координатах сцены
-    const emit = new THREE.Vector3(0.35, 0.35, 0.85);
-
-    // Стопки монет на подиуме — «богатство лежит здесь»
-    const stacks: THREE.Mesh[] = [];
-    for (const [sx, sz, n, tilt] of [[1.55, 0.9, 6, 0], [1.85, 0.55, 4, 0.1], [1.3, 1.25, 5, -0.08], [-1.7, 0.9, 4, 0.06]] as const) {
-      for (let i = 0; i < n; i++) {
-        const c = new THREE.Mesh(coinGeo, [coinSide, coinMatHeads, coinMatTails]);
-        c.position.set(sx + Math.sin(i * 5.1) * 0.015, FLOOR_Y + 0.016 + i * 0.03, sz + Math.sin(i * 3.7) * 0.015);
-        c.rotation.y = i * 0.7;
-        c.rotation.x = tilt * (i === n - 1 ? 3 : 0.2);
-        scene.add(c);
-        stacks.push(c);
+      // Пирамида у проёма: 4 → 3 → 2, второй ряд 3 → 2 за ней.
+      // Верхние ярусы сдвинуты на полшага — слитки лежат в ложементах.
+      const rows: Array<[number, number, number]> = [
+        [4, 0, frontZ], [3, 1, frontZ], [2, 2, frontZ],
+        [3, 0, frontZ - rowZ], [2, 1, frontZ - rowZ]
+      ];
+      for (const [count, layer, z] of rows) {
+        const rowW = (count - 1) * stepX;
+        for (let i = 0; i < count; i++) {
+          const x = -rowW / 2 + i * stepX;
+          placeIngot(
+            x + rng.spread(0.012),
+            floorY + layer * barH,
+            z + rng.spread(0.015),
+            rng.spread(0.06), 0,
+            layer === 0 && Math.abs(x) < 0.8
+          );
+        }
       }
-    }
+      // Акцентный слиток набекрень на вершине пирамиды
+      placeIngot(0.1, floorY + 2 * barH, frontZ - 0.1, 0.5, 0, true);
+      // Два слитка прислонены к задней стенке — ловят луч
+      placeIngot(-0.62, floorY + 0.3, min.z + 0.28, 0.2, -1.02, true);
+      placeIngot(0.55, floorY + 0.3, min.z + 0.24, -0.3, -1.08, true);
+
+      // Подсветка самой пирамиды
+      const pileLight = new THREE.PointLight(0xffd77a, 5, 3.4, 2);
+      pileLight.position.set(0, floorY + 0.9, frontZ + 0.2);
+      ingotGroup.add(pileLight);
+
+      // Якоря бликов — верхушки передних слитков
+      for (const [sx, sy, sz] of [[0, floorY + 3 * barH, frontZ], [-0.7, floorY + barH, frontZ], [0.66, floorY + barH, frontZ - rowZ]] as const) {
+        sparkleAnchors.push(new THREE.Vector3(sx, sy + 0.1, sz));
+      }
+    });
+
+    // Пара слитков на подиуме: богатство «выплёскивается» из хранилища
+    const podiumBars = new THREE.Group();
+    scene.add(podiumBars);
+    const pb1 = new THREE.Mesh(ingotGeo, ingotMat);
+    pb1.position.set(1.62, FLOOR_Y + 0.075, 0.98);
+    pb1.rotation.y = -0.55;
+    const pb1s = new THREE.Mesh(stampGeo, stampMat);
+    pb1s.position.y = 0.152;
+    pb1s.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
+    pb1.add(pb1s);
+    podiumBars.add(pb1);
+    const pb2 = new THREE.Mesh(ingotGeo, ingotMat);
+    pb2.position.set(1.42, FLOOR_Y + 0.24, 0.86);
+    pb2.rotation.y = -0.34;
+    podiumBars.add(pb2);
+    const pb3 = new THREE.Mesh(ingotGeo, ingotMat);
+    pb3.position.set(-1.78, FLOOR_Y + 0.075, 0.72);
+    pb3.rotation.y = 0.8;
+    podiumBars.add(pb3);
+    sparkleAnchors.push(new THREE.Vector3(1.62, FLOOR_Y + 0.3, 0.98));
+    sparkleAnchors.push(new THREE.Vector3(-1.78, FLOOR_Y + 0.24, 0.72));
 
     /* ═══════════════ СВЕТ: тёплый, без циана ═════════════════════════════ */
     scene.add(new THREE.AmbientLight(0x7a6a9a, 0.7));
@@ -233,7 +311,7 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     fillAmber.position.set(-3, -0.8, 2.2);
     scene.add(fillAmber);
 
-    /* ═══════════════ ЧАСТИЦЫ: пыль в луче и блики на монетах ═════════════ */
+    /* ═══════════════ ЧАСТИЦЫ: пыль в луче и искры на золоте ══════════════ */
     const motes = new ParticleField(quality === 'low' ? 50 : 150, glowSprite('#ffe9a8', 0.18), {
       color: 0xffd76a, size: 0.18, gravity: 0.14, drag: 0.99, opacity: 0.85, scale: 180
     });
@@ -267,25 +345,7 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       aura.material.opacity = 0.4 + Math.sin(elapsed * 0.9) * 0.05;
       ring.rotation.z = elapsed * 0.1;
 
-      // Фонтан монет: дуга из проёма к зрителю, появление/растворение масштабом
-      for (const f of fountains) {
-        const t = (elapsed * 0.34 + f.ph) % 1;
-        const life = Math.sin(t * Math.PI);                 // 0→1→0
-        const tt = t * 2.6;
-        tmp.set(
-          emit.x + f.ox + f.vx * tt,
-          emit.y + f.vy * tt - 1.9 * tt * tt,
-          emit.z + f.vz * tt
-        );
-        f.mesh.position.copy(tmp);
-        f.mesh.rotation.y = elapsed * f.spin + f.ph * 7;
-        f.mesh.rotation.x = Math.sin(elapsed * 1.3 + f.ph * 9) * 0.5;
-        const s = 0.001 + life * (0.85 + 0.3 * Math.sin(f.ph * 20));
-        f.mesh.scale.setScalar(Math.max(0.001, s));
-        f.mesh.visible = life > 0.02;
-      }
-
-      // Пыль из проёма и блики на летящих монетах
+      // Пыль в луче из проёма
       moteTimer += dt;
       if (moteTimer > 0.06) {
         moteTimer = 0;
@@ -293,10 +353,13 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
         tmp2.set(rng.spread(0.3), rng.range(0.1, 0.6), rng.range(0.4, 1.3));
         motes.emit(tmp, tmp2, rng.range(1.4, 2.8), rng.range(0.07, 0.2));
       }
-      if (rng.rand() < dt * 8) {
-        const f = fountains[rng.int(0, fountains.length - 1)];
-        tmp.copy(f.mesh.position);
-        tmp2.set(rng.spread(0.3), rng.range(0.1, 0.4), rng.spread(0.3));
+      // Искры на верхушках слитков
+      if (sparkleAnchors.length && rng.rand() < dt * 9) {
+        const p = sparkleAnchors[rng.int(0, sparkleAnchors.length - 1)];
+        tmp.copy(p);
+        tmp.x += rng.spread(0.3);
+        tmp.z += rng.spread(0.24);
+        tmp2.set(rng.spread(0.2), rng.range(0.05, 0.3), rng.spread(0.2));
         sparkles.emit(tmp, tmp2, rng.range(0.35, 0.9), rng.range(0.06, 0.14));
       }
       motes.update(dt);
@@ -312,13 +375,15 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       stopLoop();
       motes.dispose();
       sparkles.dispose();
-      coinGeo.dispose();
-      coinMatHeads.dispose();
-      coinMatTails.dispose();
-      coinSide.dispose();
+      ingotGeo.dispose();
+      ingotMat.dispose();
+      stampGeo.dispose();
+      stampMat.dispose();
+      stampTex.dispose();
       marble.dispose();
       columnMat.dispose();
       disposeObject(safe);
+      disposeObject(podiumBars);
       disposeObject(scene);
       stage.dispose();
     };

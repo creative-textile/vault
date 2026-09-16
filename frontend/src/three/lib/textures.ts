@@ -721,6 +721,44 @@ export function blackMarble(): THREE.CanvasTexture {
   });
 }
 
+/**
+ * Клеймо слитка: «VAULT 999.9 FINE GOLD». Тёмная гравировка на прозрачном —
+ * кладётся отдельной плоскостью на верхнюю грань слитка.
+ */
+export function ingotStamp(): THREE.CanvasTexture {
+  const W = 256;
+  const H = 88;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  if (!g) return new THREE.CanvasTexture(c);
+
+  // Двойная рамка штампа
+  g.strokeStyle = 'rgba(74,58,14,0.85)';
+  g.lineWidth = 5;
+  g.strokeRect(10, 8, W - 20, H - 16);
+  g.lineWidth = 2;
+  g.strokeRect(20, 16, W - 40, H - 32);
+
+  // Гравировка: тёмный знак + светлый сдвиг вниз-вправо (эффект чеканки)
+  const draw = (color: string, ox: number, oy: number) => {
+    g.fillStyle = color;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '800 34px Georgia, serif';
+    g.fillText('VAULT', W / 2 + ox, 32 + oy);
+    g.font = '700 19px Georgia, serif';
+    g.fillText('999.9 · FINE GOLD', W / 2 + ox, 62 + oy);
+  };
+  draw('rgba(255,236,180,0.5)', 1.4, 1.4);
+  draw('rgba(58,44,8,0.95)', 0, 0);
+
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 /* ═══════════════════════════ ПОЛ И ФОН ═════════════════════════════════ */
 
 /** Радиальное свечение на полу (неоновое кольцо арены, подсветка сейфа). */
