@@ -597,7 +597,7 @@ export default function RocketScene({
     // Раскалённый металл: тёмная сталь с остывающим свечением кромки
     const charMat = new THREE.MeshStandardMaterial({
       color: 0x24262e, roughness: 0.78, metalness: 0.85,
-      emissive: 0xff5a1f, emissiveIntensity: 0.55
+      emissive: 0xff6a24, emissiveIntensity: 0.95
     });
     const tankMat = new THREE.MeshStandardMaterial({
       color: 0xc8ccd8, roughness: 0.34, metalness: 1, side: THREE.DoubleSide
@@ -694,6 +694,22 @@ export default function RocketScene({
     flameCol.visible = false;
     scene.add(flameCol);
 
+    // Цепная реакция: три вторичных детонации с задержкой и смещением —
+    // взрыв не один «бабах», а серия, как в настоящем крушении
+    interface After { mesh: THREE.Mesh; delay: number; off: THREE.Vector3; burst: boolean }
+    const afters: After[] = [];
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+      m.visible = false;
+      scene.add(m);
+      afters.push({
+        mesh: m,
+        delay: 0.42 + i * rng.range(0.22, 0.34),
+        off: new THREE.Vector3(rng.spread(2.2), rng.range(-0.4, 1.0), rng.spread(2.2)),
+        burst: false
+      });
+    }
+
     /* ── Состояние анимации ─────────────────────────────────────────────── */
     let altitude = 0;
     let flightT = 0;
@@ -722,7 +738,7 @@ export default function RocketScene({
         d.vr.set(rng.spread(5.5), rng.spread(5.5), rng.spread(5.5));
       }
       // Искры и дым взрыва
-      for (let i = 0; i < (quality === 'low' ? 46 : 110); i++) {
+      for (let i = 0; i < (quality === 'low' ? 60 : 150); i++) {
         const [vx, vy, vz] = rng.onSphere(1);
         const sp = rng.range(2.5, 9);
         sparks.emit(at, tmp.set(vx * sp, vy * sp * 0.9 + 1.4, vz * sp), rng.range(0.5, 1.5), rng.range(0.3, 0.8));
@@ -756,8 +772,14 @@ export default function RocketScene({
       flameCol.position.copy(at);
       flameCol.scale.set(1.4, 0.6, 1);
       (flameCol.material as THREE.MeshBasicMaterial).opacity = 1;
+      for (const a of afters) {
+        a.mesh.visible = false;
+        a.burst = false;
+        a.mesh.position.copy(at).add(a.off);
+        a.mesh.scale.setScalar(0.4);
+      }
       // Фонтан раскалённых углей вверх — взрыв не только вширь, но и вверх
-      for (let i = 0; i < (quality === 'low' ? 22 : 64); i++) {
+      for (let i = 0; i < (quality === 'low' ? 28 : 92); i++) {
         const a = rng.rand() * Math.PI * 2;
         const rr = rng.range(0, 0.5);
         tmp.set(at.x + Math.cos(a) * rr, at.y, at.z + Math.sin(a) * rr);
@@ -800,6 +822,7 @@ export default function RocketScene({
         debris.forEach((d) => { d.mesh.visible = false; });
         fireCloud.forEach((b) => { b.mesh.visible = false; });
         flameCol.visible = false;
+        afters.forEach((a) => { a.mesh.visible = false; });
         smoke.clear(); embers.clear(); sparks.clear(); speedLines.clear();
 
         // Предстартовое покачивание + лёгкое дрожание (двигатель на холостых)
@@ -850,6 +873,7 @@ export default function RocketScene({
         debris.forEach((d) => { d.mesh.visible = false; });
         fireCloud.forEach((b) => { b.mesh.visible = false; });
         flameCol.visible = false;
+        afters.forEach((a) => { a.mesh.visible = false; });
 
         // Набор высоты логарифмический: ракета уходит вверх, но остаётся в кадре
         const targetAlt = Math.log(1 + flightT * 0.62) * 4.2;
@@ -1052,9 +1076,9 @@ export default function RocketScene({
           if (explodedAt > 3.2) d.mesh.visible = false;
         }
         // Вспышка гаснет за ~0.4 с
-        const f = Math.max(0, 1 - explodedAt / 0.4);
-        (flash.material as THREE.MeshBasicMaterial).opacity = f * f * 0.92;
-        flash.scale.setScalar(1 + explodedAt * 2.4);
+        const f = Math.max(0, 1 - explodedAt / 0.45);
+        (flash.material as THREE.MeshBasicMaterial).opacity = f * f;
+        flash.scale.setScalar(1.3 + explodedAt * 3.1);
         flash.lookAt(camera.position);
         flash.visible = f > 0.01;
         // Огненный шар растёт и тает, билборды к камере
@@ -1096,6 +1120,30 @@ export default function RocketScene({
           (flameCol.material as THREE.MeshBasicMaterial).opacity = colOp * colOp;
           flameCol.lookAt(camera.position);
         }
+        // Цепная реакция: вторичные детонации вспыхивают по очереди,
+        // каждая со своим всплеском искр
+        for (const a of afters) {
+          const at2 = explodedAt - a.delay;
+          if (at2 < 0) { a.mesh.visible = false; continue; }
+          const aOp = Math.max(0, 1 - at2 / 0.6);
+          a.mesh.visible = aOp > 0.01;
+          if (a.mesh.visible) {
+            a.mesh.scale.setScalar(0.4 + easeOutCubic(Math.min(1, at2 / 0.3)) * 4.6);
+            (a.mesh.material as THREE.MeshBasicMaterial).opacity = aOp * aOp;
+            a.mesh.lookAt(camera.position);
+            a.mesh.rotateZ(at2 * 2.4);
+          }
+          if (!a.burst && at2 >= 0) {
+            a.burst = true;
+            tmp.copy(a.mesh.position);
+            for (let k = 0; k < (quality === 'low' ? 10 : 26); k++) {
+              const [vx, vy, vz] = rng.onSphere(1);
+              const sp = rng.range(1.4, 5);
+              sparks.emit(tmp, tmp2.set(vx * sp, vy * sp, vz * sp), rng.range(0.3, 0.8), rng.range(0.16, 0.34));
+            }
+            blastLight.intensity += 8;
+          }
+        }
         // Дымовая колонна поднимается ещё полторы секунды
         if (ft < 1.6) {
           smokeTimer += dt;
@@ -1120,8 +1168,9 @@ export default function RocketScene({
         shock2.lookAt(camera.position);
         shock2.visible = s2r > 0.01;
         // Свет: главный пик + вторичный от огненного шара
-        blastLight.intensity = Math.max(0, 26 * (1 - explodedAt / 0.7)) +
-          (ft > 0.1 ? 14 * Math.max(0, 1 - Math.abs(ft - 0.3) / 0.5) : 0);
+        blastLight.intensity = Math.max(blastLight.intensity - 40 * dt,
+          Math.max(0, 34 * (1 - explodedAt / 0.7)) +
+          (ft > 0.1 ? 16 * Math.max(0, 1 - Math.abs(ft - 0.3) / 0.5) : 0));
         // Камера отъезжает и дрожит с лёгким креном — удар ощущается
         const back = 8.6 + Math.min(2.4, explodedAt * 1.4);
         // Зум-панч: в первые 0.3 с камера резко расширяет поле зрения
