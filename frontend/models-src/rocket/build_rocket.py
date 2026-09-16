@@ -138,8 +138,7 @@ def main():
         'rocket_red': make_material('rocket_red', (0.70, 0.02, 0.07, 1), 0.3, 0.26,
                                     clearcoat=1.0),
         'rocket_steel': make_material('rocket_steel', (0.10, 0.11, 0.19, 1), 0.94, 0.42),
-        'rocket_glass': make_material('rocket_glass', (0.62, 0.85, 1.0, 1), 0.0, 0.05,
-                                      transmission=0.94),
+        'rocket_glass': make_material('rocket_glass', (0.03, 0.05, 0.09, 1), 0.1, 0.08),
     }
 
     # ── Корпус: профиль как в процедурной сцене ──
@@ -219,9 +218,10 @@ def main():
     # ── Оси: сценные → Blender (поворот данных и позиций) ──
     bpy.context.view_layer.update()
     for ob in list(bpy.data.objects):
+        if ob.type == 'MESH':
+            ob.data.transform(R4)
+            ob.data.update()
         ob.location = R4 @ ob.location
-        ob.rotation_mode = 'QUATERNION'
-        ob.rotation_quaternion = R4.to_quaternion() @ ob.rotation_quaternion
     bpy.context.view_layer.update()
 
     # ── Иерархия: root на срезе сопла ──
