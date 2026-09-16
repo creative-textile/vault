@@ -664,6 +664,63 @@ export function lightPillar(color = '#22d3ee'): THREE.CanvasTexture {
   });
 }
 
+
+/** Чёрный полированный мрамор с золотыми прожилками — пол и постаменты. */
+export function blackMarble(): THREE.CanvasTexture {
+  return cached('blackMarble:v1', [512, 512], (ctx, w, h) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 74.7 + 7.7) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, '#0b0b12');
+    g.addColorStop(0.5, '#101018');
+    g.addColorStop(1, '#0a0a10');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // широкие дымчатые разводы
+    for (let i = 0; i < 26; i++) {
+      const x = rnd(i) * w, y = rnd(i + 31) * h, r = 40 + rnd(i + 61) * 120;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+      rg.addColorStop(0, `rgba(${i % 3 ? '38,38,52' : '26,24,36'},.22)`);
+      rg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // прожилки: золото и серебро, ветвящиеся линии
+    for (let i = 0; i < 16; i++) {
+      const gold = i % 3 === 0;
+      ctx.strokeStyle = gold ? 'rgba(212,175,55,.4)' : 'rgba(190,196,224,.22)';
+      ctx.lineWidth = gold ? 1.6 : 1.1;
+      ctx.beginPath();
+      let x = rnd(i + 7) * w, y = 0;
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 12; k++) {
+        x += (rnd(i * 13 + k) - 0.5) * 70;
+        y += h / 12;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      // тонкие ответвления
+      ctx.strokeStyle = gold ? 'rgba(212,175,55,.18)' : 'rgba(190,196,224,.1)';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(x - 30, y - h / 4);
+      ctx.lineTo(x + 26, y);
+      ctx.stroke();
+    }
+    // блики полировки
+    for (let i = 0; i < 8; i++) {
+      const x = rnd(i + 91) * w, y = rnd(i + 121) * h;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, 60 + rnd(i) * 60);
+      rg.addColorStop(0, 'rgba(255,255,255,.05)');
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg;
+      ctx.fillRect(0, 0, w, h);
+    }
+  });
+}
+
 /* ═══════════════════════════ ПОЛ И ФОН ═════════════════════════════════ */
 
 /** Радиальное свечение на полу (неоновое кольцо арены, подсветка сейфа). */
