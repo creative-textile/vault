@@ -29,7 +29,7 @@ import * as THREE from 'three';
 import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
 import { createRng, easeOutCubic } from '../lib/rng';
 import { gold, polishedGold, darkSteel, neon, additive, disposeObject } from '../lib/materials';
-import { coinFace, coinEdge, brushedMetal, arenaFloor, neonRing, radialGlow, glowSprite, smokeSprite, arenaWall, lightPillar } from '../lib/textures';
+import { coinFace, coinEdge, brushedMetal, arenaFloor, neonRing, radialGlow, glowSprite, smokeSprite, arenaWall, lightPillar, engravedPlate } from '../lib/textures';
 import { loadModel, disposeModel } from '../lib/models';
 import { ParticleField } from '../lib/particles';
 import { FLIP_MS, sampleFlip } from './flipMath';
@@ -225,6 +225,13 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     ringInner.position.y = FLOOR_Y + 0.02;
     scene.add(ringInner);
 
+    // Золотой обод арены: физическая геометрия вместо плоского рисунка
+    const arenaRim = new THREE.Mesh(new THREE.TorusGeometry(7.42, 0.09, 12, 128), polishedGold());
+    arenaRim.rotation.x = Math.PI / 2;
+    arenaRim.position.y = FLOOR_Y + 0.05;
+    arenaRim.castShadow = quality === 'high';
+    scene.add(arenaRim);
+
     // Стена-колизей: неоновые пилястры вместо пустоты за ареной
     const wall = new THREE.Mesh(
       new THREE.CylinderGeometry(15, 15, 9.5, 64, 1, true),
@@ -232,6 +239,11 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     );
     wall.position.y = FLOOR_Y + 4.4;
     scene.add(wall);
+    // Золотая корона поверх стены — завершает «колизей»
+    const crown = new THREE.Mesh(new THREE.TorusGeometry(14.9, 0.14, 8, 96), gold());
+    crown.rotation.x = Math.PI / 2;
+    crown.position.y = FLOOR_Y + 9.0;
+    scene.add(crown);
 
     // Лужа света под монетой
     const pool = new THREE.Mesh(
@@ -247,24 +259,58 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
 
     /* ── Постаменты игроков: золото (создатель) и циан (соперник) ───────── */
     const podiums: THREE.Group[] = [];
-    const makePodium = (x: number, colorHex: number, glowCss: string): THREE.Group => {
+    const makePodium = (x: number, colorHex: number, glowCss: string, label: string): THREE.Group => {
+      const plateTex = engravedPlate(label);
+      plateTex.repeat.set(3, 1);
       const g = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 1.02, 0.5, 6), darkSteel({ roughness: 0.5 }));
-      base.position.y = 0.25;
+      // Ярус 1: шестигранная стальная база
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.98, 1.14, 0.3, 6), darkSteel({ roughness: 0.5 }));
+      base.position.y = 0.15;
       base.castShadow = quality === 'high';
       base.receiveShadow = quality === 'high';
       g.add(base);
+      const baseRim = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.026, 8, 6), neon(colorHex, 1.6));
+      baseRim.rotation.x = Math.PI / 2;
+      baseRim.position.y = 0.31;
+      g.add(baseRim);
 
+      // Ярус 2: барабан из брашированного металла с гравированной лентой
+      const drumMat = darkSteel({ roughness: 0.34 });
+      drumMat.roughnessMap = brushedMetal({ base: 96, strength: 30 });
+      drumMat.metalness = 0.92;
+      const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.86, 0.62, 48), drumMat);
+      drum.position.y = 0.6;
+      drum.castShadow = quality === 'high';
+      g.add(drum);
+      const plate = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.765, 0.765, 0.2, 48, 1, true),
+        new THREE.MeshStandardMaterial({
+          map: plateTex, metalness: 0.78, roughness: 0.4,
+          envMapIntensity: 1.0, side: THREE.DoubleSide
+        })
+      );
+      plate.position.y = 0.6;
+      g.add(plate);
+      const drumGoldTop = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.034, 10, 64), polishedGold());
+      drumGoldTop.rotation.x = Math.PI / 2;
+      drumGoldTop.position.y = 0.92;
+      g.add(drumGoldTop);
+      const drumGoldBottom = new THREE.Mesh(new THREE.TorusGeometry(0.86, 0.03, 10, 64), polishedGold());
+      drumGoldBottom.rotation.x = Math.PI / 2;
+      drumGoldBottom.position.y = 0.29;
+      g.add(drumGoldBottom);
+
+      // Ярус 3: светящаяся столешница с золотым кантом
       const top = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.07, 48), neon(colorHex, 1.9));
-      top.position.y = 0.53;
+      top.position.y = 0.97;
       g.add(top);
 
       const rim = new THREE.Mesh(
-        new THREE.TorusGeometry(0.84, 0.028, 10, 56),
+        new THREE.TorusGeometry(0.84, 0.03, 10, 64),
         polishedGold()
       );
       rim.rotation.x = Math.PI / 2;
-      rim.position.y = 0.52;
+      rim.position.y = 0.99;
       g.add(rim);
 
       const glow = new THREE.Mesh(
@@ -279,7 +325,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       g.add(glow);
 
       const light = new THREE.PointLight(colorHex, 2.4, 6.5, 2);
-      light.position.y = 1.1;
+      light.position.y = 1.6;
       g.add(light);
 
       // световой пилон за постаментом — игрок «подсветлен» как на афише
@@ -293,22 +339,13 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       );
       pillar.position.set(0, 2.3, -0.75);
       g.add(pillar);
-      // неоновая окантовка грани постамента
-      const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.95, 0.02, 8, 6),
-        new THREE.MeshBasicMaterial({ color: colorHex, toneMapped: false })
-      );
-      band.rotation.x = Math.PI / 2;
-      band.position.y = 0.1;
-      g.add(band);
-
       g.position.set(x, FLOOR_Y, -0.3);
       scene.add(g);
       podiums.push(g);
       return g;
     };
-    makePodium(-2.85, 0xf5c542, '#f5c542');
-    makePodium(2.85, 0x22d3ee, '#22d3ee');
+    makePodium(-2.85, 0xf5c542, '#f5c542', 'СОЗДАТЕЛЬ');
+    makePodium(2.85, 0x22d3ee, '#22d3ee', 'СОПЕРНИК');
 
     /* ── Свет: тёплый прожектор сверху + цветные контровые ─────────────── */
     scene.add(new THREE.AmbientLight(0x6a5aa8, 0.7));
