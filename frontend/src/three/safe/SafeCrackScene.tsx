@@ -243,7 +243,8 @@ export default function SafeCrackScene({
       const col = new THREE.Group();
       const shaft = new THREE.Mesh(flutedColumn(0.44, 7.4), hallColumnMat);
       shaft.position.y = 3.7;
-      shaft.castShadow = quality === 'high';
+      // Без теней: длинные тени колонн от прожекторов полосили пол
+      shaft.castShadow = false;
       col.add(shaft);
       const colGold = softGold();
       const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.68, 0.26, 24), colGold);
@@ -280,42 +281,14 @@ export default function SafeCrackScene({
     backHalo.position.set(0, 1.7, -4.0);
     scene.add(backHalo);
 
-    const topSpot = new THREE.SpotLight(0xffe2ac, 46, 22, Math.PI / 7.4, 0.55, 1.6);
-    topSpot.position.set(0.3, 8.4, 0.9);
+    // Верхний свет широкий и мягкий: узкий видимый конус читался
+    // как «тёмные полосы» над сейфом — оставляем только свет без луча
+    const topSpot = new THREE.SpotLight(0xffe2ac, 40, 24, Math.PI / 5.8, 0.9, 1.5);
+    topSpot.position.set(0.3, 8.6, 1.1);
     topSpot.target.position.set(0, DOOR_Y, 0);
     scene.add(topSpot);
     scene.add(topSpot.target);
 
-    // Псевдообъёмный конус луча (та же техника, что в дуэли)
-    const beamH = 8.2;
-    const beamGeo = new THREE.ConeGeometry(2.4, beamH, 36, 1, true);
-    const beamMat = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.13 } },
-      vertexShader: /* glsl */`
-        varying float vFall;
-        varying vec3 vNormalV;
-        void main() {
-          vFall = (${(beamH / 2).toFixed(1)} - position.y) / ${beamH.toFixed(1)};
-          vNormalV = normalize(normalMatrix * normal);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }`,
-      fragmentShader: /* glsl */`
-        uniform vec3 uColor;
-        uniform float uOpacity;
-        varying float vFall;
-        varying vec3 vNormalV;
-        void main() {
-          float edge = 1.0 - abs(dot(normalize(vNormalV), vec3(0.0, 0.0, 1.0)));
-          float a = uOpacity * pow(clamp(vFall, 0.0, 1.0), 1.8) * pow(edge, 1.4);
-          gl_FragColor = vec4(uColor, a);
-        }`,
-      transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending
-    });
-    const beam = new THREE.Mesh(beamGeo, beamMat);
-    beam.position.set(0.3, 8.4 - beamH / 2, 0.6);
-    beam.rotation.z = 0.03;
-    scene.add(beam);
 
     /* ═══════════════════════════ КОРПУС СЕЙФА ═══════════════════════════ */
     const safe = new THREE.Group();
@@ -747,6 +720,15 @@ export default function SafeCrackScene({
         });
       }
       proceduralHide.forEach((o) => { o.visible = false; });
+      // Табличка VAULT: в .glb её нет, а процедурная дверь прячется — без
+      // пересадки табличка исчезала после загрузки модели. Сажаем на дверь
+      // модели (локально центр двери в +1.55 от оси петли)
+      const modelDoor = m.root.getObjectByName('safe_door');
+      if (modelDoor) {
+        modelDoor.attach(plate);
+        plate.position.set(1.55, 1.02, 0.18);
+        plate.visible = true;
+      }
       hingeParts.forEach((o) => { o.visible = false; });
       rivets.forEach((o) => { o.visible = false; });
       // процедурные внутренности заменяет интерьер модели; золотой свет —
@@ -759,7 +741,7 @@ export default function SafeCrackScene({
 
     scene.add(new THREE.AmbientLight(0x5f5a86, 0.75));
 
-    const key = new THREE.SpotLight(0xfff0cc, 58, 22, Math.PI / 5.2, 0.5, 1.5);
+    const key = new THREE.SpotLight(0xfff0cc, 58, 22, Math.PI / 4.8, 0.78, 1.5);
     key.position.set(-3.2, 4.6, 4.6);
     key.target.position.set(0, DOOR_Y, 0);
     if (quality === 'high') {
@@ -1033,8 +1015,6 @@ export default function SafeCrackScene({
       sparks.dispose(); dust.dispose(); goldMotes.dispose(); smoke.dispose();
       barGeo.dispose(); coinGeo.dispose();
       drumBodyGeo.dispose(); plateGeo.dispose(); rivetGeo.dispose(); boltGeo.dispose();
-      beamGeo.dispose();
-      beamMat.dispose();
       disposeObject(safe);
       disposeObject(scene);
       stage.dispose();
