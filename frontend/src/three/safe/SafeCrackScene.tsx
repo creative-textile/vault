@@ -36,6 +36,7 @@ import {
   radialGlow, radialFade, glowSprite, smokeSprite, blackMarble
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { loadModel, disposeModel, playClip, scrubClip, type LoadedModel } from '../lib/models';
 import {
   drumPosition, drumAngle, angleForDigit, speedOf, normalizeCode, drumPlateTransform
@@ -323,7 +324,9 @@ export default function SafeCrackScene({
     const bodyMat = darkSteel({ roughness: 0.64 });
     bodyMat.envMapIntensity = 0.38;
     bodyMat.map = brushedMetal({ base: 62, strength: 22 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(3.9, 3.6, 2.4, 1, 1, 1), bodyMat);
+    // Фаски: у реального сейфа нет бумажных углов в 90° — блик обязан
+    // бежать по скруглению (раунд U, пункт «фаски»)
+    const body = new THREE.Mesh(new RoundedBoxGeometry(3.9, 3.6, 2.4, 3, 0.06), bodyMat);
     body.position.set(0, 0.15, -1.35);
     body.castShadow = quality === 'high';
     body.receiveShadow = quality === 'high';
@@ -333,13 +336,13 @@ export default function SafeCrackScene({
     const frameMat = darkSteel({ roughness: 0.5 });
     frameMat.envMapIntensity = 0.45;
     frameMat.map = brushedMetal({ base: 74, strength: 18 });
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(4.14, 3.84, 0.26), frameMat);
+    const frame = new THREE.Mesh(new RoundedBoxGeometry(4.14, 3.84, 0.26, 3, 0.05), frameMat);
     frame.position.set(0, 0.15, -0.14);
     safe.add(frame);
 
     // Постамент
     const plinth = new THREE.Mesh(
-      new THREE.BoxGeometry(4.3, 0.26, 2.75),
+      new RoundedBoxGeometry(4.3, 0.26, 2.75, 2, 0.04),
       darkSteel({ roughness: 0.66 })
     );
     plinth.position.set(0, FLOOR_Y + 0.13, -1.35);
@@ -446,7 +449,12 @@ export default function SafeCrackScene({
     doorGeo.rotateX(Math.PI / 2);                       // ось двери → Z
     const doorMat = darkSteel({ roughness: 0.48 });
     doorMat.envMapIntensity = 0.45;
-    doorMat.map = brushedMetal({ base: 86, strength: 20, circular: true });
+    const doorBrush = brushedMetal({ base: 86, strength: 20, circular: true });
+    doorMat.map = doorBrush;
+    // PBR-деталь (раунд U): та же карта работает картой рельефа — блик
+    // на двери не идеально гладкий, а с микроцарапинами
+    doorMat.bumpMap = doorBrush;
+    doorMat.bumpScale = 0.004;
     const door = new THREE.Mesh(doorGeo, doorMat);
     door.position.x = -HINGE_X;                          // центр двери в мире = 0
     door.castShadow = quality === 'high';
@@ -484,7 +492,7 @@ export default function SafeCrackScene({
     /* ═══════════════════════════ БАРАБАНЫ ═══════════════════════════════ */
     // Панель-углубление, в которой стоят барабаны
     const panel = new THREE.Mesh(
-      new THREE.BoxGeometry(2.86, 1.02, 0.12),
+      new RoundedBoxGeometry(2.86, 1.02, 0.12, 2, 0.03),
       new THREE.MeshStandardMaterial({
         color: 0x0b0d1a, metalness: 0.7, roughness: 0.44, envMapIntensity: 0.8
       })
@@ -493,7 +501,7 @@ export default function SafeCrackScene({
     doorPivot.add(panel);
 
     const panelTrim = new THREE.Mesh(
-      new THREE.BoxGeometry(2.98, 1.14, 0.05),
+      new RoundedBoxGeometry(2.98, 1.14, 0.05, 2, 0.02),
       softGold()
     );
     panelTrim.position.set(-HINGE_X, DRUM_Y, halfT - 0.075);
