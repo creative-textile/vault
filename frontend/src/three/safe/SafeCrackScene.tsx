@@ -36,6 +36,7 @@ import {
   radialGlow, glowSprite, smokeSprite
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
+import { loadModel, disposeModel, playClip, scrubClip, type LoadedModel } from '../lib/models';
 import {
   drumPosition, drumAngle, angleForDigit, speedOf, normalizeCode, drumPlateTransform
 } from './drumMath';
@@ -99,7 +100,8 @@ export default function SafeCrackScene({
       bloom: quality === 'high' ? 0.7 : quality === 'medium' ? 0.45 : 0,
       bloomRadius: 0.55,
       bloomThreshold: 0.66,
-      exposure: 1.06
+      exposure: 1.06,
+      statsId: 'safe'
     });
     if (!stage) return;
     const { scene, camera } = stage;
@@ -276,6 +278,7 @@ export default function SafeCrackScene({
     // Заклёпки по периметру — деталь, по которой сейф узнают мгновенно
     const rivetGeo = new THREE.SphereGeometry(0.055, 14, 10);
     const rivetMat = chrome();
+    const rivets: THREE.Mesh[] = [];
     for (let i = 0; i < 14; i++) {
       const a = (i / 14) * Math.PI * 2 + Math.PI / 14;
       const r = new THREE.Mesh(rivetGeo, rivetMat);
@@ -286,6 +289,7 @@ export default function SafeCrackScene({
       );
       r.scale.z = 0.62;                                  // приплюснутая головка
       doorPivot.add(r);
+      rivets.push(r);
     }
 
     /* ── Гравированная табличка ─────────────────────────────────────────── */
@@ -442,6 +446,7 @@ export default function SafeCrackScene({
     wheelIndex.position.z = halfT + 0.12;
 
     /* ── Петли и ригели ─────────────────────────────────────────────────── */
+    const hingeParts: THREE.Mesh[] = [];
     for (const hy of [-0.72, 0.92]) {
       const hinge = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.62, 0.42), chrome());
       hinge.position.set(HINGE_X + 0.02, DOOR_Y + hy, -0.02);
@@ -449,6 +454,7 @@ export default function SafeCrackScene({
       const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.74, 18), polishedGold());
       pin.position.set(HINGE_X + 0.02, DOOR_Y + hy, 0.16);
       safe.add(pin);
+      hingeParts.push(hinge, pin);
     }
 
     // Ригели: уходят в дверь перед распахиванием
@@ -493,6 +499,52 @@ export default function SafeCrackScene({
     safe.add(beaconSweeper);
 
     /* ═══════════════════════════ СВЕТ ═══════════════════════════════════ */
+    /* ═══════════ 3D-МОДЕЛЬ СЕЙФА (ТЗ «3D-модели») ═══════════
+     * Пока .glb едет/парсится — игрок видит процедурный сейф (фолбэк и
+     * витрина одновременно). Загрузилась — корпус/дверь/ригели/штурвал/петли
+     * заменяет модель, а барабаны с цифрами остаются процедурными и
+     * пересаживаются под Anchor_Drums (дочерний двери — открываются вместе).
+     */
+    let cancelled = false;
+    let safeModel: LoadedModel | null = null;
+    let modelActive = false;
+    let modelClip = '';
+    let modelAction: THREE.AnimationAction | null = null;
+    const modelHolder = new THREE.Group();
+    scene.add(modelHolder);
+    const proceduralHide: THREE.Object3D[] = [
+      body, frame, plinth, collar, door, plate, panel, panelTrim,
+      wheel, wheelIndex, ...bolts
+    ];
+    loadModel('safe.glb', { quality }).then((m) => {
+      if (cancelled || !m) return;
+      safeModel = m;
+      modelHolder.add(m.root);
+      modelHolder.updateMatrixWorld(true);
+      // Лоадер центрирует bbox и ставит низ на пол; возвращаем петлю (root
+      // модели) на сценную ось двери — габариты авторены 1:1 со сценой.
+      let hinge = m.root.getObjectByName('safe');
+      if (!hinge || hinge === m.root) {
+        hinge = m.root.children.find((c) => c.name === 'safe') ?? m.root;
+      }
+      const hv = new THREE.Vector3();
+      hinge.getWorldPosition(hv);
+      modelHolder.position.add(new THREE.Vector3(HINGE_X, DOOR_Y, 0.06).sub(hv));
+      // Процедурные барабаны — под якорь двери модели
+      const drumAnchor = m.anchors['Anchor_Drums'];
+      if (drumAnchor) {
+        drums.forEach((d) => {
+          drumAnchor.attach(d.group);
+          drumAnchor.attach(d.bezel);
+          drumAnchor.attach(d.windowGlow);
+        });
+      }
+      proceduralHide.forEach((o) => { o.visible = false; });
+      hingeParts.forEach((o) => { o.visible = false; });
+      rivets.forEach((o) => { o.visible = false; });
+      modelActive = true;
+    });
+
     scene.add(new THREE.AmbientLight(0x5f5a86, 0.75));
 
     const key = new THREE.SpotLight(0xfff0cc, 58, 22, Math.PI / 5.2, 0.5, 1.5);
@@ -670,6 +722,19 @@ export default function SafeCrackScene({
       // Дверь чуть выезжает вперёд, когда распахивается: так читается толщина
       doorPivot.position.z = 0.06 + doorOpen * 0.16;
 
+      /* ── Модель сейфа: детерминированные клипы (mixer.setTime) ─────────── */
+      if (modelActive && safeModel) {
+        const want = openSeq >= 0 ? 'open' : phaseNow === 'spinning' ? 'spin' : 'idle';
+        if (want !== modelClip) {
+          modelClip = want;
+          modelAction = playClip(safeModel, want, want === 'open' ? 'once' : 'loop');
+        }
+        if (modelAction) {
+          const dur = safeModel.clips[want]?.duration ?? 1;
+          scrubClip(safeModel, modelAction, want === 'open' ? openSeq : elapsed % dur);
+        }
+      }
+
       // Золото внутри разгорается вместе с дверью
       const glow = doorOpen * doorOpen;
       goldLight.intensity = glow * 13;
@@ -748,6 +813,8 @@ export default function SafeCrackScene({
     stage.render();
 
     return () => {
+      cancelled = true;
+      disposeModel('safe.glb');
       stopLoop();
       sparks.dispose(); dust.dispose(); goldMotes.dispose(); smoke.dispose();
       barGeo.dispose(); coinGeo.dispose();

@@ -51,6 +51,20 @@ export interface StageOptions {
   /** Ограничение pixelRatio: для bloom-сцен дешевле держать 1.5–1.75. */
   maxPixelRatio?: number;
   exposure?: number;
+  /** Идентификатор для дев-оверлея статистики (`/scenes.html`). */
+  statsId?: string;
+}
+
+/* ── Статистика для дев-оверлея (`/scenes.html`, ТЗ 6.4) ─────────────────
+ * Сцена с `statsId` раз в 500 мс пишет сюда FPS/треугольники/draw calls —
+ * оверлей читает реестр, не трогая сцены.
+ */
+export interface StageStats { fps: number; triangles: number; calls: number; }
+const statsRegistry = new Map<string, StageStats>();
+export function getStageStats(): Record<string, StageStats> {
+  const out: Record<string, StageStats> = {};
+  statsRegistry.forEach((v, k) => { out[k] = { ...v }; });
+  return out;
 }
 
 export interface Stage {
@@ -195,8 +209,24 @@ export function createStage(opts: StageOptions): Stage {
     }
   };
 
+  /* ── Статистика: FPS считаем всегда (не только до деградации) ────────── */
+  let statFrames = 0;
+  let statInterval: ReturnType<typeof setInterval> | null = null;
+  if (opts.statsId) {
+    const id = opts.statsId;
+    statInterval = setInterval(() => {
+      statsRegistry.set(id, {
+        fps: statFrames * 2,
+        triangles: renderer.info.render.triangles,
+        calls: renderer.info.render.calls
+      });
+      statFrames = 0;
+    }, 500);
+  }
+
   const render = () => {
     if (disposed) return;
+    statFrames++;
     if (composer) composer.render();
     else renderer.render(scene, camera);
   };
@@ -208,6 +238,8 @@ export function createStage(opts: StageOptions): Stage {
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    if (statInterval) clearInterval(statInterval);
+    if (opts.statsId) statsRegistry.delete(opts.statsId);
     ro?.disconnect();
     window.removeEventListener('resize', setSize);
     window.removeEventListener('orientationchange', setSize);

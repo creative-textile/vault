@@ -34,6 +34,7 @@ import { createRng, fbm1, easeOutCubic } from '../lib/rng';
 import { gold, chrome, darkSteel, paintedHull, paintedRed, glass, neon, additive, composite, polishedGold, disposeObject } from '../lib/materials';
 import { glowSprite, starFlare, smokeSprite, nebula, hazardStripes, neonRing, radialGlow, streakSprite } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
+import { loadModel, disposeModel } from '../lib/models';
 
 interface Props {
   phase: 'idle' | 'flying' | 'crashed' | 'cashed';
@@ -60,6 +61,8 @@ interface RocketParts {
   engineLight: THREE.PointLight;
   beacon: THREE.Mesh;
   beaconLight: THREE.PointLight;
+  /** Корпусные детали: при загрузке .glb они скрываются (модель вместо них). */
+  bodyParts: THREE.Object3D[];
 }
 
 /**
@@ -69,6 +72,7 @@ interface RocketParts {
  */
 function buildRocket(ghost = false): RocketParts {
   const group = new THREE.Group();
+  const bodyParts: THREE.Object3D[] = [];
 
   /** Обёртка материала: в режиме призрака делаем прозрачным и не пишущим в depth. */
   const asGhost = <T extends THREE.Material>(m: T): T => {
@@ -108,6 +112,7 @@ function buildRocket(ghost = false): RocketParts {
   const hull = new THREE.Mesh(new THREE.LatheGeometry(profile, 56), hullMat);
   hull.castShadow = !ghost;
   group.add(hull);
+  bodyParts.push(hull);
 
   /* ── Носовой обтекатель: красный лак поверх белого корпуса ────────────── */
   const noseProfile: THREE.Vector2[] = [];
@@ -120,6 +125,7 @@ function buildRocket(ghost = false): RocketParts {
   const nose = new THREE.Mesh(new THREE.LatheGeometry(noseProfile, 56), asGhost(paintedRed()));
   nose.castShadow = !ghost;
   group.add(nose);
+  bodyParts.push(nose);
 
   /* ── Золотые акцентные кольца: читаются как «дорогой» объект ─────────── */
   [-0.52, 0.34, 0.92].forEach((y, i) => {
@@ -131,6 +137,7 @@ function buildRocket(ghost = false): RocketParts {
     band.rotation.x = Math.PI / 2;
     band.position.y = y;
     group.add(band);
+  bodyParts.push(band);
   });
 
   /* ── Иллюминатор: стекло в металлическом кольце ──────────────────────── */
@@ -151,6 +158,7 @@ function buildRocket(ghost = false): RocketParts {
   windowGroup.position.set(0, 0.42, R * 0.94);
   windowGroup.rotation.x = -0.12;
   group.add(windowGroup);
+  bodyParts.push(windowGroup);
 
   /* ── Кили: выдавленный профиль с фаской (не конусы) ───────────────────── */
   const finShape = new THREE.Shape();
@@ -173,6 +181,7 @@ function buildRocket(ghost = false): RocketParts {
     fin.rotation.z = 0;
     fin.castShadow = !ghost;
     group.add(fin);
+  bodyParts.push(fin);
 
     // Золотая кромка киля — тонкая полоска, ловит блик
     const edge = new THREE.Mesh(
@@ -182,6 +191,7 @@ function buildRocket(ghost = false): RocketParts {
     edge.position.set(Math.cos(a) * (R * 0.86 + 0.3), -H * 0.32 - 0.3, Math.sin(a) * (R * 0.86 + 0.3));
     edge.rotation.y = -a + Math.PI / 2;
     group.add(edge);
+  bodyParts.push(edge);
   }
 
   /* ── Сопловой раструб ────────────────────────────────────────────────── */
@@ -194,6 +204,7 @@ function buildRocket(ghost = false): RocketParts {
   const bell = new THREE.Mesh(new THREE.LatheGeometry(bellProfile, 40), asGhost(darkSteel({ roughness: 0.5 })));
   bell.castShadow = !ghost;
   group.add(bell);
+  bodyParts.push(bell);
 
   // Раскалённая внутренняя поверхность сопла
   const innerProfile = bellProfile.map((p) => new THREE.Vector2(p.x * 0.93, p.y + 0.01));
@@ -250,12 +261,14 @@ function buildRocket(ghost = false): RocketParts {
   );
   beacon.position.y = H * 0.5 + 0.05;
   group.add(beacon);
+  bodyParts.push(beacon);
   const antenna = new THREE.Mesh(
     new THREE.CylinderGeometry(0.012, 0.016, 0.16, 8),
     asGhost(chrome())
   );
   antenna.position.y = H * 0.5 - 0.02;
   group.add(antenna);
+  bodyParts.push(antenna);
 
   /* ── Свет ────────────────────────────────────────────────────────────── */
   const engineLight = new THREE.PointLight(0xff7a2a, 0, 26, 2);
@@ -274,7 +287,7 @@ function buildRocket(ghost = false): RocketParts {
     }
   });
 
-  return { group, flameCore, flameMid, flameOuter, diamonds, nozzleGlow, engineLight, beacon, beaconLight };
+  return { group, flameCore, flameMid, flameOuter, diamonds, nozzleGlow, engineLight, beacon, beaconLight, bodyParts };
 }
 
 /* ═══════════════════════════ ПЛАТФОРМА И КОСМОС ══════════════════════ */
@@ -404,7 +417,8 @@ export default function RocketScene({
       bloom: quality === 'high' ? 0.92 : quality === 'medium' ? 0.6 : 0,
       bloomRadius: 0.66,
       bloomThreshold: 0.58,
-      exposure: 1.12
+      exposure: 1.12,
+      statsId: 'rocket'
     });
     // WebGL недоступен или контекст не создался: экран обязан остаться играбельным
     if (!stage) return;
@@ -491,6 +505,26 @@ export default function RocketScene({
     const ghost = buildRocket(true);
     ghost.group.visible = false;
     scene.add(ghost.group);
+
+    /* ═══ 3D-МОДЕЛЬ РАКЕТЫ (ТЗ): корпус из .glb, пламя/частицы — VFX сцены ═══
+     * Призрак после кэшаута остаётся процедурным (полупрозрачный дубль).
+     * Модель садится в группу ракеты и inherits покачивания/полёт; срез сопла
+     * (Anchor_Flame) совмещаем с верхом процедурного пламени.
+     */
+    let cancelled = false;
+    const rocketHolder = new THREE.Group();
+    rocket.group.add(rocketHolder);
+    loadModel('rocket.glb', { quality }).then((m) => {
+      if (cancelled || !m) return;
+      rocketHolder.add(m.root);
+      rocketHolder.updateMatrixWorld(true);
+      const anchor = m.anchors['Anchor_Flame'] ?? m.root;
+      const av = new THREE.Vector3();
+      anchor.getWorldPosition(av);
+      rocket.group.worldToLocal(av);
+      rocketHolder.position.add(new THREE.Vector3(0, -1.60, 0).sub(av));
+      rocket.bodyParts.forEach((o) => { o.visible = false; });
+    });
 
     /* ── Частицы ────────────────────────────────────────────────────────── */
     const smoke = new ParticleField(quality === 'low' ? 90 : 220, smokeSprite(), {
@@ -891,6 +925,8 @@ export default function RocketScene({
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      cancelled = true;
+      disposeModel('rocket.glb');
       document.removeEventListener('visibilitychange', onVisible);
       stopLoop();
       smoke.dispose(); embers.dispose(); sparks.dispose(); speedLines.dispose();

@@ -30,6 +30,7 @@ import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
 import { createRng, easeOutCubic } from '../lib/rng';
 import { gold, polishedGold, darkSteel, neon, additive, disposeObject } from '../lib/materials';
 import { coinFace, coinEdge, brushedMetal, arenaFloor, neonRing, radialGlow, glowSprite, smokeSprite } from '../lib/textures';
+import { loadModel, disposeModel } from '../lib/models';
 import { ParticleField } from '../lib/particles';
 import { FLIP_MS, sampleFlip } from './flipMath';
 
@@ -88,7 +89,8 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       bloom: quality === 'high' ? 0.78 : quality === 'medium' ? 0.5 : 0,
       bloomRadius: 0.6,
       bloomThreshold: 0.62,
-      exposure: 1.1
+      exposure: 1.1,
+      statsId: 'duel'
     });
     if (!stage) return;
     const { scene, camera } = stage;
@@ -169,6 +171,21 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
 
     coin.position.y = 0.1;
     scene.add(coin);
+
+    /* ═══ 3D-МОДЕЛЬ МОНЕТЫ (ТЗ): чеканка из .glb вместо плоских сторон ═══
+     * Группу `coin` сцена уже крутит/бросает — модель садится внутрь неё и
+     * наследует всю логику фаз. Процедурная монета остаётся фолбэком.
+     */
+    let cancelled = false;
+    const coinHolder = new THREE.Group();
+    coin.add(coinHolder);
+    loadModel('coin.glb', { quality, targetHeight: COIN_R * 2 }).then((m) => {
+      if (cancelled || !m) return;
+      coinHolder.add(m.root);
+      // лоадер ставит низ на floorY=0 → центр монеты на R выше; возвращаем в 0
+      coinHolder.position.y = -COIN_R;
+      [body, edge, heads, tails].forEach((o) => { o.visible = false; });
+    });
 
     /* ══════════════════════════ АРЕНА ═══════════════════════════════════ */
     const floorTex = arenaFloor();
@@ -545,6 +562,8 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     return () => {
       stopLoop();
       dust.dispose(); impact.dispose(); sparks.dispose();
+      cancelled = true;
+      disposeModel('coin.glb');
       disposeObject(coin);
       disposeObject(scene);
       beamGeo.dispose(); beamMat.dispose();

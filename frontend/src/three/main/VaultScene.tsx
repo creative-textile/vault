@@ -28,6 +28,7 @@ import { createRng } from '../lib/rng';
 import { gold, polishedGold, chrome, darkSteel, disposeObject } from '../lib/materials';
 import { brushedMetal, radialGlow, glowSprite, neonRing, coinFace } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
+import { loadModel, disposeModel, acquireRoot } from '../lib/models';
 
 const FLOOR_Y = -1.22;
 const DOOR_R = 1.02;
@@ -52,7 +53,8 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       bloom: 0,                                  // см. шапку: composer съедает альфу
       fov: 40,
       position: [0, 0.34, 5.5],
-      exposure: 1.12
+      exposure: 1.12,
+      statsId: 'vault'
     });
     if (!stage) return;
     const { scene, camera } = stage;
@@ -250,11 +252,50 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     }
 
     // Петли
+    const hingeParts: THREE.Mesh[] = [];
     for (const hy of [-0.62, 0.62]) {
       const hinge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.46, 0.3), chrome());
       hinge.position.set(HINGE_X + 0.02, hy, 0.14);
       safe.add(hinge);
+      hingeParts.push(hinge);
     }
+
+    /* ═══ 3D-МОДЕЛЬ СЕЙФА (ТЗ): клон с распахнутой дверью вместо корпуса ═══
+     * Сейф тут — витрина: дверь открыта, свет льётся. Модель берём клоном
+     * (safe.glb уже в кэше у SafeCrackScene — файл качается один раз),
+     * дверь позой ставим вручную (микшер у клона общий не нужен), а золото
+     * и ореол остаются процедурными VFX поверх.
+     */
+    let cancelled = false;
+    let modelHolder: THREE.Group | null = null;
+    const hideOnModel: THREE.Object3D[] = [body, frame, collar, doorPivot, ...hingeParts, cavity, ...bars];
+    loadModel('safe.glb', { quality }).then((m) => {
+      if (cancelled || !m) return;
+      const clone = acquireRoot(m);
+      modelHolder = new THREE.Group();
+      modelHolder.add(clone);
+      modelHolder.scale.setScalar(0.72);          // витрина меньше взлома
+      safe.add(modelHolder);
+      modelHolder.updateMatrixWorld(true);
+      // Дверь — распахнута, как в процедурной витрине
+      const doorNode = clone.getObjectByName('safe_door');
+      if (doorNode) {
+        doorNode.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -1.02);
+        doorNode.position.z += 0.16;
+      }
+      // Петля модели — на ось петли витрины (локально в группе safe)
+      let hingeNode = clone.getObjectByName('safe');
+      if (!hingeNode || hingeNode === clone) {
+        hingeNode = clone.children.find((c) => c.name === 'safe') ?? clone;
+      }
+      const hv = new THREE.Vector3();
+      hingeNode.getWorldPosition(hv);
+      const want = new THREE.Vector3(HINGE_X, 0, 0.26);
+      safe.updateMatrixWorld(true);
+      const delta = safe.worldToLocal(want.clone()).sub(safe.worldToLocal(hv.clone()));
+      modelHolder.position.add(delta);
+      hideOnModel.forEach((o) => { o.visible = false; });
+    });
 
     /* ═══════════════════════ МОНЕТЫ НА ОРБИТАХ ══════════════════════════ */
     // Монеты — та же чеканка, что и в дуэли: игрок узнаёт «свою» валюту
@@ -381,6 +422,9 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     stage.render();
 
     return () => {
+      cancelled = true;
+      if (modelHolder) safe.remove(modelHolder);   // клон делит геометрию с кэшем
+      disposeModel('safe.glb');
       stopLoop();
       motes.dispose();
       sparkles.dispose();
