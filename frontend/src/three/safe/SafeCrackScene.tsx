@@ -33,7 +33,7 @@ import {
 } from '../lib/materials';
 import {
   digitPlate, dialGraduation, engravedPlate, brushedMetal,
-  radialGlow, radialFade, glowSprite, smokeSprite, blackMarble, arenaMedallion
+  radialGlow, radialFade, glowSprite, smokeSprite, blackMarble, arenaMedallion, starFlare
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -298,19 +298,55 @@ export default function SafeCrackScene({
     contact.position.set(0, FLOOR_Y + 0.02, 0.0);
     scene.add(contact);
 
-    /* ── Новая световая концепция (T2): сейф — экспонат под музейным лучом ─
-     * Мягкий тёплый ореол за сейфом даёт глубину без кричащих светильников,
-     * а верхний прожектор с псевдообъёмным конусом ставит световой акцент.
+    /* ── Звёздное небо на заднем плане ───────────────────────────────────
+     * Вместо оранжевого гало — мерцающие звёзды по всей стене хранилища.
+     * Детерминированные позиции (общий ГПСЧ сцены), свой шейдер с
+     * индивидуальной фазой мерцания — как в сцене ракеты.
      */
-    // Неяркое компактное гало на стене за сейфом: раньше раздувалось
-    // в розово-белое пятно над крышей
-    const backHalo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowSprite('#ff9d3e', 0.45), transparent: true, opacity: 0.28,
-      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
-    }));
-    backHalo.scale.set(6.5, 4.6, 1);
-    backHalo.position.set(0, 1.9, -4.25);
-    scene.add(backHalo);
+    const starCount = quality === 'low' ? 240 : 560;
+    const starGeo = new THREE.BufferGeometry();
+    const starPos = new Float32Array(starCount * 3);
+    const starSize = new Float32Array(starCount);
+    const starAlpha = new Float32Array(starCount);
+    for (let i = 0; i < starCount; i++) {
+      starPos[i * 3] = rng.range(-21.5, 21.5);
+      starPos[i * 3 + 1] = rng.range(-0.5, 10.6);
+      starPos[i * 3 + 2] = -4.32 + rng.range(0, 0.08);
+      starSize[i] = rng.range(0.5, 1.7) * (rng.rand() > 0.9 ? 2.3 : 1);
+      starAlpha[i] = rng.range(0.4, 1);
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    starGeo.setAttribute('aSize', new THREE.BufferAttribute(starSize, 1));
+    starGeo.setAttribute('aAlpha', new THREE.BufferAttribute(starAlpha, 1));
+    const starMat = new THREE.ShaderMaterial({
+      uniforms: { uTex: { value: starFlare('#eaf2ff') }, uScale: { value: 190 }, uTime: { value: 0 } },
+      vertexShader: /* glsl */`
+        attribute float aSize;
+        attribute float aAlpha;
+        uniform float uScale;
+        uniform float uTime;
+        varying float vAlpha;
+        void main() {
+          // Мерцание: у каждой звезды своя фаза
+          vAlpha = aAlpha * (0.68 + 0.32 * sin(uTime * 1.9 + aAlpha * 40.0));
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = aSize * uScale / max(0.001, -mv.z);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D uTex;
+        varying float vAlpha;
+        void main() {
+          vec4 t = texture2D(uTex, gl_PointCoord);
+          float a = t.a * vAlpha;
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(t.rgb, a);
+        }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false
+    });
+    const stars = new THREE.Points(starGeo, starMat);
+    stars.frustumCulled = false;
+    scene.add(stars);
 
     // Верхний свет широкий и мягкий: узкий видимый конус читался
     // как «тёмные полосы» над сейфом — оставляем только свет без луча
@@ -869,12 +905,6 @@ export default function SafeCrackScene({
     const doorGrazing = new THREE.PointLight(0xffd76a, 3.4, 8, 2);
     doorGrazing.position.set(1.6, 1.4, 2.4);
     scene.add(doorGrazing);
-    // Честный широкий свет на стену вместо светящейся плоскости-меши:
-    // плоский меш при облете камеры читался как «клинья» с резкими гранями
-    const wallLight = new THREE.SpotLight(0xffb066, 34, 24, Math.PI / 2.7, 1.0, 1.1);
-    wallLight.position.set(0, 6.5, 5.5);
-    wallLight.target.position.set(0, 3.0, -4.4);
-    scene.add(wallLight, wallLight.target);
 
     /* ═══════════════════════════ ЧАСТИЦЫ ════════════════════════════════ */
     const sparks = new ParticleField(quality === 'low' ? 70 : 220, glowSprite('#fff6da', 0.34), {
@@ -932,6 +962,7 @@ export default function SafeCrackScene({
     };
 
     const stopLoop = startLoop(stage, (dt, elapsed) => {
+      starMat.uniforms.uTime.value = elapsed;
       const s = stateRef.current;
       const phaseNow = s.phase;
       const digits = normalizeCode(s.code) ?? [0, 0, 0];
