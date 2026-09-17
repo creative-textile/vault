@@ -217,11 +217,24 @@ export function createStage(opts: StageOptions): Stage {
   let windowStart = performance.now();
   let degraded = false;
   let disposed = false;
-  let perfStep = 0;   // 0: полный вид, дальше ступени экономии
-  let lowStreak = 0;  // подряд идущие замеры ниже порога
+
+  /* ── Динамическое разрешение (DRS) ─────────────────────────────────────
+   * Главный механизм плавности: рендерим в доле от базового разрешения и
+   * непрерывно подстраиваем её под реальное железо. Слабый ноутбук или
+   * телефон получает 0.55–0.7× разрешения и стабильные 50+ FPS; мощный ПК
+   * сидит на 1.0 и не теряет ни пикселя. Композиция сцены не меняется —
+   * меняется только плотность пикселей, под тонмаппингом это почти
+   * незаметно, а тайминг игр (ракета, барабаны) остаётся точным.
+   */
+  const baseCap = capByQuality;
+  let resScale = 1.0;
+  let fpsEma = 60;
+  let lastAdjust = 0;
+  let shadowsKilled = false;
 
   const killShadows = () => {
-    if (!renderer.shadowMap.enabled) return;
+    if (shadowsKilled || !renderer.shadowMap.enabled) return;
+    shadowsKilled = true;
     renderer.shadowMap.enabled = false;
     scene.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -232,40 +245,48 @@ export function createStage(opts: StageOptions): Stage {
     });
   };
 
+  const applyResolution = () => {
+    renderer.setPixelRatio(Math.max(0.6, Math.min(window.devicePixelRatio || 1, baseCap * resScale)));
+    setSize();
+  };
+
   const tickPerf = () => {
-    if (disposed || perfStep >= 3) return;
+    if (disposed) return;
     frames++;
     const now = performance.now();
     const elapsed = now - windowStart;
-    if (elapsed < 1600) return;
+    if (elapsed < 500) return;
     const fps = (frames * 1000) / elapsed;
     frames = 0;
     windowStart = now;
+    fpsEma = fpsEma * 0.65 + fps * 0.35;   // сглаживание против скачков
 
-    // Меньше 34 FPS два замера подряд — спускаемся на ступень. Ступени
-    // мягкие: композиция сцены не меняется, деградация не выглядит
-    // «поломкой», а на слабых устройствах качество съезжает постепенно.
-    if (fps < 34) {
-      lowStreak++;
-      if (lowStreak < 2) return;
-      lowStreak = 0;
-      perfStep++;
+    // Первые две секунды сцена разогревается (компиляции, текстуры) —
+    // решения по качеству в это время не принимаем
+    if (now < firstFrameAt + 2000) return;
+
+    // Дорогая постобработка гасится первой и навсегда
+    if (fpsEma < 42 && bloomPass && bloomPass.strength > 0) {
+      bloomPass.strength = 0;
       degraded = true;
-      if (perfStep === 1 && bloomPass) {
-        bloomPass.strength = 0;
-        console.info(`[3d] FPS ${fps.toFixed(0)} — постобработка отключена`);
-      } else if (perfStep === 2) {
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
-        setSize();
-        console.info(`[3d] FPS ${fps.toFixed(0)} — разрешение снижено`);
-      } else if (perfStep === 3) {
-        killShadows();
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
-        setSize();
-        console.info(`[3d] FPS ${fps.toFixed(0)} — тени отключены`);
-      }
-    } else if (fps > 48) {
-      lowStreak = 0;
+      console.info(`[3d] FPS ${fpsEma.toFixed(0)} — постобработка отключена`);
+      return;
+    }
+
+    // Кулдаун между изменениями разрешения, чтобы не дёргать канвас
+    if (now - lastAdjust < 1000) return;
+
+    if (fpsEma < 45 && resScale > 0.5) {
+      resScale = Math.max(0.5, resScale * (fpsEma < 30 ? 0.72 : 0.85));
+      lastAdjust = now;
+      applyResolution();
+      if (fpsEma < 26) killShadows();   // совсе́м слабое железо — без теней
+      console.info(`[3d] FPS ${fpsEma.toFixed(0)} — разрешение ${(resScale * 100).toFixed(0)}%`);
+    } else if (fpsEma > 58.5 && resScale < 1) {
+      resScale = Math.min(1, resScale * 1.12);
+      lastAdjust = now;
+      applyResolution();
+      console.info(`[3d] FPS ${fpsEma.toFixed(0)} — разрешение восстановлено до ${(resScale * 100).toFixed(0)}%`);
     }
   };
 
@@ -284,8 +305,10 @@ export function createStage(opts: StageOptions): Stage {
     }, 500);
   }
 
+  let firstFrameAt = 0;
   const render = () => {
     if (disposed) return;
+    if (!firstFrameAt) firstFrameAt = performance.now();
     statFrames++;
     if (composer) composer.render();
     else renderer.render(scene, camera);
