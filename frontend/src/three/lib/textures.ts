@@ -937,9 +937,10 @@ export function arenaFloor(): THREE.CanvasTexture {
 
 /** Туманность для космоса (фон ракеты): облака цвета вместо чёрной пустоты. */
 export function nebula(): THREE.CanvasTexture {
-  // v3: детерминированный ГПСЧ вместо Math.random (космос обязан быть
-  // одинаковым у всех игроков), богаче облака и звёзды
-  return cached('nebula:v3', [1024, 512], (ctx, w, h) => {
+  // v4: детерминированный ГПСЧ, богаче облака и звёзды; полюса тёмные —
+  // верх и низ текстуры на сфере стягиваются в точку, и яркий рисунок там
+  // превращался в «срезанные» разводы вверху кадра
+  return cached('nebula:v4', [1024, 512], (ctx, w, h) => {
     let seed = 987654321 >>> 0;
     const rnd = () => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -988,6 +989,18 @@ export function nebula(): THREE.CanvasTexture {
       ctx.fillStyle = `rgba(210,220,255,${0.06 + b * 0.3})`;
       ctx.fillRect(x, y, 1, 1);
     }
+
+    // Затемнение к полюсам (верх/низ кадра на сфере)
+    const poleTop = ctx.createLinearGradient(0, 0, 0, h * 0.24);
+    poleTop.addColorStop(0, 'rgba(3,4,10,1)');
+    poleTop.addColorStop(1, 'rgba(3,4,10,0)');
+    ctx.fillStyle = poleTop;
+    ctx.fillRect(0, 0, w, h * 0.24);
+    const poleBottom = ctx.createLinearGradient(0, h, 0, h * 0.76);
+    poleBottom.addColorStop(0, 'rgba(3,4,10,1)');
+    poleBottom.addColorStop(1, 'rgba(3,4,10,0)');
+    ctx.fillStyle = poleBottom;
+    ctx.fillRect(0, h * 0.76, w, h * 0.24);
 
     // Звёзды: мелкие точки + у ярких крестовый блик
     for (let i = 0; i < 1200; i++) {

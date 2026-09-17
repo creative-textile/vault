@@ -227,6 +227,15 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     roseRim.position.y = FLOOR_Y + 0.03;
     scene.add(roseRim);
 
+    // Ореол за монетой — главный приз обязан гореть (подхватывается блумом)
+    const coinHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: radialGlow('#ffcf5e', 0.05), transparent: true, opacity: 0.34,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    coinHalo.scale.setScalar(4.6);
+    coinHalo.position.set(0, 0.5, -1.4);
+    scene.add(coinHalo);
+
     // Неоновые кольца на полу
     const ringOuter = new THREE.Mesh(
       new THREE.PlaneGeometry(15.4, 15.4),

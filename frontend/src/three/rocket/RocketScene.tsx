@@ -142,7 +142,11 @@ function buildRocket(ghost = false): RocketParts {
 
   /* ── Иллюминатор: стекло в металлическом кольце ──────────────────────── */
   const windowGroup = new THREE.Group();
-  const glassBall = new THREE.Mesh(new THREE.SphereGeometry(0.155, 28, 20), asGhost(glass({ color: 0x9fd8ff })));
+  const glassMat = asGhost(glass({ color: 0x9fd8ff }));
+  glassMat.emissive = new THREE.Color(0x2e5a86);
+  glassMat.emissiveIntensity = 0.55;
+  glassMat.envMapIntensity = 2.2;
+  const glassBall = new THREE.Mesh(new THREE.SphereGeometry(0.155, 28, 20), glassMat);
   windowGroup.add(glassBall);
   const windowRing = new THREE.Mesh(
     new THREE.TorusGeometry(0.175, 0.032, 12, 40),
@@ -573,6 +577,24 @@ export default function RocketScene({
       rocket.group.worldToLocal(av);
       rocketHolder.position.add(new THREE.Vector3(0, -1.60, 0).sub(av));
       rocket.bodyParts.forEach((o) => { o.visible = false; });
+      // «Спасаем» модель эффектами: иллюминатор светится и отражает,
+      // сопло тлеет изнутри
+      const porthole = m.root.getObjectByName('porthole_glass') as THREE.Mesh | null;
+      if (porthole) {
+        const gm = (porthole.material as THREE.MeshPhysicalMaterial).clone();
+        gm.roughness = 0.02;
+        gm.envMapIntensity = 2.4;
+        gm.emissive = new THREE.Color(0x2e5a86);
+        gm.emissiveIntensity = 0.6;
+        porthole.material = gm;
+      }
+      const nozzle = m.root.getObjectByName('rocket_nozzle') as THREE.Mesh | null;
+      if (nozzle) {
+        const nm = (nozzle.material as THREE.MeshStandardMaterial).clone();
+        nm.emissive = new THREE.Color(0xff5a1f);
+        nm.emissiveIntensity = 0.45;
+        nozzle.material = nm;
+      }
     });
 
     /* ── Частицы ────────────────────────────────────────────────────────── */

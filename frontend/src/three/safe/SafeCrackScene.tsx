@@ -150,7 +150,7 @@ export default function SafeCrackScene({
       map: floorMarbleTex, color: 0xb4b4c4, metalness: 0.44, roughness: 0.16,
       envMapIntensity: 1.1, clearcoat: 0.8, clearcoatRoughness: 0.14
     });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(34, 34), floorMat);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(54, 54), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = FLOOR_Y;
     floor.receiveShadow = quality === 'high';
@@ -293,14 +293,14 @@ export default function SafeCrackScene({
 
     // Контактная тень (псевдо-AO): мягкое тёмное пятно прижимает сейф к полу
     const contact = new THREE.Mesh(
-      new THREE.PlaneGeometry(7.8, 5.6),
+      new THREE.PlaneGeometry(8.8, 6.2),
       new THREE.MeshBasicMaterial({
         color: 0x000000, transparent: true, alphaMap: radialFade(),
-        opacity: 0.66, depthWrite: false
+        opacity: 0.82, depthWrite: false
       })
     );
     contact.rotation.x = -Math.PI / 2;
-    contact.position.set(0, FLOOR_Y + 0.02, 0.0);
+    contact.position.set(0, FLOOR_Y + 0.02, 0.15);
     scene.add(contact);
 
     /* ── Звёздное небо на заднем плане ───────────────────────────────────
@@ -518,6 +518,17 @@ export default function SafeCrackScene({
     const goldLight = new THREE.PointLight(0xffc44d, 0, 8.5, 2);
     goldLight.position.set(0, DOOR_Y - 0.1, -0.5);
     safe.add(goldLight);
+
+    // Псевдо-AO в проёме у петель: тёмное пятно отделяет открытую дверь и
+    // петли от корпуса, когда металл сливается в серое пятно. При закрытой
+    // двери спрятано за ней
+    const hingeAO = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: radialFade(), color: 0x000000, transparent: true, opacity: 0.5,
+      depthWrite: false
+    }));
+    hingeAO.scale.set(1.5, 3.0, 1);
+    hingeAO.position.set(HINGE_X + 0.45, DOOR_Y, -0.3);
+    safe.add(hingeAO);
 
     /* ═══════════════════════════ ДВЕРЬ ══════════════════════════════════ */
     // Дверь живёт в группе с осью на петле: распахивание — поворот группы
@@ -822,35 +833,6 @@ export default function SafeCrackScene({
       bolts.push(b);
     }
 
-    /* ── Маячок тревоги наверху ─────────────────────────────────────────── */
-    const beacon = new THREE.Group();
-    beacon.position.set(0, 2.16, -1.0);
-    safe.add(beacon);
-    const beaconBase = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.14, 28), darkSteel({}));
-    beacon.add(beaconBase);
-    const domeMat0 = glass({ color: 0xff2d2d, attenuation: 0.35 });
-    domeMat0.emissive = new THREE.Color(0xff1a1a);
-    domeMat0.emissiveIntensity = 0.35;
-    domeMat0.roughness = 0.12;
-    const beaconDome = new THREE.Mesh(
-      new THREE.SphereGeometry(0.17, 28, 20, 0, Math.PI * 2, 0, Math.PI / 2),
-      domeMat0
-    );
-    beaconDome.position.y = 0.07;
-    beacon.add(beaconDome);
-    const beaconLight = new THREE.PointLight(0xff2a2a, 0, 9, 2);
-    beaconLight.position.y = 0.16;
-    beacon.add(beaconLight);
-    // Вращающийся «лепесток» света внутри плафона
-    const beaconSweeper = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.4, 3.4),
-      new THREE.MeshBasicMaterial({
-        map: radialGlow('#ff3b30', 0.02), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0
-      })
-    );
-    beaconSweeper.position.set(0, 2.16, -0.72);
-    safe.add(beaconSweeper);
 
     /* ═══════════════════════════ СВЕТ ═══════════════════════════════════ */
     /* ═══════════ 3D-МОДЕЛЬ СЕЙФА (ТЗ «3D-модели») ═══════════
@@ -1212,14 +1194,9 @@ export default function SafeCrackScene({
         b.rotation.y = Math.sin(elapsed * 0.6 + i) * 0.05 * glow;
       });
 
-      /* ── Маячок тревоги ───────────────────────────────────────────────── */
-      const pulse = alarmOn ? (Math.sin(elapsed * 7.5) * 0.5 + 0.5) : (openSeq >= 0 ? 0 : 0.16 + Math.sin(elapsed * 1.1) * 0.06);
-      beaconLight.intensity = pulse * (alarmOn ? 7 : 0);
-      const domeMat = beaconDome.material as THREE.MeshPhysicalMaterial;
-      domeMat.emissiveIntensity = 0.5 + pulse * (alarmOn ? 3.2 : 0.9);
-      beaconSweeper.rotation.z = elapsed * (alarmOn ? 2.4 : 0.5);
-      (beaconSweeper.material as THREE.MeshBasicMaterial).opacity = pulse * (alarmOn ? 0.42 : 0);
-      // Красная подсветка двери во время взлома
+      /* ── Тревога при взломе ───────────────────────────────────────────── */
+      // Красная подсветка двери (маячок на крыше удалён — читался как
+      // розовый пиксель над сейфом)
       doorGrazing.intensity = 3.4 + (alarmOn ? Math.sin(elapsed * 7.5) * 1.4 : 0);
       doorGrazing.color.setHex(alarmOn ? 0xff5a4a : 0xffd76a);
 
