@@ -77,8 +77,9 @@ function softChrome(): THREE.MeshPhysicalMaterial {
  * детали получаем с приглушёнными отражениями.
  */
 function softGold(): THREE.MeshPhysicalMaterial {
-  const m = gold({ roughness: 0.4 });
-  m.envMapIntensity = 0.7;
+  const m = gold({ roughness: 0.26 });
+  m.color.set(0xe8bd4a);   // яркое ювелирное золото, не «горчица»
+  m.envMapIntensity = 1.3;
   return m;
 }
 
@@ -182,10 +183,10 @@ export default function SafeCrackScene({
     // читалась как «срезанная долька» оранжевого круга при облете камеры.
     // Большое мягкое свечение делает переход незаметным с любого угла
     const floorPool = new THREE.Mesh(
-      new THREE.PlaneGeometry(19, 17),
+      new THREE.PlaneGeometry(15, 13),
       new THREE.MeshBasicMaterial({
         map: radialGlow('#ffcf6a', 0.03), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.34
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.3
       })
     );
     floorPool.rotation.x = -Math.PI / 2;
@@ -211,17 +212,6 @@ export default function SafeCrackScene({
       scene.add(edge);
     }
 
-    // Стену подсвечиваем широким тёплым пятном — иначе по краю конуса
-    // прожектора на ней оставался жёсткий световой обрез
-    const wallWash = new THREE.Mesh(
-      new THREE.PlaneGeometry(24, 12),
-      new THREE.MeshBasicMaterial({
-        map: radialGlow('#ff9d4a', 0.04), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.16
-      })
-    );
-    wallWash.position.set(0, 3.0, -4.35);
-    scene.add(wallWash);
 
     /* ── Стена хранилища: панели, золотой профиль (бра убраны в T2) ────── */
     const wallMarbleTex = blackMarble().clone();
@@ -298,26 +288,28 @@ export default function SafeCrackScene({
 
     // Контактная тень (псевдо-AO): мягкое тёмное пятно прижимает сейф к полу
     const contact = new THREE.Mesh(
-      new THREE.PlaneGeometry(6.4, 4.6),
+      new THREE.PlaneGeometry(7.8, 5.6),
       new THREE.MeshBasicMaterial({
         color: 0x000000, transparent: true, alphaMap: radialFade(),
-        opacity: 0.62, depthWrite: false
+        opacity: 0.66, depthWrite: false
       })
     );
     contact.rotation.x = -Math.PI / 2;
-    contact.position.set(0, FLOOR_Y + 0.02, -1.0);
+    contact.position.set(0, FLOOR_Y + 0.02, 0.0);
     scene.add(contact);
 
     /* ── Новая световая концепция (T2): сейф — экспонат под музейным лучом ─
      * Мягкий тёплый ореол за сейфом даёт глубину без кричащих светильников,
      * а верхний прожектор с псевдообъёмным конусом ставит световой акцент.
      */
+    // Неяркое компактное гало на стене за сейфом: раньше раздувалось
+    // в розово-белое пятно над крышей
     const backHalo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowSprite('#ff9d3e', 0.45), transparent: true, opacity: 0.4,
+      map: glowSprite('#ff9d3e', 0.45), transparent: true, opacity: 0.28,
       blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
     }));
-    backHalo.scale.set(10, 7.4, 1);
-    backHalo.position.set(0, 1.7, -4.0);
+    backHalo.scale.set(6.5, 4.6, 1);
+    backHalo.position.set(0, 1.9, -4.25);
     scene.add(backHalo);
 
     // Верхний свет широкий и мягкий: узкий видимый конус читался
@@ -480,7 +472,7 @@ export default function SafeCrackScene({
     // PBR-деталь (раунд U): та же карта работает картой рельефа — блик
     // на двери не идеально гладкий, а с микроцарапинами
     doorMat.bumpMap = doorBrush;
-    doorMat.bumpScale = 0.004;
+    doorMat.bumpScale = 0.006;
     const door = new THREE.Mesh(doorGeo, doorMat);
     door.position.x = -HINGE_X;                          // центр двери в мире = 0
     door.castShadow = quality === 'high';
@@ -504,15 +496,25 @@ export default function SafeCrackScene({
     }
 
     /* ── Гравированная табличка ─────────────────────────────────────────── */
-    const plate = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.62, 0.61),
+    // Объёмная табличка в золотой рамке: толстая плита с гравировкой,
+    // наклонена вниз — верхний спот больше не пересвечивает текст
+    const plate = new THREE.Group();
+    const plateBack = new THREE.Mesh(
+      new RoundedBoxGeometry(1.74, 0.72, 0.05, 2, 0.02), softGold()
+    );
+    plateBack.position.z = -0.02;
+    plate.add(plateBack);
+    const plateFace = new THREE.Mesh(
+      new RoundedBoxGeometry(1.62, 0.61, 0.09, 2, 0.015),
       new THREE.MeshStandardMaterial({
         map: engravedPlate('VAULT', 'DEPOSITARY № 7'),
-        metalness: 1, roughness: 0.34, envMapIntensity: 1.5,
+        metalness: 1, roughness: 0.4, envMapIntensity: 0.9,
         bumpMap: engravedPlate('VAULT', 'DEPOSITARY № 7'), bumpScale: 0.012
       })
     );
+    plate.add(plateFace);
     plate.position.set(-HINGE_X, 1.02, halfT + 0.012);
+    plate.rotation.x = 0.07;
     doorPivot.add(plate);
 
     /* ═══════════════════════════ БАРАБАНЫ ═══════════════════════════════ */
@@ -670,29 +672,6 @@ export default function SafeCrackScene({
       drums.push({ group: g, angle: 0, target: null, settled: false, bezel, frameMat, windowGlow });
     }
 
-    // Пейлайн: линия «выигрышной» цифры через все три окна — как в
-    // слот-машине. Сразу понятно, что именно крутится и куда смотреть.
-    const payline = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.5, 0.014),
-      new THREE.MeshBasicMaterial({
-        color: 0xffd76a, transparent: true, opacity: 0.62,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
-      })
-    );
-    payline.position.set(-HINGE_X, DRUM_Y, halfT + 0.04 + DRUM_R + 0.06);
-    doorPivot.add(payline);
-    const paylineL = new THREE.Mesh(
-      new THREE.ConeGeometry(0.035, 0.09, 3),
-      new THREE.MeshBasicMaterial({ color: 0xffd76a, toneMapped: false })
-    );
-    paylineL.rotation.z = -Math.PI / 2;
-    paylineL.position.set(-HINGE_X - 1.3, DRUM_Y, halfT + 0.04 + DRUM_R + 0.06);
-    doorPivot.add(paylineL);
-    const paylineR = paylineL.clone();
-    paylineR.rotation.z = Math.PI / 2;
-    paylineR.position.x = -HINGE_X + 1.3;
-    doorPivot.add(paylineR);
-
     /* ── Штурвал со шкалой: главный признак двери хранилища ─────────────── */
     const wheel = new THREE.Group();
     wheel.position.set(-HINGE_X, -0.86, halfT + 0.1);
@@ -767,7 +746,7 @@ export default function SafeCrackScene({
     beacon.add(beaconBase);
     const domeMat0 = glass({ color: 0xff2d2d, attenuation: 0.35 });
     domeMat0.emissive = new THREE.Color(0xff1a1a);
-    domeMat0.emissiveIntensity = 1.4;
+    domeMat0.emissiveIntensity = 0.35;
     domeMat0.roughness = 0.12;
     const beaconDome = new THREE.Mesh(
       new THREE.SphereGeometry(0.17, 28, 20, 0, Math.PI * 2, 0, Math.PI / 2),
@@ -840,9 +819,6 @@ export default function SafeCrackScene({
           drumAnchor.attach(d.bezel);
           drumAnchor.attach(d.windowGlow);
         });
-        drumAnchor.attach(payline);
-        drumAnchor.attach(paylineL);
-        drumAnchor.attach(paylineR);
       }
       proceduralHide.forEach((o) => { o.visible = false; });
       // Табличка VAULT: в .glb её нет, а процедурная дверь прячется — без
@@ -893,6 +869,12 @@ export default function SafeCrackScene({
     const doorGrazing = new THREE.PointLight(0xffd76a, 3.4, 8, 2);
     doorGrazing.position.set(1.6, 1.4, 2.4);
     scene.add(doorGrazing);
+    // Честный широкий свет на стену вместо светящейся плоскости-меши:
+    // плоский меш при облете камеры читался как «клинья» с резкими гранями
+    const wallLight = new THREE.SpotLight(0xffb066, 34, 24, Math.PI / 2.7, 1.0, 1.1);
+    wallLight.position.set(0, 6.5, 5.5);
+    wallLight.target.position.set(0, 3.0, -4.4);
+    scene.add(wallLight, wallLight.target);
 
     /* ═══════════════════════════ ЧАСТИЦЫ ════════════════════════════════ */
     const sparks = new ParticleField(quality === 'low' ? 70 : 220, glowSprite('#fff6da', 0.34), {
@@ -1071,11 +1053,11 @@ export default function SafeCrackScene({
 
       /* ── Маячок тревоги ───────────────────────────────────────────────── */
       const pulse = alarmOn ? (Math.sin(elapsed * 7.5) * 0.5 + 0.5) : (openSeq >= 0 ? 0 : 0.16 + Math.sin(elapsed * 1.1) * 0.06);
-      beaconLight.intensity = pulse * (alarmOn ? 7 : 1.6);
+      beaconLight.intensity = pulse * (alarmOn ? 7 : 0);
       const domeMat = beaconDome.material as THREE.MeshPhysicalMaterial;
       domeMat.emissiveIntensity = 0.5 + pulse * (alarmOn ? 3.2 : 0.9);
       beaconSweeper.rotation.z = elapsed * (alarmOn ? 2.4 : 0.5);
-      (beaconSweeper.material as THREE.MeshBasicMaterial).opacity = pulse * (alarmOn ? 0.42 : 0.1);
+      (beaconSweeper.material as THREE.MeshBasicMaterial).opacity = pulse * (alarmOn ? 0.42 : 0);
       // Красная подсветка двери во время взлома
       doorGrazing.intensity = 3.4 + (alarmOn ? Math.sin(elapsed * 7.5) * 1.4 : 0);
       doorGrazing.color.setHex(alarmOn ? 0xff5a4a : 0xffd76a);
