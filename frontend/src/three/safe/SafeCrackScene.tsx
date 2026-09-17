@@ -81,9 +81,9 @@ function softChrome(): THREE.MeshPhysicalMaterial {
  * детали получаем с приглушёнными отражениями.
  */
 function softGold(): THREE.MeshPhysicalMaterial {
-  const m = gold({ roughness: 0.26 });
-  m.color.set(0xe8bd4a);   // яркое ювелирное золото, не «горчица»
-  m.envMapIntensity = 1.3;
+  const m = gold({ roughness: 0.18 });
+  m.color.set(0xd4af37);   // классическое ювелирное золото
+  m.envMapIntensity = 1.5;
   return m;
 }
 
@@ -560,14 +560,14 @@ export default function SafeCrackScene({
 
     const doorGeo = new THREE.LatheGeometry(doorProfile, 96);
     doorGeo.rotateX(Math.PI / 2);                       // ось двери → Z
-    const doorMat = darkSteel({ roughness: 0.48 });
-    doorMat.envMapIntensity = 0.45;
-    const doorBrush = brushedMetal({ base: 86, strength: 20, circular: true });
+    const doorMat = darkSteel({ roughness: 0.32 });
+    doorMat.envMapIntensity = 0.75;
+    const doorBrush = brushedMetal({ base: 86, strength: 24, circular: true });
     doorMat.map = doorBrush;
     // PBR-деталь (раунд U): та же карта работает картой рельефа — блик
     // на двери не идеально гладкий, а с микроцарапинами
     doorMat.bumpMap = doorBrush;
-    doorMat.bumpScale = 0.006;
+    doorMat.bumpScale = 0.009;
     const door = new THREE.Mesh(doorGeo, doorMat);
     door.position.x = -HINGE_X;                          // центр двери в мире = 0
     door.castShadow = quality === 'high';
@@ -600,10 +600,10 @@ export default function SafeCrackScene({
     plateBack.position.z = -0.02;
     plate.add(plateBack);
     const plateFace = new THREE.Mesh(
-      new RoundedBoxGeometry(1.62, 0.61, 0.09, 2, 0.015),
+      new RoundedBoxGeometry(1.62, 0.61, 0.13, 2, 0.015),
       new THREE.MeshStandardMaterial({
         map: engravedPlate('VAULT', 'DEPOSITARY № 7'),
-        metalness: 1, roughness: 0.4, envMapIntensity: 0.9,
+        metalness: 0.75, roughness: 0.42, envMapIntensity: 0.7,
         bumpMap: engravedPlate('VAULT', 'DEPOSITARY № 7'), bumpScale: 0.012
       })
     );
@@ -716,6 +716,15 @@ export default function SafeCrackScene({
        * переднего края + золотая фасочная рамка на передней кромке.
        */
       const bezel = new THREE.Group();
+      // Тёмная подложка в шахте: зазоры между плашками больше не
+      // «чёрные дыры», цифры контрастнее
+      const wellAO = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: radialFade(), color: 0x000000, transparent: true, opacity: 0.5,
+        depthWrite: false
+      }));
+      wellAO.scale.setScalar(0.8);
+      wellAO.position.set(-HINGE_X + DRUM_XS[i], DRUM_Y, halfT + 0.06);
+      bezel.add(wellAO);
       const wellMat = new THREE.MeshStandardMaterial({
         color: 0x14161f, roughness: 0.7, metalness: 0.5, envMapIntensity: 0.3
       });
@@ -887,6 +896,30 @@ export default function SafeCrackScene({
         });
       }
       proceduralHide.forEach((o) => { o.visible = false; });
+      // Точечная настройка материалов модели: дверь не «пластик»,
+      // золото ярче, хром обода без белого пересвета
+      const doorMesh = m.root.getObjectByName('safe_door') as THREE.Mesh | null;
+      if (doorMesh && doorMesh.material) {
+        const dm = (doorMesh.material as THREE.MeshStandardMaterial).clone();
+        dm.roughness = 0.3;
+        dm.metalness = 0.95;
+        dm.envMapIntensity = 0.9;
+        doorMesh.material = dm;
+      }
+      const goldMesh = m.root.getObjectByName('gold_bars') as THREE.Mesh | null;
+      if (goldMesh && goldMesh.material) {
+        const gm = (goldMesh.material as THREE.MeshStandardMaterial).clone();
+        gm.roughness = 0.18;
+        gm.envMapIntensity = 1.4;
+        goldMesh.material = gm;
+      }
+      const collarMesh = m.root.getObjectByName('safe_collar') as THREE.Mesh | null;
+      if (collarMesh && collarMesh.material) {
+        const cm = (collarMesh.material as THREE.MeshStandardMaterial).clone();
+        cm.roughness = Math.min(1, cm.roughness + 0.07);
+        cm.envMapIntensity = 0.75;
+        collarMesh.material = cm;
+      }
       // Табличка VAULT: в .glb её нет, а процедурная дверь прячется — без
       // пересадки табличка исчезала после загрузки модели. Сажаем на дверь
       // модели (локально центр двери в +1.55 от оси петли)

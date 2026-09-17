@@ -540,7 +540,7 @@ export default function RocketScene({
       key.shadow.bias = -0.0012;
     }
     scene.add(key);
-    const rim = new THREE.DirectionalLight(0x4f8dff, 1.5);
+    const rim = new THREE.DirectionalLight(0x4f8dff, 2.3);
     rim.position.set(-6, 3, -5);
     scene.add(rim);
     const fill = new THREE.DirectionalLight(0x22d3ee, 0.7);
@@ -592,8 +592,13 @@ export default function RocketScene({
       if (nozzle) {
         const nm = (nozzle.material as THREE.MeshStandardMaterial).clone();
         nm.emissive = new THREE.Color(0xff5a1f);
-        nm.emissiveIntensity = 0.45;
+        nm.emissiveIntensity = 0.9;
         nozzle.material = nm;
+      }
+      if (quality === 'high') {
+        m.root.traverse((o) => {
+          if (o instanceof THREE.Mesh) o.castShadow = true;
+        });
       }
     });
 
@@ -889,10 +894,11 @@ export default function RocketScene({
 
         // Киношный облёт площадки
         const orbit = elapsed * 0.16;
-        camTarget.set(Math.sin(orbit) * 1.5, 1.7 + Math.sin(elapsed * 0.3) * 0.18, 8.1 + Math.cos(orbit) * 0.5);
+        // Hero-angle: камера ниже и ближе — ракета выглядит массивнее
+        camTarget.set(Math.sin(orbit) * 1.5, 1.15 + Math.sin(elapsed * 0.3) * 0.16, 7.7 + Math.cos(orbit) * 0.5);
         camera.position.lerp(camTarget, 1 - Math.pow(0.001, dt));
-        camera.lookAt(0, rocket.group.position.y + 0.5, 0);
-        camera.fov += (52 - camera.fov) * 0.06;
+        camera.lookAt(0, rocket.group.position.y + 1.0, 0);
+        camera.fov += (50 - camera.fov) * 0.06;
         camera.updateProjectionMatrix();
       } else if (phase === 'flying') {
         flightT += dt;

@@ -29,7 +29,7 @@ import * as THREE from 'three';
 import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
 import { createRng, easeOutCubic } from '../lib/rng';
 import { gold, polishedGold, darkSteel, neon, additive, disposeObject } from '../lib/materials';
-import { coinFace, coinEdge, brushedMetal, blackMarble, arenaMedallion, nebula, neonRing, radialGlow, glowSprite, smokeSprite, lightPillar, engravedPlate } from '../lib/textures';
+import { coinFace, coinEdge, brushedMetal, blackMarble, arenaMedallion, nebula, neonRing, radialGlow, radialFade, glowSprite, smokeSprite, lightPillar, engravedPlate } from '../lib/textures';
 import { loadModel, disposeModel } from '../lib/models';
 import { ParticleField } from '../lib/particles';
 import { FLIP_MS, sampleFlip } from './flipMath';
@@ -227,6 +227,30 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     roseRim.position.y = FLOOR_Y + 0.03;
     scene.add(roseRim);
 
+    // Радиальное затемнение пола под ареной — роза получает глубину
+    const floorAO = new THREE.Mesh(
+      new THREE.CircleGeometry(4.4, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, alphaMap: radialFade(),
+        opacity: 0.3, depthWrite: false
+      })
+    );
+    floorAO.rotation.x = -Math.PI / 2;
+    floorAO.position.y = FLOOR_Y + 0.016;
+    scene.add(floorAO);
+
+    // Контактная тень монеты — якорь, даже когда она левитирует
+    const coinShadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 2.6),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, alphaMap: radialFade(),
+        opacity: 0.4, depthWrite: false
+      })
+    );
+    coinShadow.rotation.x = -Math.PI / 2;
+    coinShadow.position.y = FLOOR_Y + 0.02;
+    scene.add(coinShadow);
+
     // Ореол за монетой — главный приз обязан гореть (подхватывается блумом)
     const coinHalo = new THREE.Sprite(new THREE.SpriteMaterial({
       map: radialGlow('#ffcf5e', 0.05), transparent: true, opacity: 0.34,
@@ -338,9 +362,10 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
 
     /* ── Постаменты игроков: мрамор + золото, цвета идентичности ───────── */
     const podiums: THREE.Group[] = [];
+    // Тумбы приглушены: монета — единственный герой кадра
     const podiumMarble = new THREE.MeshStandardMaterial({
-      map: blackMarble(), color: 0x6a6f8c, roughness: 0.3, metalness: 0.35,
-      envMapIntensity: 1.0
+      map: blackMarble(), color: 0x4c5066, roughness: 0.45, metalness: 0.35,
+      envMapIntensity: 0.6
     });
     const makePodium = (x: number, colorHex: number, glowCss: string, label: string): THREE.Group => {
       const plateTex = engravedPlate(label);
@@ -443,7 +468,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     const beamH = 9.4;
     const beamGeo = new THREE.ConeGeometry(2.9, beamH, 40, 1, true);
     const beamMat = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.1 } },
+      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.065 } },
       vertexShader: /* glsl */`
         varying float vFall;
         varying vec3 vNormalV;
@@ -599,6 +624,10 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       }
       sky.rotation.y = elapsed * 0.006;
       bounceLight.intensity += (3.2 - bounceLight.intensity) * (1 - Math.pow(0.02, dt));
+      // Контактная тень монеты: ниже монета — плотнее и крупнее тень
+      const coinH = Math.max(0, coin.position.y - REST_Y);
+      (coinShadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0.12, 0.42 - coinH * 0.24);
+      coinShadow.scale.setScalar(Math.max(0.55, 1 - coinH * 0.18));
 
       // Пыль в луче прожектора
       dustTimer += dt;
