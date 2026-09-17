@@ -191,10 +191,16 @@ export function hazardStripes(yellow = '#f5c542', dark = '#14141c', stripe = 34)
     for (let x = -w; x < w * 2; x += stripe * 2) ctx.fillRect(x, 0, stripe, h * 2);
     ctx.restore();
     // Потёртости: полосы не должны быть идеальными
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777001 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     ctx.globalAlpha = 0.35;
     for (let i = 0; i < 260; i++) {
-      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.14)';
-      ctx.fillRect(Math.random() * w, Math.random() * h, Math.random() * 26, Math.random() * 3);
+      ctx.fillStyle = rnd() > 0.5 ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.14)';
+      ctx.fillRect(rnd() * w, rnd() * h, rnd() * 26, rnd() * 3);
     }
     ctx.globalAlpha = 1;
   });
@@ -207,11 +213,17 @@ export function hullPanels(): THREE.CanvasTexture {
   const t = cached('hull:v2', [512, 512], (ctx, w, h) => {
     ctx.fillStyle = '#f2f3f7';
     ctx.fillRect(0, 0, w, h);
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777002 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     // Лёгкая пятнистость краски
     for (let i = 0; i < 420; i++) {
-      ctx.fillStyle = `rgba(${180 + Math.random() * 40},${182 + Math.random() * 40},${190 + Math.random() * 40},0.10)`;
+      ctx.fillStyle = `rgba(${180 + rnd() * 40},${182 + rnd() * 40},${190 + rnd() * 40},0.10)`;
       ctx.beginPath();
-      ctx.arc(Math.random() * w, Math.random() * h, Math.random() * 26 + 4, 0, Math.PI * 2);
+      ctx.arc(rnd() * w, rnd() * h, rnd() * 26 + 4, 0, Math.PI * 2);
       ctx.fill();
     }
     // Линии расшивки
@@ -268,13 +280,19 @@ export function coinFace(side: CoinSide): THREE.CanvasTexture {
     // Круговая шлифовка поля
     ctx.save();
     ctx.beginPath(); ctx.arc(c, c, c * 0.99, 0, Math.PI * 2); ctx.clip();
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777003 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     ctx.globalAlpha = 0.16;
     for (let i = 0; i < 1500; i++) {
-      const r = Math.random() * c;
-      const a0 = Math.random() * Math.PI * 2;
-      ctx.strokeStyle = Math.random() > 0.5 ? '#fff8dd' : '#7a4e04';
-      ctx.lineWidth = Math.random() * 1.5 + 0.2;
-      ctx.beginPath(); ctx.arc(c, c, r, a0, a0 + Math.random() * 0.4 + 0.05); ctx.stroke();
+      const r = rnd() * c;
+      const a0 = rnd() * Math.PI * 2;
+      ctx.strokeStyle = rnd() > 0.5 ? '#fff8dd' : '#7a4e04';
+      ctx.lineWidth = rnd() * 1.5 + 0.2;
+      ctx.beginPath(); ctx.arc(c, c, r, a0, a0 + rnd() * 0.4 + 0.05); ctx.stroke();
     }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -370,10 +388,10 @@ export function coinFace(side: CoinSide): THREE.CanvasTexture {
     ctx.beginPath(); ctx.arc(c, c, c, 0, Math.PI * 2); ctx.clip();
     ctx.globalAlpha = 0.13;
     for (let i = 0; i < 90; i++) {
-      ctx.strokeStyle = Math.random() > 0.5 ? '#fffbe8' : '#6b4403';
-      ctx.lineWidth = Math.random() * 2.4 + 0.4;
-      const a = Math.random() * Math.PI * 2;
-      const r0 = c * (0.55 + Math.random() * 0.44);
+      ctx.strokeStyle = rnd() > 0.5 ? '#fffbe8' : '#6b4403';
+      ctx.lineWidth = rnd() * 2.4 + 0.4;
+      const a = rnd() * Math.PI * 2;
+      const r0 = c * (0.55 + rnd() * 0.44);
       ctx.beginPath();
       ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
       ctx.lineTo(c + Math.cos(a + 0.2) * r0 * 1.06, c + Math.sin(a + 0.2) * r0 * 1.06);
@@ -884,17 +902,23 @@ export function arenaFloor(): THREE.CanvasTexture {
   const t = cached('arena:v2', [512, 512], (ctx, w, h) => {
     ctx.fillStyle = '#0b0718';
     ctx.fillRect(0, 0, w, h);
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777004 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     // Прожилки
     ctx.globalAlpha = 0.3;
     for (let i = 0; i < 26; i++) {
       ctx.strokeStyle = i % 3 === 0 ? 'rgba(168,85,247,.5)' : 'rgba(200,205,240,.28)';
-      ctx.lineWidth = Math.random() * 2.4 + 0.4;
+      ctx.lineWidth = rnd() * 2.4 + 0.4;
       ctx.beginPath();
-      let x = Math.random() * w, y = Math.random() * h;
+      let x = rnd() * w, y = rnd() * h;
       ctx.moveTo(x, y);
       for (let s = 0; s < 7; s++) {
-        x += (Math.random() - 0.5) * 190;
-        y += (Math.random() - 0.5) * 190;
+        x += (rnd() - 0.5) * 190;
+        y += (rnd() - 0.5) * 190;
         ctx.lineTo(x, y);
       }
       ctx.stroke();
