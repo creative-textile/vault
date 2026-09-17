@@ -907,37 +907,72 @@ export function arenaFloor(): THREE.CanvasTexture {
 
 /** Туманность для космоса (фон ракеты): облака цвета вместо чёрной пустоты. */
 export function nebula(): THREE.CanvasTexture {
-  return cached('nebula:v2', [1024, 512], (ctx, w, h) => {
-    ctx.fillStyle = '#04050e';
+  // v3: детерминированный ГПСЧ вместо Math.random (космос обязан быть
+  // одинаковым у всех игроков), богаче облака и звёзды
+  return cached('nebula:v3', [1024, 512], (ctx, w, h) => {
+    let seed = 987654321 >>> 0;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+
+    // Глубокий градиент вместо плоского чёрного
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#070a1c');
+    bg.addColorStop(0.5, '#04050e');
+    bg.addColorStop(1, '#0a0716');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
+
     const clouds: Array<[number, number, number, string]> = [
-      [w * 0.22, h * 0.36, h * 0.62, 'rgba(88,44,160,0.42)'],
-      [w * 0.62, h * 0.28, h * 0.5, 'rgba(20,90,150,0.36)'],
-      [w * 0.84, h * 0.66, h * 0.46, 'rgba(150,44,96,0.3)'],
-      [w * 0.42, h * 0.74, h * 0.44, 'rgba(40,120,140,0.24)'],
-      [w * 0.1, h * 0.8, h * 0.34, 'rgba(120,80,200,0.2)']
+      [w * 0.22, h * 0.36, h * 0.66, 'rgba(96,52,178,0.5)'],
+      [w * 0.62, h * 0.26, h * 0.56, 'rgba(28,102,168,0.44)'],
+      [w * 0.84, h * 0.66, h * 0.5, 'rgba(168,52,108,0.36)'],
+      [w * 0.42, h * 0.76, h * 0.48, 'rgba(44,132,150,0.3)'],
+      [w * 0.1, h * 0.8, h * 0.38, 'rgba(132,88,214,0.26)'],
+      [w * 0.52, h * 0.5, h * 0.6, 'rgba(70,60,190,0.3)']
     ];
     clouds.forEach(([x, y, r, color]) => {
-      // Облако из множества мягких пятен
-      for (let i = 0; i < 34; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const d = Math.random() * r * 0.85;
-        const rr = r * (0.2 + Math.random() * 0.5);
-        const g = ctx.createRadialGradient(x + Math.cos(a) * d, y + Math.sin(a) * d, 0, x + Math.cos(a) * d, y + Math.sin(a) * d, rr);
+      // Облако из множества мягких пятен + яркое ядро
+      for (let i = 0; i < 46; i++) {
+        const a = rnd() * Math.PI * 2;
+        const d = rnd() * r * 0.85;
+        const rr = r * (0.2 + rnd() * 0.5);
+        const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
+        const g = ctx.createRadialGradient(px, py, 0, px, py, rr);
         g.addColorStop(0, color);
         g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, rr, 0, Math.PI * 2);
+        ctx.arc(px, py, rr, 0, Math.PI * 2);
         ctx.fill();
       }
     });
-    // Мелкие звёзды прямо в текстуре (крупные — отдельные спрайты в сцене)
-    for (let i = 0; i < 900; i++) {
-      const x = Math.random() * w, y = Math.random() * h;
-      const b = Math.random();
-      ctx.fillStyle = `rgba(255,255,255,${0.18 + b * 0.7})`;
-      ctx.fillRect(x, y, b > 0.94 ? 2 : 1, b > 0.94 ? 2 : 1);
+
+    // Диагональная полоса «млечного пути» из мелкой звёздной пыли
+    for (let i = 0; i < 700; i++) {
+      const t = rnd();
+      const x = t * w;
+      const y = h * (0.32 + t * 0.22) + (rnd() - 0.5) * h * 0.22;
+      const b = rnd();
+      ctx.fillStyle = `rgba(210,220,255,${0.06 + b * 0.3})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+
+    // Звёзды: мелкие точки + у ярких крестовый блик
+    for (let i = 0; i < 1200; i++) {
+      const x = rnd() * w, y = rnd() * h;
+      const b = rnd();
+      ctx.fillStyle = `rgba(255,255,255,${0.16 + b * 0.72})`;
+      ctx.fillRect(x, y, b > 0.93 ? 2 : 1, b > 0.93 ? 2 : 1);
+      if (b > 0.965) {
+        ctx.strokeStyle = 'rgba(220,230,255,0.55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x - 3, y); ctx.lineTo(x + 3, y);
+        ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 3);
+        ctx.stroke();
+      }
     }
   });
 }

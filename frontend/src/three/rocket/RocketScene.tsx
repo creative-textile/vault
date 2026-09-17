@@ -298,7 +298,7 @@ function buildPad(quality: string): THREE.Group {
   // Бетонная юбка — площадка стоит на «земле», а не висит в пустоте
   const skirt = new THREE.Mesh(
     new THREE.CylinderGeometry(2.95, 3.2, 0.24, 72),
-    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x565a66, roughness: 0.9, metalness: 0.05 })
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x424650, roughness: 0.9, metalness: 0.05 })
   );
   skirt.position.y = -0.5;
   skirt.receiveShadow = quality === 'high';
@@ -307,7 +307,7 @@ function buildPad(quality: string): THREE.Group {
   // Бетонный пьедестал
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(2.35, 2.6, 0.3, 72),
-    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x6a6e7a, roughness: 0.85, metalness: 0.08 })
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x565b68, roughness: 0.85, metalness: 0.08 })
   );
   base.position.y = -0.24;
   base.receiveShadow = quality === 'high';
@@ -321,6 +321,17 @@ function buildPad(quality: string): THREE.Group {
   top.position.y = -0.04;
   top.receiveShadow = quality === 'high';
   pad.add(top);
+
+  // Золотые канты ярусов: без них платформа выглядела плоским цилиндром
+  const rimMat = polishedGold();
+  const rim1 = new THREE.Mesh(new THREE.TorusGeometry(2.13, 0.04, 10, 96), rimMat);
+  rim1.rotation.x = Math.PI / 2;
+  rim1.position.y = 0.015;
+  pad.add(rim1);
+  const rim2 = new THREE.Mesh(new THREE.TorusGeometry(2.47, 0.035, 10, 96), rimMat);
+  rim2.rotation.x = Math.PI / 2;
+  rim2.position.y = -0.09;
+  pad.add(rim2);
 
   // Кольцо опасной разметки вокруг ракеты
   const hazard = hazardStripes('#f5c542', '#14141c', 30);
