@@ -137,18 +137,24 @@ export function streakSprite(color = '#ffd28a'): THREE.CanvasTexture {
 export function brushedMetal(opts: { base?: number; strength?: number; circular?: boolean } = {}): THREE.CanvasTexture {
   const { base = 128, strength = 46, circular = false } = opts;
   return cached(`brushed:${base}:${strength}:${circular}`, [512, 512], (ctx, w, h) => {
+    // Детерминированный ГПСЧ: риски металла одинаковы у всех игроков
+    let seed = ((base * 7919 + strength * 104729) ^ (circular ? 0x5f3759df : 0)) >>> 0 || 123456789;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     ctx.fillStyle = `rgb(${base},${base},${base})`;
     ctx.fillRect(0, 0, w, h);
     ctx.globalAlpha = 0.5;
     if (circular) {
       // Круговая шлифовка (как на настоящих монетах и циферблатах)
       for (let i = 0; i < 900; i++) {
-        const r = Math.random() * (w / 2);
-        const a0 = Math.random() * Math.PI * 2;
-        const a1 = a0 + (Math.random() * 0.5 + 0.08);
-        const v = base + (Math.random() - 0.5) * strength * 2;
+        const r = rnd() * (w / 2);
+        const a0 = rnd() * Math.PI * 2;
+        const a1 = a0 + (rnd() * 0.5 + 0.08);
+        const v = base + (rnd() - 0.5) * strength * 2;
         ctx.strokeStyle = `rgb(${v},${v},${v})`;
-        ctx.lineWidth = Math.random() * 1.4 + 0.2;
+        ctx.lineWidth = rnd() * 1.4 + 0.2;
         ctx.beginPath();
         ctx.arc(w / 2, h / 2, r, a0, a1);
         ctx.stroke();
@@ -156,15 +162,15 @@ export function brushedMetal(opts: { base?: number; strength?: number; circular?
     } else {
       // Продольная шлифовка
       for (let i = 0; i < 2600; i++) {
-        const y = Math.random() * h;
-        const x = Math.random() * w;
-        const len = Math.random() * 90 + 12;
-        const v = base + (Math.random() - 0.5) * strength * 2;
+        const y = rnd() * h;
+        const x = rnd() * w;
+        const len = rnd() * 90 + 12;
+        const v = base + (rnd() - 0.5) * strength * 2;
         ctx.strokeStyle = `rgb(${v},${v},${v})`;
-        ctx.lineWidth = Math.random() * 1.2 + 0.2;
+        ctx.lineWidth = rnd() * 1.2 + 0.2;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.lineTo(x + len, y + (Math.random() - 0.5) * 1.5);
+        ctx.lineTo(x + len, y + (rnd() - 0.5) * 1.5);
         ctx.stroke();
       }
     }
