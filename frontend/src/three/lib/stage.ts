@@ -88,6 +88,9 @@ export interface Stage {
   quality: Quality;
   /** Пересобрать composer (после ресайза или смены качества). */
   setSize: () => void;
+  /** Преконтролировать шейдеры ВСЕХ объектов (включая скрытые), чтобы
+   *  первое появление взрыва/двери/пламени не давало фриза компиляции. */
+  precompile: () => void;
   /** Кадр. Возвращает false, если сцену уже уничтожили. */
   render: () => void;
   /** Замер FPS и авто-деградация; вызвать в цикле анимации. */
@@ -182,6 +185,22 @@ export function createStage(opts: StageOptions): Stage {
       composer.setSize(w, h);
     }
     bloomPass?.setSize(w, h);
+  };
+
+  /* ── Предкомпиляция: компилируем шейдеры даже скрытых объектов ─────────
+   * Иначе первая ракета/взрыв/открытая дверь дают фриз на 50–200 мс —
+   * three компилирует программу материала при ПЕРВОМ видимом рендере.
+   */
+  const precompile = () => {
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (!o.visible) {
+        o.visible = true;
+        hidden.push(o);
+      }
+    });
+    renderer.compile(scene, camera);
+    hidden.forEach((o) => { o.visible = false; });
   };
 
   /* ── Ресайз: ResizeObserver ловит и поворот экрана, и открытие клавиатуры ─ */
@@ -293,7 +312,7 @@ export function createStage(opts: StageOptions): Stage {
 
   return {
     renderer, scene, camera, composer, quality,
-    setSize, render, tickPerf, setBloom, dispose,
+    setSize, precompile, render, tickPerf, setBloom, dispose,
     width: () => Math.max(1, container.clientWidth),
     height: () => Math.max(1, container.clientHeight)
   };

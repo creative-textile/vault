@@ -127,10 +127,10 @@ export default function SafeCrackScene({
       fog: { color: 0x0a0812, density: 0.034 },
       fov: 40,
       position: [0.35, 0.62, 6.6],
-      bloom: quality === 'high' ? 0.5 : quality === 'medium' ? 0.36 : 0,
-      bloomRadius: 0.5,
-      bloomThreshold: 0.74,
-      exposure: 1.06,
+      bloom: quality === 'high' ? 0.24 : quality === 'medium' ? 0.16 : 0,
+      bloomRadius: 0.45,
+      bloomThreshold: 0.86,
+      exposure: 1.0,
       statsId: 'safe'
     });
     if (!stage) return;
@@ -358,7 +358,7 @@ export default function SafeCrackScene({
 
     // Верхний свет широкий и мягкий: узкий видимый конус читался
     // как «тёмные полосы» над сейфом — оставляем только свет без луча
-    const topSpot = new THREE.SpotLight(0xffe2ac, 40, 30, Math.PI / 3.9, 1.0, 1.4);
+    const topSpot = new THREE.SpotLight(0xffe2ac, 30, 30, Math.PI / 3.9, 1.0, 1.4);
     topSpot.position.set(0.3, 8.6, 1.1);
     topSpot.target.position.set(0, DOOR_Y, 0);
     scene.add(topSpot);
@@ -643,7 +643,7 @@ export default function SafeCrackScene({
     }
     // Тёплый прожектор, направленный на барабаны: цифры не должны тонуть
     // в тени при любом окружающем свете
-    const drumLight = new THREE.PointLight(0xffe3b0, 6.5, 4.6, 2);
+    const drumLight = new THREE.PointLight(0xffe3b0, 3.4, 4.6, 2);
     drumLight.position.set(-HINGE_X, DRUM_Y + 0.5, halfT + 1.35);
     doorPivot.add(drumLight);
 
@@ -691,7 +691,7 @@ export default function SafeCrackScene({
         const p2 = new THREE.Mesh(plateGeo, new THREE.MeshStandardMaterial({
           map: tex,
           metalness: 0.12, roughness: 0.62, envMapIntensity: 0.3,
-          emissive: 0xfff0c8, emissiveIntensity: 0.6, emissiveMap: tex
+          emissive: 0xfff0c8, emissiveIntensity: 0.42, emissiveMap: tex
         }));
         p2.position.set(...place.position);
         p2.rotation.x = place.rotationX;
@@ -950,9 +950,10 @@ export default function SafeCrackScene({
       modelActive = true;
     });
 
-    scene.add(new THREE.AmbientLight(0x7a6c5c, 1.0));
+    const ambient = new THREE.AmbientLight(0x7a6c5c, 1.0);
+    scene.add(ambient);
 
-    const key = new THREE.SpotLight(0xfff0cc, 58, 30, Math.PI / 3.7, 1.0, 1.4);
+    const key = new THREE.SpotLight(0xfff0cc, 44, 30, Math.PI / 3.7, 1.0, 1.4);
     key.position.set(-3.2, 4.6, 4.6);
     key.target.position.set(0, DOOR_Y, 0);
     if (quality === 'high') {
@@ -1127,10 +1128,12 @@ export default function SafeCrackScene({
         }
         d.group.rotation.x = d.angle;
 
-        // Вспышка окна при фиксации цифры
+        // Вспышка окна при фиксации цифры; остановленный барабан
+        // подсвечен золотом постоянно — сразу видно, какие уже готовы
         flash[i] = Math.max(0, flash[i] - dt * 1.9);
-        (d.windowGlow.material as THREE.MeshBasicMaterial).opacity = flash[i] * 0.85;
-        d.frameMat.emissiveIntensity = 0.16 + flash[i] * 2.4;
+        const held = phaseNow === 'spinning' && d.settled ? 1 : 0;
+        (d.windowGlow.material as THREE.MeshBasicMaterial).opacity = flash[i] * 0.85 + held * 0.22;
+        d.frameMat.emissiveIntensity = 0.16 + flash[i] * 2.4 + held * 0.55;
         d.bezel.scale.setScalar(1 + flash[i] * 0.02);
       }
 
@@ -1228,6 +1231,8 @@ export default function SafeCrackScene({
       });
 
       /* ── Тревога при взломе ───────────────────────────────────────────── */
+      // Во время мини-игры зал темнее и напряжённее
+      ambient.intensity = alarmOn ? 0.6 : 1.0;
       // Красная подсветка двери (маячок на крыше удалён — читался как
       // розовый пиксель над сейфом)
       doorGrazing.intensity = 3.4 + (alarmOn ? Math.sin(elapsed * 7.5) * 1.4 : 0);
@@ -1291,6 +1296,9 @@ export default function SafeCrackScene({
       }
     });
 
+    // Шейдеры всех объектов (включая скрытые) компилируем заранее:
+    // первый взрыв/запуск/открытие двери больше не фризит
+    stage.precompile();
     stage.render();
 
     return () => {

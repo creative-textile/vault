@@ -388,6 +388,9 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       sparkles.update(dt);
     });
 
+    // Шейдеры всех объектов (включая скрытые) компилируем заранее:
+    // первый взрыв/запуск/открытие двери больше не фризит
+    stage.precompile();
     stage.render();
 
     return () => {
