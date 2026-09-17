@@ -416,7 +416,8 @@ export function coinEdge(): THREE.CanvasTexture {
  */
 export function digitPlate(digit: number, opts: { face?: string; accent?: string } = {}): THREE.CanvasTexture {
   const { face = '#0d1024', accent = '#f5c542' } = opts;
-  return cached(`digit:${digit}:${face}:${accent}`, [256, 256], (ctx, w, h) => {
+  // 512px: барабаны — центральный элемент зала, цифры обязаны быть резкими
+  return cached(`digit:${digit}:${face}:${accent}`, [512, 512], (ctx, w, h) => {
     // Детерминированный шум вместо Math.random (ограничение ТЗ): риски
     // металла обязаны быть одинаковыми от кадра к кадру и между клиентами.
     let rs = (digit + 7) * 2654435761 % 4294967296;
@@ -449,7 +450,7 @@ export function digitPlate(digit: number, opts: { face?: string; accent?: string
     ctx.textBaseline = 'middle';
     ctx.font = `800 ${Math.round(h * 0.86)}px 'Orbitron', 'Russo One', ui-monospace, monospace`;
     ctx.fillStyle = 'rgba(0,0,0,0.95)';
-    ctx.fillText(String(digit), w / 2 + 4, h / 2 + 12);
+    ctx.fillText(String(digit), w / 2 + h * 0.016, h / 2 + h * 0.047);
     const tg = ctx.createLinearGradient(0, h * 0.08, 0, h * 0.92);
     tg.addColorStop(0, '#ffffff');
     tg.addColorStop(0.35, '#ffe9a8');
@@ -457,9 +458,9 @@ export function digitPlate(digit: number, opts: { face?: string; accent?: string
     tg.addColorStop(1, '#c08a12');
     ctx.fillStyle = tg;
     ctx.fillText(String(digit), w / 2, h / 2 + 2);
-    ctx.lineWidth = 4;
+    ctx.lineWidth = h * 0.016;
     ctx.strokeStyle = 'rgba(255,248,221,0.85)';
-    ctx.strokeText(String(digit), w / 2, h / 2 + 2);
+    ctx.strokeText(String(digit), w / 2, h / 2 + h * 0.008);
 
     // Ореол вокруг цифры — свечение видно даже в тени
     ctx.globalCompositeOperation = 'lighter';

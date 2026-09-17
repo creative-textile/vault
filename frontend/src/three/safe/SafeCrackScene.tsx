@@ -118,7 +118,7 @@ export default function SafeCrackScene({
       preset: 'safe',
       quality,
       background: 0x0a0812,
-      fog: { color: 0x0a0812, density: 0.048 },
+      fog: { color: 0x0a0812, density: 0.034 },
       fov: 40,
       position: [0.35, 0.62, 6.6],
       bloom: quality === 'high' ? 0.5 : quality === 'medium' ? 0.36 : 0,
@@ -144,7 +144,7 @@ export default function SafeCrackScene({
       map: floorMarbleTex, color: 0xb4b4c4, metalness: 0.44, roughness: 0.16,
       envMapIntensity: 1.1, clearcoat: 0.8, clearcoatRoughness: 0.14
     });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(26, 26), floorMat);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(34, 34), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = FLOOR_Y;
     floor.receiveShadow = quality === 'high';
@@ -205,8 +205,8 @@ export default function SafeCrackScene({
       map: wallMarbleTex, color: 0x50506a, roughness: 0.52, metalness: 0.3,
       envMapIntensity: 0.45
     });
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(26, 12), wallMat);
-    wall.position.set(0, 1.6, -4.4);
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(44, 17), wallMat);
+    wall.position.set(0, 2.4, -4.4);
     wall.receiveShadow = quality === 'high';
     scene.add(wall);
     // Вертикальные золотые пилястры на стене
@@ -283,7 +283,7 @@ export default function SafeCrackScene({
 
     // Верхний свет широкий и мягкий: узкий видимый конус читался
     // как «тёмные полосы» над сейфом — оставляем только свет без луча
-    const topSpot = new THREE.SpotLight(0xffe2ac, 40, 24, Math.PI / 5.8, 0.9, 1.5);
+    const topSpot = new THREE.SpotLight(0xffe2ac, 40, 28, Math.PI / 4.6, 0.92, 1.5);
     topSpot.position.set(0.3, 8.6, 1.1);
     topSpot.target.position.set(0, DOOR_Y, 0);
     scene.add(topSpot);
@@ -486,7 +486,9 @@ export default function SafeCrackScene({
       angle: number;
       target: number | null;
       settled: boolean;
-      bezel: THREE.Mesh;
+      /** Золотая рамка окна чтения (группа из четырёх фасок). */
+      bezel: THREE.Group;
+      frameMat: THREE.MeshStandardMaterial;
       windowGlow: THREE.Mesh;
     }
     // Тёплый прожектор, направленный на барабаны: цифры не должны тонуть
@@ -513,6 +515,21 @@ export default function SafeCrackScene({
 
       const body2 = new THREE.Mesh(drumBodyGeo, drumBodyMat);
       g.add(body2);
+
+      // Торцы: стальные цапфы с золотыми ступицами — барабан выглядит
+      // механизмом, а не просто цилиндром с картинками
+      for (const sx of [-1, 1]) {
+        const axle = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.115, 0.115, 0.05, 24),
+          softChrome()
+        );
+        axle.rotation.z = Math.PI / 2;
+        axle.position.x = sx * (DRUM_W / 2 + 0.02);
+        g.add(axle);
+        const hub = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12), softGold());
+        hub.position.x = sx * (DRUM_W / 2 + 0.05);
+        g.add(hub);
+      }
 
       // Раскладка плашек — общая функция drumMath.drumPlateTransform: её же
       // проворачивает тест, поэтому знак не может разойтись с формулой угла
@@ -542,34 +559,86 @@ export default function SafeCrackScene({
         g.add(ring);
       }
 
-      // Безель окна чтения: рамка вокруг цифры, обращённой к игроку
-      // Свой экземпляр материала на барабан: безели вспыхивают независимо.
-      // neon() из lib — это MeshBasicMaterial без emissive, а для bloom нужен
-      // именно emissiveIntensity > 1 при toneMapped: false.
-      const bezel = new THREE.Mesh(
-        new THREE.TorusGeometry(0.30, 0.026, 10, 44),
-        new THREE.MeshStandardMaterial({
-          color: 0x0a1a24, emissive: 0x22d3ee, emissiveIntensity: 1.2,
-          metalness: 0.45, roughness: 0.3, toneMapped: false
-        })
-      );
-      bezel.scale.set(0.86, 1.18, 1);
-      bezel.position.set(-HINGE_X + DRUM_XS[i], DRUM_Y, halfT + 0.16);
+      /* Окно чтения цифры: настоящая «шахта» слот-барабана.
+       * Прежнее циановое кольцо висело МЕЖДУ дверью и плашками (плашки на
+       * радиусе 0.334 от оси, кольцо было на 0.315 от двери) и читалось как
+       * странный артефакт. Теперь: тёмные стенки-щёки от поверхности двери до
+       * переднего края + золотая фасочная рамка на передней кромке.
+       */
+      const bezel = new THREE.Group();
+      const wellMat = new THREE.MeshStandardMaterial({
+        color: 0x14161f, roughness: 0.7, metalness: 0.5, envMapIntensity: 0.3
+      });
+      // Щёки шахты: боковые и верхняя/нижняя стенки
+      const cheekSide = new THREE.BoxGeometry(0.04, 0.62, 0.46);
+      const cheekTB = new THREE.BoxGeometry(0.54, 0.04, 0.46);
+      for (const sx of [-1, 1]) {
+        const cheek = new THREE.Mesh(cheekSide, wellMat);
+        cheek.position.set(sx * 0.27, 0, -0.2);
+        bezel.add(cheek);
+      }
+      for (const sy of [-1, 1]) {
+        const cheek = new THREE.Mesh(cheekTB, wellMat);
+        cheek.position.set(0, sy * 0.31, -0.2);
+        bezel.add(cheek);
+      }
+      // Золотая рамка на передней кромке (свой материал — вспыхивает независимо)
+      const frameMat = new THREE.MeshStandardMaterial({
+        color: 0x8a6a24, metalness: 0.95, roughness: 0.34,
+        emissive: 0xffd76a, emissiveIntensity: 0.16, envMapIntensity: 0.9
+      });
+      const FW = 0.62;   // проём рамки
+      const FH = 0.70;
+      const FT = 0.05;   // толщина планки
+      for (const [bw, bh, bx, by] of [
+        [FW + FT, FT, 0, FH / 2], [FW + FT, FT, 0, -FH / 2],
+        [FT, FH + FT, -FW / 2, 0], [FT, FH + FT, FW / 2, 0]
+      ] as const) {
+        const barM = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.06), frameMat);
+        barM.position.set(bx, by, 0);
+        bezel.add(barM);
+      }
+      // Позиция: передняя плашка на радиусе 0.334 от оси барабана
+      bezel.position.set(-HINGE_X + DRUM_XS[i], DRUM_Y, halfT + 0.04 + DRUM_R + 0.02);
       doorPivot.add(bezel);
 
-      // Подсветка окна: вспыхивает, когда барабан остановился на цифре
+      // Подсветка окна: вспыхивает золотом, когда барабан встал на цифру
       const windowGlow = new THREE.Mesh(
         new THREE.PlaneGeometry(0.86, 0.86),
         new THREE.MeshBasicMaterial({
-          map: radialGlow('#22d3ee', 0.12), transparent: true,
+          map: radialGlow('#ffd76a', 0.12), transparent: true,
           blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0
         })
       );
-      windowGlow.position.set(-HINGE_X + DRUM_XS[i], DRUM_Y, halfT + 0.1);
+      // Вспышка — перед плашками (радиус 0.334 от оси), иначе её не видно
+      windowGlow.position.set(-HINGE_X + DRUM_XS[i], DRUM_Y, halfT + 0.04 + DRUM_R + 0.05);
       doorPivot.add(windowGlow);
 
-      drums.push({ group: g, angle: 0, target: null, settled: false, bezel, windowGlow });
+      drums.push({ group: g, angle: 0, target: null, settled: false, bezel, frameMat, windowGlow });
     }
+
+    // Пейлайн: линия «выигрышной» цифры через все три окна — как в
+    // слот-машине. Сразу понятно, что именно крутится и куда смотреть.
+    const payline = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.5, 0.014),
+      new THREE.MeshBasicMaterial({
+        color: 0xffd76a, transparent: true, opacity: 0.62,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      })
+    );
+    payline.position.set(-HINGE_X, DRUM_Y, halfT + 0.04 + DRUM_R + 0.06);
+    doorPivot.add(payline);
+    const paylineL = new THREE.Mesh(
+      new THREE.ConeGeometry(0.035, 0.09, 3),
+      new THREE.MeshBasicMaterial({ color: 0xffd76a, toneMapped: false })
+    );
+    paylineL.rotation.z = -Math.PI / 2;
+    paylineL.position.set(-HINGE_X - 1.3, DRUM_Y, halfT + 0.04 + DRUM_R + 0.06);
+    doorPivot.add(paylineL);
+    const paylineR = paylineL.clone();
+    paylineR.rotation.z = Math.PI / 2;
+    paylineR.position.x = -HINGE_X + 1.3;
+    doorPivot.add(paylineR);
 
     /* ── Штурвал со шкалой: главный признак двери хранилища ─────────────── */
     const wheel = new THREE.Group();
@@ -718,6 +787,9 @@ export default function SafeCrackScene({
           drumAnchor.attach(d.bezel);
           drumAnchor.attach(d.windowGlow);
         });
+        drumAnchor.attach(payline);
+        drumAnchor.attach(paylineL);
+        drumAnchor.attach(paylineR);
       }
       proceduralHide.forEach((o) => { o.visible = false; });
       // Табличка VAULT: в .glb её нет, а процедурная дверь прячется — без
@@ -741,7 +813,7 @@ export default function SafeCrackScene({
 
     scene.add(new THREE.AmbientLight(0x5f5a86, 0.75));
 
-    const key = new THREE.SpotLight(0xfff0cc, 58, 22, Math.PI / 4.8, 0.78, 1.5);
+    const key = new THREE.SpotLight(0xfff0cc, 58, 26, Math.PI / 4.1, 0.86, 1.5);
     key.position.set(-3.2, 4.6, 4.6);
     key.target.position.set(0, DOOR_Y, 0);
     if (quality === 'high') {
@@ -760,6 +832,11 @@ export default function SafeCrackScene({
     const fill = new THREE.DirectionalLight(0xc8d4f0, 0.45);
     fill.position.set(-4, -1, 3);
     scene.add(fill);
+    // Правый заполняющий: при облете справа сейф раньше уходил в тень —
+    // свет «срезался» границей конуса прожектора
+    const rightFill = new THREE.DirectionalLight(0xffd9b0, 0.85);
+    rightFill.position.set(5.5, 2.0, 3.5);
+    scene.add(rightFill);
     const doorGrazing = new THREE.PointLight(0xffd76a, 3.4, 8, 2);
     doorGrazing.position.set(1.6, 1.4, 2.4);
     scene.add(doorGrazing);
@@ -894,8 +971,8 @@ export default function SafeCrackScene({
         // Вспышка окна при фиксации цифры
         flash[i] = Math.max(0, flash[i] - dt * 1.9);
         (d.windowGlow.material as THREE.MeshBasicMaterial).opacity = flash[i] * 0.85;
-        (d.bezel.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + flash[i] * 5;
-        d.bezel.scale.set(0.86 + flash[i] * 0.05, 1.18 + flash[i] * 0.05, 1);
+        d.frameMat.emissiveIntensity = 0.16 + flash[i] * 2.4;
+        d.bezel.scale.setScalar(1 + flash[i] * 0.02);
       }
 
       /* ── Последовательность вскрытия ──────────────────────────────────── */
@@ -984,7 +1061,7 @@ export default function SafeCrackScene({
         lookTarget.set(0, DOOR_Y - 0.05, 0);
       } else if (phaseNow === 'spinning') {
         // Крупнее на барабанах: игрок должен видеть цифры
-        camTarget.set(0.1 + Math.sin(elapsed * 0.7) * 0.05, DRUM_Y + 0.3, 4.95);
+        camTarget.set(0.1 + Math.sin(elapsed * 0.7) * 0.05, DRUM_Y + 0.26, 4.5);
         lookTarget.set(0, DRUM_Y, 0.1);
       } else {
         // Заезжаем справа и чуть сбоку, чтобы заглянуть в открытый сейф
@@ -995,7 +1072,7 @@ export default function SafeCrackScene({
       camera.position.lerp(camTarget, 1 - Math.pow(phaseNow === 'spinning' ? 0.02 : 0.006, dt));
       lookNow.lerp(lookTarget, 1 - Math.pow(0.01, dt));
       camera.lookAt(lookNow);
-      const wantFov = phaseNow === 'spinning' ? 33.5 : openSeq >= 0 ? 38.5 : 40;
+      const wantFov = phaseNow === 'spinning' ? 31.5 : openSeq >= 0 ? 38.5 : 40;
       camera.fov += (wantFov - camera.fov) * (1 - Math.pow(0.05, dt));
       camera.updateProjectionMatrix();
 
