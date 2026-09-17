@@ -221,7 +221,7 @@ export default function SafeCrackScene({
       map: wallMarbleTex, color: 0x50506a, roughness: 0.52, metalness: 0.3,
       envMapIntensity: 0.45
     });
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(44, 17), wallMat);
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(44, 9.2), wallMat);
     wall.position.set(0, 2.4, -4.4);
     wall.receiveShadow = quality === 'high';
     scene.add(wall);
@@ -303,23 +303,26 @@ export default function SafeCrackScene({
      * Детерминированные позиции (общий ГПСЧ сцены), свой шейдер с
      * индивидуальной фазой мерцания — как в сцене ракеты.
      */
-    const starCount = quality === 'low' ? 240 : 560;
+    // Звёзды живут далеко за стеной (небо над залом) — они физически не
+    // могут пересечься ни с одним объектом сцены. Мелкие: читаются как
+    // далёкие, а не как наклейки
+    const starCount = quality === 'low' ? 300 : 700;
     const starGeo = new THREE.BufferGeometry();
     const starPos = new Float32Array(starCount * 3);
     const starSize = new Float32Array(starCount);
     const starAlpha = new Float32Array(starCount);
     for (let i = 0; i < starCount; i++) {
-      starPos[i * 3] = rng.range(-21.5, 21.5);
-      starPos[i * 3 + 1] = rng.range(-0.5, 10.6);
-      starPos[i * 3 + 2] = -4.32 + rng.range(0, 0.08);
-      starSize[i] = rng.range(0.5, 1.7) * (rng.rand() > 0.9 ? 2.3 : 1);
+      starPos[i * 3] = rng.range(-58, 58);
+      starPos[i * 3 + 1] = rng.range(2.5, 40);
+      starPos[i * 3 + 2] = rng.range(-34, -24);
+      starSize[i] = rng.range(0.55, 1.3) * (rng.rand() > 0.93 ? 1.7 : 1);
       starAlpha[i] = rng.range(0.4, 1);
     }
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
     starGeo.setAttribute('aSize', new THREE.BufferAttribute(starSize, 1));
     starGeo.setAttribute('aAlpha', new THREE.BufferAttribute(starAlpha, 1));
     const starMat = new THREE.ShaderMaterial({
-      uniforms: { uTex: { value: starFlare('#eaf2ff') }, uScale: { value: 190 }, uTime: { value: 0 } },
+      uniforms: { uTex: { value: starFlare('#eaf2ff') }, uScale: { value: 115 }, uTime: { value: 0 } },
       vertexShader: /* glsl */`
         attribute float aSize;
         attribute float aAlpha;
