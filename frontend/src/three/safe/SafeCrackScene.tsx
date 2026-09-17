@@ -434,21 +434,23 @@ export default function SafeCrackScene({
     interior.add(cavity);
     interiorParts.push(cavity);
 
-    // Золотое сияние в глубине
-    const innerGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.4, 3.4),
-      new THREE.MeshBasicMaterial({
-        map: radialGlow('#ffcf5e', 0.04), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0
-      })
-    );
+    // Золотое сияние в глубине — спрайт всегда повёрнут к камере,
+    // у плоскости под углом торчали квадратные грани («срезанные лучи»)
+    const innerGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: radialGlow('#ffcf5e', 0.04), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
     innerGlow.position.z = -0.7;
+    innerGlow.scale.setScalar(3.4);
     interior.add(innerGlow);
 
-    // Слитки пирамидой — то, ради чего всё это
-    const barGeo = new THREE.BoxGeometry(0.46, 0.17, 0.26);
+    // Слитки пирамидой — то, ради чего всё это. Фаски обязательны:
+    // кубики без фасок выглядели «пластмассой»
+    const barGeo = new RoundedBoxGeometry(0.46, 0.17, 0.26, 2, 0.03);
     const bars: THREE.Mesh[] = [];
     const barMat = polishedGold();
+    barMat.roughness = 0.16;
+    barMat.envMapIntensity = 1.5;
     for (let row = 0; row < 3; row++) {
       const n = 3 - row;
       for (let i = 0; i < n; i++) {
@@ -479,8 +481,10 @@ export default function SafeCrackScene({
     // а нижний ряд тонул в темноте. Слитки и монеты лежат там, куда падает
     // свет из двери
     const treasure = new THREE.Group();
-    const barGeo2 = new THREE.BoxGeometry(0.46, 0.17, 0.26);
+    const barGeo2 = new RoundedBoxGeometry(0.46, 0.17, 0.26, 2, 0.03);
     const barMat2 = polishedGold();
+    barMat2.roughness = 0.16;
+    barMat2.envMapIntensity = 1.5;
     const coinGeo2 = new THREE.CylinderGeometry(0.14, 0.14, 0.035, 28);
     const coinMat2 = gold({ roughness: 0.2 });
     for (let i = 0; i < 4; i++) {
@@ -1203,7 +1207,7 @@ export default function SafeCrackScene({
       // Золото внутри разгорается вместе с дверью
       const glow = doorOpen * doorOpen;
       goldLight.intensity = glow * 30 + openFxFlash * 46;
-      (innerGlow.material as THREE.MeshBasicMaterial).opacity = glow * 0.95;
+      (innerGlow.material as THREE.SpriteMaterial).opacity = glow * 0.95;
       bars.forEach((b, i) => {
         b.rotation.y = Math.sin(elapsed * 0.6 + i) * 0.05 * glow;
       });
@@ -1249,8 +1253,9 @@ export default function SafeCrackScene({
       /* ── Камера ───────────────────────────────────────────────────────── */
       if (phaseNow === 'idle') {
         const a = elapsed * 0.13;
-        camTarget.set(0.35 + Math.sin(a) * 0.55, 0.62 + Math.sin(elapsed * 0.24) * 0.14, 6.55 + Math.cos(a) * 0.3);
-        lookTarget.set(0, DOOR_Y - 0.05, 0);
+        // Витрина под углом 3/4: ракурс «прямо в лоб» делал 3D плоским
+        camTarget.set(1.75 + Math.sin(a) * 0.7, 0.62 + Math.sin(elapsed * 0.24) * 0.14, 6.15 + Math.cos(a) * 0.35);
+        lookTarget.set(0.15, DOOR_Y - 0.05, 0);
       } else if (phaseNow === 'spinning') {
         // Крупнее на барабанах: игрок должен видеть цифры
         camTarget.set(0.1 + Math.sin(elapsed * 0.7) * 0.05, DRUM_Y + 0.26, 4.5);
@@ -1259,8 +1264,8 @@ export default function SafeCrackScene({
         // Заезжаем справа и чуть сбоку, чтобы заглянуть в открытый сейф;
         // при автозакрытии камера сама возвращается на общий план
         const k = doorOpen;
-        camTarget.set(0.35 + k * 1.5, 0.62 - k * 0.18, 6.55 - k * 1.5);
-        lookTarget.set(k * 0.45, DOOR_Y - k * 0.12, -k * 0.5);
+        camTarget.set(1.35 + k * 0.9, 0.62 - k * 0.18, 6.15 - k * 1.4);
+        lookTarget.set(0.15 + k * 0.3, DOOR_Y - k * 0.12, -k * 0.5);
       }
       camera.position.lerp(camTarget, 1 - Math.pow(phaseNow === 'spinning' ? 0.02 : 0.006, dt));
       lookNow.lerp(lookTarget, 1 - Math.pow(0.01, dt));
