@@ -28,11 +28,24 @@ export function detectQuality(): Quality {
   const cores = navigator.hardwareConcurrency ?? 4;
   const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 4;
   const dpr = window.devicePixelRatio || 1;
+  // Сенсорное устройство/мобильный UA — это телефон или планшет: им 'high'
+  // (тени + полный DPR) не по карману даже при свежих 8 ядрах
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  if (coarse || mobileUA) {
+    return cores >= 6 && mem >= 4 ? 'medium' : 'low';
+  }
   // Очень маленькие экраны в паре с высоким DPR — почти всегда бюджетные устройства
   const weak = cores <= 4 || mem <= 3;
   if (cores >= 8 && mem >= 6 && dpr <= 3) return 'high';
   if (weak && dpr >= 3) return 'low';
   return weak ? 'medium' : 'high';
+}
+
+/** Бюджет количества частиц: на средних устройствах режем наполнение,
+ *  на слабых — до трети. Сцены обязаны множить базовое число на бюджет. */
+export function particleBudget(quality: Quality): number {
+  return quality === 'high' ? 1 : quality === 'medium' ? 0.62 : 0.34;
 }
 
 export interface StageOptions {
@@ -93,14 +106,17 @@ export function createStage(opts: StageOptions): Stage {
   const width = Math.max(1, container.clientWidth);
   const height = Math.max(1, container.clientHeight);
 
+  const dprNow = window.devicePixelRatio || 1;
   const renderer = new THREE.WebGLRenderer({
-    antialias: quality !== 'low',
+    // MSAA нужен только при низком DPR: на ретине пикселей и так с запасом,
+    // а антиалиасинг — дорогая операция полного разрешения
+    antialias: quality !== 'low' && dprNow < 1.75,
     alpha: opts.transparent ?? false,
     powerPreference: 'high-performance',
     stencil: false,
     depth: true
   });
-  const capByQuality = quality === 'high' ? 2 : quality === 'medium' ? 1.65 : 1.25;
+  const capByQuality = quality === 'high' ? 1.75 : quality === 'medium' ? 1.5 : 1.15;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, opts.maxPixelRatio ?? capByQuality));
   renderer.setSize(width, height, false);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -134,7 +150,9 @@ export function createStage(opts: StageOptions): Stage {
   if (wantBloom) {
     try {
       composer = new EffectComposer(renderer);
-      composer.setPixelRatio(renderer.getPixelRatio());
+      // Постобработка дешевле основного рендера: блум всё равно размывает,
+      // а пиксели экономятся кратно
+      composer.setPixelRatio(Math.min(renderer.getPixelRatio(), 1.35));
       composer.setSize(width, height);
       composer.addPass(new RenderPass(scene, camera));
       bloomPass = new UnrealBloomPass(
@@ -159,7 +177,10 @@ export function createStage(opts: StageOptions): Stage {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
-    composer?.setSize(w, h);
+    if (composer) {
+      composer.setPixelRatio(Math.min(renderer.getPixelRatio(), 1.35));
+      composer.setSize(w, h);
+    }
     bloomPass?.setSize(w, h);
   };
 
@@ -177,9 +198,23 @@ export function createStage(opts: StageOptions): Stage {
   let windowStart = performance.now();
   let degraded = false;
   let disposed = false;
+  let perfStep = 0;   // 0: полный вид, дальше ступени экономии
+  let lowStreak = 0;  // подряд идущие замеры ниже порога
+
+  const killShadows = () => {
+    if (!renderer.shadowMap.enabled) return;
+    renderer.shadowMap.enabled = false;
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.material) {
+        const list = Array.isArray(m.material) ? m.material : [m.material];
+        list.forEach((x) => { x.needsUpdate = true; });
+      }
+    });
+  };
 
   const tickPerf = () => {
-    if (disposed || degraded) return;
+    if (disposed || perfStep >= 3) return;
     frames++;
     const now = performance.now();
     const elapsed = now - windowStart;
@@ -188,24 +223,30 @@ export function createStage(opts: StageOptions): Stage {
     frames = 0;
     windowStart = now;
 
-    // Меньше 34 FPS два замера подряд — гасим bloom и режем pixelRatio.
-    // Композиция сцены не меняется, поэтому деградация не выглядит «поломкой».
+    // Меньше 34 FPS два замера подряд — спускаемся на ступень. Ступени
+    // мягкие: композиция сцены не меняется, деградация не выглядит
+    // «поломкой», а на слабых устройствах качество съезжает постепенно.
     if (fps < 34) {
+      lowStreak++;
+      if (lowStreak < 2) return;
+      lowStreak = 0;
+      perfStep++;
       degraded = true;
-      if (bloomPass) bloomPass.strength = 0;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.1));
-      setSize();
-      if (renderer.shadowMap.enabled) {
-        renderer.shadowMap.enabled = false;
-        scene.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (m.material) {
-            const list = Array.isArray(m.material) ? m.material : [m.material];
-            list.forEach((x) => { x.needsUpdate = true; });
-          }
-        });
+      if (perfStep === 1 && bloomPass) {
+        bloomPass.strength = 0;
+        console.info(`[3d] FPS ${fps.toFixed(0)} — постобработка отключена`);
+      } else if (perfStep === 2) {
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
+        setSize();
+        console.info(`[3d] FPS ${fps.toFixed(0)} — разрешение снижено`);
+      } else if (perfStep === 3) {
+        killShadows();
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.0));
+        setSize();
+        console.info(`[3d] FPS ${fps.toFixed(0)} — тени отключены`);
       }
-      console.info(`[3d] FPS ${fps.toFixed(0)} — постобработка отключена для плавности`);
+    } else if (fps > 48) {
+      lowStreak = 0;
     }
   };
 

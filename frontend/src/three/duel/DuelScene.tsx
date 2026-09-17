@@ -26,7 +26,7 @@
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
+import { createStageSafe, startLoop, detectQuality, particleBudget } from '../lib/stage';
 import { createRng, easeOutCubic } from '../lib/rng';
 import { gold, polishedGold, darkSteel, neon, additive, disposeObject } from '../lib/materials';
 import { coinFace, coinEdge, brushedMetal, blackMarble, arenaMedallion, nebula, neonRing, radialGlow, radialFade, glowSprite, smokeSprite, lightPillar, engravedPlate } from '../lib/textures';
@@ -512,18 +512,18 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     scene.add(bounceLight);
 
     /* ── Частицы: пыль в луче и дым от приземления ─────────────────────── */
-    const dust = new ParticleField(quality === 'low' ? 60 : 170, glowSprite('#fff3d0', 0.1), {
+    const dust = new ParticleField(Math.round(particleBudget(quality) * 170), glowSprite('#fff3d0', 0.1), {
       color: 0xffe6b0, size: 0.14, gravity: 0.02, drag: 0.995, opacity: 0.5, scale: 120
     });
     scene.add(dust.points);
 
-    const impact = new ParticleField(quality === 'low' ? 60 : 180, smokeSprite(), {
+    const impact = new ParticleField(Math.round(particleBudget(quality) * 180), smokeSprite(), {
       color: 0xd8cdf0, size: 0.9, gravity: 0.5, drag: 0.94,
       blending: THREE.NormalBlending, opacity: 0.45, scale: 260
     });
     scene.add(impact.points);
 
-    const sparks = new ParticleField(quality === 'low' ? 50 : 150, glowSprite('#fff8dd', 0.3), {
+    const sparks = new ParticleField(Math.round(particleBudget(quality) * 150), glowSprite('#fff8dd', 0.3), {
       color: 0xffdf8a, size: 0.3, gravity: -2.6, drag: 0.96, opacity: 1, scale: 240
     });
     scene.add(sparks.points);
@@ -579,14 +579,14 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       shock.visible = true;
       shock.position.set(0, FLOOR_Y + 0.03, 0);
       // Пыль и искры из-под монеты
-      for (let i = 0; i < (quality === 'low' ? 16 : 42); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 42); i++) {
         const a = rng.rand() * Math.PI * 2;
         const sp = rng.range(0.9, 3.4);
         tmp.set(Math.cos(a) * 0.2, y, Math.sin(a) * 0.2);
         tmp2.set(Math.cos(a) * sp, rng.range(0.4, 1.9), Math.sin(a) * sp);
         impact.emit(tmp, tmp2, rng.range(0.6, 1.4), rng.range(0.5, 1.2));
       }
-      for (let i = 0; i < (quality === 'low' ? 8 : 22); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 22); i++) {
         const a = rng.rand() * Math.PI * 2;
         tmp.set(Math.cos(a) * 0.25, y + 0.05, Math.sin(a) * 0.25);
         tmp2.set(Math.cos(a) * rng.range(1.4, 4.2), rng.range(1.2, 3.4), Math.sin(a) * rng.range(1.4, 4.2));

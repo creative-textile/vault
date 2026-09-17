@@ -15,7 +15,7 @@
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
+import { createStageSafe, startLoop, detectQuality, particleBudget } from '../lib/stage';
 import { createRng } from '../lib/rng';
 import { gold, polishedGold, disposeObject } from '../lib/materials';
 import { blackMarble, radialGlow, radialFade, glowSprite, neonRing, ingotStamp } from '../lib/textures';
@@ -334,11 +334,11 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
     scene.add(fillAmber);
 
     /* ═══════════════ ЧАСТИЦЫ: пыль в луче и искры на золоте ══════════════ */
-    const motes = new ParticleField(quality === 'low' ? 50 : 150, glowSprite('#ffe9a8', 0.18), {
+    const motes = new ParticleField(Math.round(particleBudget(quality) * 150), glowSprite('#ffe9a8', 0.18), {
       color: 0xffd76a, size: 0.18, gravity: 0.14, drag: 0.99, opacity: 0.85, scale: 180
     });
     scene.add(motes.points);
-    const sparkles = new ParticleField(quality === 'low' ? 26 : 80, glowSprite('#ffffff', 0.5), {
+    const sparkles = new ParticleField(Math.round(particleBudget(quality) * 80), glowSprite('#ffffff', 0.5), {
       color: 0xfff6dd, size: 0.12, gravity: -0.04, drag: 0.995, opacity: 0.9, scale: 150
     });
     scene.add(sparkles.points);

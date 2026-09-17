@@ -26,7 +26,7 @@
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
+import { createStageSafe, startLoop, detectQuality, particleBudget } from '../lib/stage';
 import { createRng, easeOutCubic, easeInOut } from '../lib/rng';
 import {
   gold, polishedGold, chrome, darkSteel, paintedRed, glass, neon, disposeObject
@@ -685,7 +685,7 @@ export default function SafeCrackScene({
       // проворачивает тест, поэтому знак не может разойтись с формулой угла
       for (let d = 0; d < 10; d++) {
         const place = drumPlateTransform(d, DRUM_R + 0.004);
-        const tex = digitPlate(d, { face: '#0b0e20', accent: '#f5c542' });
+        const tex = digitPlate(d, { face: '#0b0e20', accent: '#f5c542', size: quality === 'high' ? 1024 : 512 });
         // Цифры обязаны читаться всегда: почти диэлектрик + собственное
         // тёплое свечение 0.6 (в раунде Q было 0.22 — не хватило)
         const p2 = new THREE.Mesh(plateGeo, new THREE.MeshStandardMaterial({
@@ -981,22 +981,22 @@ export default function SafeCrackScene({
     scene.add(doorGrazing);
 
     /* ═══════════════════════════ ЧАСТИЦЫ ════════════════════════════════ */
-    const sparks = new ParticleField(quality === 'low' ? 70 : 220, glowSprite('#fff6da', 0.34), {
+    const sparks = new ParticleField(Math.round(particleBudget(quality) * 220), glowSprite('#fff6da', 0.34), {
       color: 0xffe08a, size: 0.26, gravity: -3.4, drag: 0.955, scale: 230
     });
     scene.add(sparks.points);
 
-    const dust = new ParticleField(quality === 'low' ? 50 : 140, glowSprite('#ffeccd', 0.08), {
+    const dust = new ParticleField(Math.round(particleBudget(quality) * 140), glowSprite('#ffeccd', 0.08), {
       color: 0xd9d2f2, size: 0.11, gravity: -0.03, drag: 0.996, opacity: 0.34, scale: 120
     });
     scene.add(dust.points);
 
-    const goldMotes = new ParticleField(quality === 'low' ? 60 : 180, glowSprite('#ffe9a8', 0.2), {
+    const goldMotes = new ParticleField(Math.round(particleBudget(quality) * 180), glowSprite('#ffe9a8', 0.2), {
       color: 0xffd76a, size: 0.2, gravity: 0.35, drag: 0.985, opacity: 0.9, scale: 200
     });
     scene.add(goldMotes.points);
 
-    const smoke = new ParticleField(quality === 'low' ? 40 : 110, smokeSprite(), {
+    const smoke = new ParticleField(Math.round(particleBudget(quality) * 110), smokeSprite(), {
       color: 0xcfc6ee, size: 0.8, gravity: 0.22, drag: 0.96,
       blending: THREE.NormalBlending, opacity: 0.26, scale: 250
     });

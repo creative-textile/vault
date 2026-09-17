@@ -29,7 +29,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
+import { createStageSafe, startLoop, detectQuality, particleBudget } from '../lib/stage';
 import { createRng, fbm1, easeOutCubic } from '../lib/rng';
 import { gold, chrome, darkSteel, paintedHull, paintedRed, glass, neon, additive, composite, polishedGold, disposeObject } from '../lib/materials';
 import { glowSprite, starFlare, smokeSprite, nebula, hazardStripes, neonRing, radialGlow, streakSprite, concrete, fireball } from '../lib/textures';
@@ -603,23 +603,23 @@ export default function RocketScene({
     });
 
     /* ── Частицы ────────────────────────────────────────────────────────── */
-    const smoke = new ParticleField(quality === 'low' ? 90 : 220, smokeSprite(), {
+    const smoke = new ParticleField(Math.round(particleBudget(quality) * 220), smokeSprite(), {
       color: 0xbfc6e8, size: 1.5, gravity: -0.35, drag: 0.965,
       blending: THREE.NormalBlending, opacity: 0.5
     });
     scene.add(smoke.points);
 
-    const embers = new ParticleField(quality === 'low' ? 90 : 260, glowSprite('#ffd28a', 0.2), {
+    const embers = new ParticleField(Math.round(particleBudget(quality) * 260), glowSprite('#ffd28a', 0.2), {
       color: 0xffb347, size: 0.55, gravity: -1.1, drag: 0.975, opacity: 1
     });
     scene.add(embers.points);
 
-    const sparks = new ParticleField(quality === 'low' ? 110 : 320, glowSprite('#fff4d0', 0.35), {
+    const sparks = new ParticleField(Math.round(particleBudget(quality) * 320), glowSprite('#fff4d0', 0.35), {
       color: 0xffe9b0, size: 0.4, gravity: -3.2, drag: 0.965, opacity: 1
     });
     scene.add(sparks.points);
 
-    const speedLines = new ParticleField(quality === 'low' ? 60 : 160, streakSprite('#bfe6ff'), {
+    const speedLines = new ParticleField(Math.round(particleBudget(quality) * 160), streakSprite('#bfe6ff'), {
       color: 0xcfe9ff, size: 0.34, gravity: 0, drag: 1, opacity: 0.75
     });
     scene.add(speedLines.points);
@@ -776,12 +776,12 @@ export default function RocketScene({
         d.vr.set(rng.spread(5.5), rng.spread(5.5), rng.spread(5.5));
       }
       // Искры и дым взрыва
-      for (let i = 0; i < (quality === 'low' ? 60 : 150); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 150); i++) {
         const [vx, vy, vz] = rng.onSphere(1);
         const sp = rng.range(2.5, 9);
         sparks.emit(at, tmp.set(vx * sp, vy * sp * 0.9 + 1.4, vz * sp), rng.range(0.5, 1.5), rng.range(0.3, 0.8));
       }
-      for (let i = 0; i < (quality === 'low' ? 14 : 34); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 34); i++) {
         const [vx, vy, vz] = rng.onSphere(1);
         smoke.emit(at, tmp.set(vx * rng.range(0.5, 1.9), Math.abs(vy) * rng.range(0.4, 1.4), vz * rng.range(0.5, 1.9)), rng.range(1.4, 3), rng.range(1.4, 3.2));
       }
@@ -817,7 +817,7 @@ export default function RocketScene({
         a.mesh.scale.setScalar(0.4);
       }
       // Фонтан раскалённых углей вверх — взрыв не только вширь, но и вверх
-      for (let i = 0; i < (quality === 'low' ? 28 : 92); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 92); i++) {
         const a = rng.rand() * Math.PI * 2;
         const rr = rng.range(0, 0.5);
         tmp.set(at.x + Math.cos(a) * rr, at.y, at.z + Math.sin(a) * rr);
@@ -825,7 +825,7 @@ export default function RocketScene({
         embers.emit(tmp, tmp2, rng.range(0.7, 1.6), rng.range(0.2, 0.5));
       }
       // Первый кадр: плотный выброс дыма из точки взрыва
-      for (let i = 0; i < (quality === 'low' ? 20 : 60); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 60); i++) {
         const [vx, vy, vz] = rng.onSphere(1);
         smoke.emit(at, tmp.set(vx * rng.range(0.4, 1.4), Math.abs(vy) * rng.range(0.5, 1.6), vz * rng.range(0.4, 1.4)), rng.range(1.8, 3.4), rng.range(0.9, 1.9));
       }
@@ -1175,7 +1175,7 @@ export default function RocketScene({
           if (!a.burst && at2 >= 0) {
             a.burst = true;
             tmp.copy(a.mesh.position);
-            for (let k = 0; k < (quality === 'low' ? 10 : 26); k++) {
+            for (let k = 0; k < Math.round(particleBudget(quality) * 26); k++) {
               const [vx, vy, vz] = rng.onSphere(1);
               const sp = rng.range(1.4, 5);
               sparks.emit(tmp, tmp2.set(vx * sp, vy * sp, vz * sp), rng.range(0.3, 0.8), rng.range(0.16, 0.34));

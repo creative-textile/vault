@@ -438,11 +438,11 @@ export function coinEdge(): THREE.CanvasTexture {
  * каждого барабана 10 таких плашек по окружности, и цифра читается на самой
  * модели (см. SafeCrackScene — поворот выводится из той же формулы digitAt).
  */
-export function digitPlate(digit: number, opts: { face?: string; accent?: string } = {}): THREE.CanvasTexture {
-  const { face = '#0d1024', accent = '#f5c542' } = opts;
-  // 1024px: при игровом наезде камеры плашки занимают пол-экрана —
-  // цифры обязаны быть идеально резкими
-  return cached(`digit:${digit}:${face}:${accent}:2`, [1024, 1024], (ctx, w, h) => {
+export function digitPlate(digit: number, opts: { face?: string; accent?: string; size?: number } = {}): THREE.CanvasTexture {
+  const { face = '#0d1024', accent = '#f5c542', size = 1024 } = opts;
+  // 1024px на мощных устройствах (плашки занимают пол-экрана при наезде),
+  // 512px на средних/слабых — втрое меньше памяти текстур
+  return cached(`digit:${digit}:${face}:${accent}:${size}`, [size, size], (ctx, w, h) => {
     // Детерминированный шум вместо Math.random (ограничение ТЗ): риски
     // металла обязаны быть одинаковыми от кадра к кадру и между клиентами.
     let rs = (digit + 7) * 2654435761 % 4294967296;
