@@ -33,7 +33,7 @@ import {
 } from '../lib/materials';
 import {
   digitPlate, dialGraduation, engravedPlate, brushedMetal,
-  radialGlow, radialFade, glowSprite, smokeSprite, blackMarble, arenaMedallion, starFlare
+  radialGlow, radialFade, glowSprite, smokeSprite, blackMarble, arenaMedallion, starFlare, neonRing
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -423,7 +423,7 @@ export default function SafeCrackScene({
     const cavity = new THREE.Mesh(
       new THREE.BoxGeometry(DOOR_R * 2 - 0.06, DOOR_R * 2 - 0.06, 1.5),
       new THREE.MeshStandardMaterial({
-        color: 0x1a1206, roughness: 0.9, metalness: 0.1, side: THREE.BackSide
+        color: 0x10141c, roughness: 0.95, metalness: 0.05, side: THREE.BackSide
       })
     );
     interior.add(cavity);
@@ -470,8 +470,44 @@ export default function SafeCrackScene({
       interior.add(c);
       interiorParts.push(c);
     }
-    const goldLight = new THREE.PointLight(0xffc44d, 0, 7.5, 2);
-    goldLight.position.set(0, DOOR_Y - 0.2, -0.7);
+    // Дополнительное золото ближе к проёму: пирамида была «кот наплакал»,
+    // а нижний ряд тонул в темноте. Слитки и монеты лежат там, куда падает
+    // свет из двери
+    const treasure = new THREE.Group();
+    const barGeo2 = new THREE.BoxGeometry(0.46, 0.17, 0.26);
+    const barMat2 = polishedGold();
+    const coinGeo2 = new THREE.CylinderGeometry(0.14, 0.14, 0.035, 28);
+    const coinMat2 = gold({ roughness: 0.2 });
+    for (let i = 0; i < 4; i++) {
+      const bar = new THREE.Mesh(barGeo2, barMat2);
+      bar.position.set(-0.78 + i * 0.5, DOOR_Y - 1.3, -0.42 + rng.spread(0.04));
+      bar.rotation.y = rng.spread(0.12);
+      bar.castShadow = quality === 'high';
+      treasure.add(bar);
+    }
+    for (let i = 0; i < 3; i++) {
+      const bar = new THREE.Mesh(barGeo2, barMat2);
+      bar.position.set(-0.53 + i * 0.5, DOOR_Y - 1.12, -0.4 + rng.spread(0.03));
+      bar.rotation.y = rng.spread(0.12);
+      treasure.add(bar);
+    }
+    for (let i = 0; i < 11; i++) {
+      const c = new THREE.Mesh(coinGeo2, coinMat2);
+      c.position.set(0.86 + rng.spread(0.03), DOOR_Y - 1.34 + i * 0.038, -0.36 + rng.spread(0.03));
+      c.rotation.z = rng.spread(0.07);
+      treasure.add(c);
+    }
+    // Монеты россыпью по дну
+    for (let i = 0; i < 5; i++) {
+      const c = new THREE.Mesh(coinGeo2, coinMat2);
+      c.position.set(rng.range(-1.0, 0.6), DOOR_Y - 1.36, rng.range(-0.6, -0.25));
+      c.rotation.y = rng.range(0, Math.PI);
+      treasure.add(c);
+    }
+    safe.add(treasure);
+
+    const goldLight = new THREE.PointLight(0xffc44d, 0, 8.5, 2);
+    goldLight.position.set(0, DOOR_Y - 0.1, -0.5);
     safe.add(goldLight);
 
     /* ═══════════════════════════ ДВЕРЬ ══════════════════════════════════ */
@@ -874,6 +910,17 @@ export default function SafeCrackScene({
       // процедурные внутренности заменяет интерьер модели; золотой свет —
       // под Anchor_Light, чтобы бил из настоящего проёма
       interiorParts.forEach((o) => { o.visible = false; });
+      // Интерьер модели перекрасить в холодный тёмный: золотые слитки
+      // на нижней полке раньше сливались со стальной стенкой
+      const interiorMesh = m.root.getObjectByName('safe_interior');
+      if (interiorMesh) {
+        const mesh = interiorMesh as THREE.Mesh;
+        const im = (mesh.material as THREE.MeshStandardMaterial).clone();
+        im.color.set(0x10141c);
+        im.roughness = 0.95;
+        im.envMapIntensity = 0.25;
+        mesh.material = im;
+      }
       const lightAnchor = m.anchors['Anchor_Light'];
       if (lightAnchor) lightAnchor.attach(goldLight);
       modelActive = true;
@@ -940,6 +987,22 @@ export default function SafeCrackScene({
 
     let doorOpen = 0;              // 0..1 — насколько распахнута дверь
     let openSeq = -1;              // таймер последовательности вскрытия
+    let openFxT = -1;                // таймер спецэффекта вскрытия
+    let openFxFlash = 0;             // добавка света от вспышки
+
+    /* ── Спецэффект вскрытия: вспышка + расходящееся золотое кольцо ──── */
+    const openFlash = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowSprite('#ffd97a', 0.55), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    openFlash.position.set(0, DOOR_Y + 0.1, 0.55);
+    scene.add(openFlash);
+    const openRing = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: neonRing('#ffd76a', 0.045), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    openRing.position.set(0, DOOR_Y + 0.1, 0.5);
+    scene.add(openRing);
     let boltRetract = 0;
     let wheelSpin = 0;
     let shake = 0;
@@ -974,6 +1037,7 @@ export default function SafeCrackScene({
       if (phaseNow !== prevPhase) {
         if (phaseNow === 'spinning') {
           localSpinMs = 0;
+          openFxT = -1;
           drums.forEach((d) => { d.target = null; d.settled = false; });
           openSeq = -1;
           doorOpen = 0;
@@ -1077,9 +1141,40 @@ export default function SafeCrackScene({
         }
       }
 
+      // Триггер спецэффекта: дверь только пошла открываться
+      if (openSeq >= 0 && doorOpen > 0.04 && openFxT < 0) {
+        openFxT = 0;
+        // Сноп золотых искр из проёма
+        for (let i = 0; i < 130; i++) {
+          tmp.set(rng.spread(0.75), DOOR_Y + rng.spread(0.8), -0.25);
+          tmp2.set(rng.spread(2.6), rng.range(0.6, 4.2), rng.range(1.4, 4.6));
+          goldMotes.emit(tmp, tmp2, rng.range(0.8, 2.0), rng.range(0.14, 0.3));
+          if (i % 3 === 0) {
+            tmp2.multiplyScalar(0.6);
+            sparks.emit(tmp, tmp2, rng.range(0.4, 1.1), rng.range(0.1, 0.22));
+          }
+        }
+      }
+      if (openFxT >= 0) {
+        openFxT += dt;
+        const k = openFxT;
+        openFxFlash = k < 0.55 ? (1 - k / 0.55) : 0;
+        openFlash.material.opacity = k < 0.5 ? 0.95 * (1 - k / 0.5) : 0;
+        openFlash.scale.setScalar(1.6 + k * 13);
+        openRing.material.opacity = k < 0.7 ? 0.85 * (1 - k / 0.7) : 0;
+        openRing.scale.setScalar(0.7 + k * 9);
+        if (k > 0.8) {
+          openFxT = -1;
+          openFlash.material.opacity = 0;
+          openRing.material.opacity = 0;
+        }
+      } else {
+        openFxFlash = 0;
+      }
+
       // Золото внутри разгорается вместе с дверью
       const glow = doorOpen * doorOpen;
-      goldLight.intensity = glow * 13;
+      goldLight.intensity = glow * 30 + openFxFlash * 46;
       (innerGlow.material as THREE.MeshBasicMaterial).opacity = glow * 0.95;
       bars.forEach((b, i) => {
         b.rotation.y = Math.sin(elapsed * 0.6 + i) * 0.05 * glow;

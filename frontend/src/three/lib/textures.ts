@@ -416,8 +416,9 @@ export function coinEdge(): THREE.CanvasTexture {
  */
 export function digitPlate(digit: number, opts: { face?: string; accent?: string } = {}): THREE.CanvasTexture {
   const { face = '#0d1024', accent = '#f5c542' } = opts;
-  // 512px: барабаны — центральный элемент зала, цифры обязаны быть резкими
-  return cached(`digit:${digit}:${face}:${accent}`, [512, 512], (ctx, w, h) => {
+  // 1024px: при игровом наезде камеры плашки занимают пол-экрана —
+  // цифры обязаны быть идеально резкими
+  return cached(`digit:${digit}:${face}:${accent}:2`, [1024, 1024], (ctx, w, h) => {
     // Детерминированный шум вместо Math.random (ограничение ТЗ): риски
     // металла обязаны быть одинаковыми от кадра к кадру и между клиентами.
     let rs = (digit + 7) * 2654435761 % 4294967296;
