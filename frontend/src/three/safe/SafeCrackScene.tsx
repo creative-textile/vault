@@ -44,6 +44,10 @@ import {
 
 interface Props {
   phase: 'idle' | 'spinning' | 'result';
+  /** Открывать ли сейф на фазе 'result'. По умолчанию да (демо, повторы).
+   * В игре сейф открывается только победителю/частичному победителю —
+   * проигравшие видят запертый сейф. */
+  celebrate?: boolean;
   code?: number[];
   drumSpeeds?: number[];
   onDrumStop?: (drumIndex: number, digit: number, position: number) => void;
@@ -95,10 +99,10 @@ const DRUM_Y = 0.18;
 const DRUM_XS = [-0.80, 0, 0.80];
 
 export default function SafeCrackScene({
-  phase, code, drumSpeeds, onDrumStop, startedAt, taps
+  phase, code, drumSpeeds, onDrumStop, startedAt, taps, celebrate = true
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ phase, code, drumSpeeds, startedAt, taps, onDrumStop });
+  const stateRef = useRef({ phase, code, drumSpeeds, startedAt, taps, onDrumStop, celebrate });
   useEffect(() => {
     stateRef.current.phase = phase;
     stateRef.current.code = code;
@@ -106,7 +110,8 @@ export default function SafeCrackScene({
     stateRef.current.startedAt = startedAt;
     stateRef.current.taps = taps;
     stateRef.current.onDrumStop = onDrumStop;
-  }, [phase, code, drumSpeeds, startedAt, taps, onDrumStop]);
+    stateRef.current.celebrate = celebrate;
+  }, [phase, code, drumSpeeds, startedAt, taps, onDrumStop, celebrate]);
 
   useEffect(() => {
     const container = ref.current;
@@ -1043,7 +1048,9 @@ export default function SafeCrackScene({
           doorOpen = 0;
           boltRetract = 0;
         } else if (phaseNow === 'result') {
-          openSeq = 0;
+          // Сейф открывается только победителю (или частичному победителю —
+          // приз > 0). Проигравший и непричастный видят запертый сейф
+          openSeq = s.celebrate ? 0 : -1;
           drums.forEach((d) => { d.settled = false; });
         } else {
           openSeq = -1;
@@ -1108,16 +1115,34 @@ export default function SafeCrackScene({
         d.bezel.scale.setScalar(1 + flash[i] * 0.02);
       }
 
-      /* ── Последовательность вскрытия ──────────────────────────────────── */
+      /* ── Последовательность вскрытия ────────────────────────────────────
+       * 0.00–2.75 с: ригели → штурвал → дверь распахивается
+       * 2.75–7.00 с: витрина золота победителю
+       * 7.00–8.70 с: дверь закрывается обратно — посмотрели и заперли
+       */
       const alarmOn = phaseNow === 'spinning';
       if (openSeq >= 0) {
         openSeq += dt;
-        // 0.00–0.45 с: ригели уходят в дверь
-        boltRetract = Math.min(1, openSeq / 0.45);
-        // 0.35–1.25 с: штурвал прокручивается
-        wheelSpin = easeOutCubic(Math.min(1, Math.max(0, (openSeq - 0.35) / 0.9))) * Math.PI * 3;
-        // 1.15–2.75 с: дверь распахивается
-        doorOpen = easeInOut(Math.min(1, Math.max(0, (openSeq - 1.15) / 1.6)));
+        if (openSeq < 7.0) {
+          // 0.00–0.45 с: ригели уходят в дверь
+          boltRetract = Math.min(1, openSeq / 0.45);
+          // 0.35–1.25 с: штурвал прокручивается
+          wheelSpin = easeOutCubic(Math.min(1, Math.max(0, (openSeq - 0.35) / 0.9))) * Math.PI * 3;
+          // 1.15–2.75 с: дверь распахивается
+          doorOpen = easeInOut(Math.min(1, Math.max(0, (openSeq - 1.15) / 1.6)));
+        } else if (openSeq < 8.7) {
+          // Автозакрытие: всё проигрывается назад
+          const e = easeInOut(Math.min(1, (openSeq - 7.0) / 1.7));
+          doorOpen = 1 - e;
+          boltRetract = 1 - e;
+          wheelSpin = Math.PI * 3 * (1 - e);
+        } else {
+          // Досмотрели: сейф снова заперт до следующего раунда
+          openSeq = -1;
+          doorOpen = 0;
+          boltRetract = 0;
+          wheelSpin = 0;
+        }
       } else {
         wheelSpin = phaseNow === 'idle' ? Math.sin(elapsed * 0.22) * 0.12 : 0;
       }
@@ -1137,12 +1162,15 @@ export default function SafeCrackScene({
         }
         if (modelAction) {
           const dur = safeModel.clips[want]?.duration ?? 1;
-          scrubClip(safeModel, modelAction, want === 'open' ? openSeq : elapsed % dur);
+          // При автозакрытии клип «open» прокручивается назад
+          let openT = openSeq;
+          if (openSeq >= 7.0) openT = dur * (1 - easeInOut(Math.min(1, (openSeq - 7.0) / 1.7)));
+          scrubClip(safeModel, modelAction, want === 'open' ? openT : elapsed % dur);
         }
       }
 
-      // Триггер спецэффекта: дверь только пошла открываться
-      if (openSeq >= 0 && doorOpen > 0.04 && openFxT < 0) {
+      // Триггер спецэффекта: дверь только пошла открываться (не закрываться)
+      if (openSeq >= 0 && openSeq < 7.0 && doorOpen > 0.04 && openFxT < 0) {
         openFxT = 0;
         // Сноп золотых искр из проёма
         for (let i = 0; i < 130; i++) {
@@ -1228,15 +1256,16 @@ export default function SafeCrackScene({
         camTarget.set(0.1 + Math.sin(elapsed * 0.7) * 0.05, DRUM_Y + 0.26, 4.5);
         lookTarget.set(0, DRUM_Y, 0.1);
       } else {
-        // Заезжаем справа и чуть сбоку, чтобы заглянуть в открытый сейф
-        const k = easeOutCubic(Math.min(1, Math.max(0, (openSeq - 1.0) / 1.8)));
+        // Заезжаем справа и чуть сбоку, чтобы заглянуть в открытый сейф;
+        // при автозакрытии камера сама возвращается на общий план
+        const k = doorOpen;
         camTarget.set(0.35 + k * 1.5, 0.62 - k * 0.18, 6.55 - k * 1.5);
         lookTarget.set(k * 0.45, DOOR_Y - k * 0.12, -k * 0.5);
       }
       camera.position.lerp(camTarget, 1 - Math.pow(phaseNow === 'spinning' ? 0.02 : 0.006, dt));
       lookNow.lerp(lookTarget, 1 - Math.pow(0.01, dt));
       camera.lookAt(lookNow);
-      const wantFov = phaseNow === 'spinning' ? 31.5 : openSeq >= 0 ? 38.5 : 40;
+      const wantFov = phaseNow === 'spinning' ? 31.5 : 40 - doorOpen * 1.5;
       camera.fov += (wantFov - camera.fov) * (1 - Math.pow(0.05, dt));
       camera.updateProjectionMatrix();
 
