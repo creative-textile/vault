@@ -33,7 +33,7 @@ import {
 } from '../lib/materials';
 import {
   digitPlate, dialGraduation, engravedPlate, brushedMetal,
-  radialGlow, radialFade, glowSprite, smokeSprite, blackMarble
+  radialGlow, radialFade, glowSprite, smokeSprite, blackMarble, arenaMedallion
 } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -150,6 +150,18 @@ export default function SafeCrackScene({
     floor.receiveShadow = quality === 'high';
     scene.add(floor);
 
+    // Золотая компасная роза под сейфом — центр композиции пола
+    const medallion = new THREE.Mesh(
+      new THREE.CircleGeometry(2.9, 96),
+      new THREE.MeshBasicMaterial({
+        map: arenaMedallion(), transparent: true, opacity: 0.4,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      })
+    );
+    medallion.rotation.x = -Math.PI / 2;
+    medallion.position.set(0, FLOOR_Y + 0.013, -0.9);
+    scene.add(medallion);
+
     // Золотая инкрустация: большое кольцо вокруг сейфа
     const inlay = new THREE.Mesh(
       new THREE.RingGeometry(3.2, 3.34, 96),
@@ -166,12 +178,14 @@ export default function SafeCrackScene({
     inlay2.position.y = FLOOR_Y + 0.011;
     scene.add(inlay2);
 
-    // Лужа тёплого света под сейфом — иначе он висит в черноте
+    // Лужа тёплого света на ВЕСЬ пол: раньше граница конуса прожектора
+    // читалась как «срезанная долька» оранжевого круга при облете камеры.
+    // Большое мягкое свечение делает переход незаметным с любого угла
     const floorPool = new THREE.Mesh(
-      new THREE.PlaneGeometry(9.5, 7.5),
+      new THREE.PlaneGeometry(19, 17),
       new THREE.MeshBasicMaterial({
-        map: radialGlow('#ffcf6a', 0.05), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.28
+        map: radialGlow('#ffcf6a', 0.03), transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.34
       })
     );
     floorPool.rotation.x = -Math.PI / 2;
@@ -197,7 +211,19 @@ export default function SafeCrackScene({
       scene.add(edge);
     }
 
-    /* ── Стена хранилища: панели, золотой профиль, тёплые бра (R4) ─────── */
+    // Стену подсвечиваем широким тёплым пятном — иначе по краю конуса
+    // прожектора на ней оставался жёсткий световой обрез
+    const wallWash = new THREE.Mesh(
+      new THREE.PlaneGeometry(24, 12),
+      new THREE.MeshBasicMaterial({
+        map: radialGlow('#ff9d4a', 0.04), transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.16
+      })
+    );
+    wallWash.position.set(0, 3.0, -4.35);
+    scene.add(wallWash);
+
+    /* ── Стена хранилища: панели, золотой профиль (бра убраны в T2) ────── */
     const wallMarbleTex = blackMarble().clone();
     wallMarbleTex.repeat.set(4, 2);
     wallMarbleTex.needsUpdate = true;
@@ -241,18 +267,31 @@ export default function SafeCrackScene({
     });
     for (const [cx, cz] of [[-6.1, -2.6], [6.1, -2.6], [-7.4, -4.0], [7.4, -4.0]] as const) {
       const col = new THREE.Group();
-      const shaft = new THREE.Mesh(flutedColumn(0.44, 7.4), hallColumnMat);
-      shaft.position.y = 3.7;
+      const shaft = new THREE.Mesh(flutedColumn(0.44, 6.9), hallColumnMat);
+      shaft.position.y = 3.95;
       // Без теней: длинные тени колонн от прожекторов полосили пол
       shaft.castShadow = false;
       col.add(shaft);
       const colGold = softGold();
+      // Пьедестал: мраморный куб, на котором стоит колонна
+      const pedestal = new THREE.Mesh(new RoundedBoxGeometry(1.06, 0.3, 1.06, 2, 0.03), hallColumnMat);
+      pedestal.position.y = 0.15;
+      col.add(pedestal);
       const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.68, 0.26, 24), colGold);
-      base.position.y = 0.13;
+      base.position.y = 0.43;
       col.add(base);
+      // Золотое кольцо на середине ствола
+      const midRing = new THREE.Mesh(new THREE.TorusGeometry(0.47, 0.035, 10, 40), colGold);
+      midRing.rotation.x = Math.PI / 2;
+      midRing.position.y = 3.9;
+      col.add(midRing);
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.5, 0.3, 24), colGold);
       cap.position.y = 7.5;
       col.add(cap);
+      // Абака: квадратная плита капители
+      const abacus = new THREE.Mesh(new RoundedBoxGeometry(1.0, 0.14, 1.0, 2, 0.02), colGold);
+      abacus.position.y = 7.72;
+      col.add(abacus);
       col.position.set(cx, FLOOR_Y, cz);
       scene.add(col);
     }
@@ -283,7 +322,7 @@ export default function SafeCrackScene({
 
     // Верхний свет широкий и мягкий: узкий видимый конус читался
     // как «тёмные полосы» над сейфом — оставляем только свет без луча
-    const topSpot = new THREE.SpotLight(0xffe2ac, 40, 28, Math.PI / 4.6, 0.92, 1.5);
+    const topSpot = new THREE.SpotLight(0xffe2ac, 40, 30, Math.PI / 3.9, 1.0, 1.4);
     topSpot.position.set(0.3, 8.6, 1.1);
     topSpot.target.position.set(0, DOOR_Y, 0);
     scene.add(topSpot);
@@ -321,6 +360,20 @@ export default function SafeCrackScene({
     plinth.position.set(0, FLOOR_Y + 0.13, -1.35);
     plinth.receiveShadow = quality === 'high';
     safe.add(plinth);
+
+    // Декоративные золотые боссы по углам и серединам рамы — «заклёпки
+    // роскоши», статичные (корпус не двигается), видны и с моделью
+    const bossGeo = new THREE.SphereGeometry(0.06, 16, 12);
+    const bossMat = softGold();
+    for (const [bx, by] of [
+      [-2.0, 1.95], [2.0, 1.95], [-2.0, -1.62], [2.0, -1.62],
+      [0, 1.98], [0, -1.66], [-2.04, 0.15], [2.04, 0.15]
+    ] as const) {
+      const boss = new THREE.Mesh(bossGeo, bossMat);
+      boss.position.set(bx, by, 0.02);
+      boss.scale.z = 0.6;
+      safe.add(boss);
+    }
 
     // Кольцо-обойма вокруг дверного проёма (признак настоящей двери хранилища)
     const collar = new THREE.Mesh(
@@ -811,9 +864,9 @@ export default function SafeCrackScene({
       modelActive = true;
     });
 
-    scene.add(new THREE.AmbientLight(0x5f5a86, 0.75));
+    scene.add(new THREE.AmbientLight(0x7a6c5c, 1.0));
 
-    const key = new THREE.SpotLight(0xfff0cc, 58, 26, Math.PI / 4.1, 0.86, 1.5);
+    const key = new THREE.SpotLight(0xfff0cc, 58, 30, Math.PI / 3.7, 1.0, 1.4);
     key.position.set(-3.2, 4.6, 4.6);
     key.target.position.set(0, DOOR_Y, 0);
     if (quality === 'high') {
