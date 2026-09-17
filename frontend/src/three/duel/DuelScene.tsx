@@ -214,13 +214,18 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     const medallion = new THREE.Mesh(
       new THREE.CircleGeometry(3.1, 96),
       new THREE.MeshBasicMaterial({
-        map: arenaMedallion(), transparent: true, opacity: 0.92,
+        map: arenaMedallion(), transparent: true, opacity: 0.55,
         blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
       })
     );
     medallion.rotation.x = -Math.PI / 2;
     medallion.position.y = FLOOR_Y + 0.01;
     scene.add(medallion);
+    // Физическое золотое кольцо по краю розы — плашка больше не плоская
+    const roseRim = new THREE.Mesh(new THREE.TorusGeometry(3.1, 0.045, 10, 110), polishedGold());
+    roseRim.rotation.x = Math.PI / 2;
+    roseRim.position.y = FLOOR_Y + 0.03;
+    scene.add(roseRim);
 
     // Неоновые кольца на полу
     const ringOuter = new THREE.Mesh(
@@ -325,7 +330,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     /* ── Постаменты игроков: мрамор + золото, цвета идентичности ───────── */
     const podiums: THREE.Group[] = [];
     const podiumMarble = new THREE.MeshStandardMaterial({
-      map: blackMarble(), color: 0xd4d4e2, roughness: 0.24, metalness: 0.3,
+      map: blackMarble(), color: 0x6a6f8c, roughness: 0.3, metalness: 0.35,
       envMapIntensity: 1.0
     });
     const makePodium = (x: number, colorHex: number, glowCss: string, label: string): THREE.Group => {
@@ -388,15 +393,14 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       light.position.y = 1.7;
       g.add(light);
 
-      // Световой пилон за постаментом — игрок «подсветлен» как на афише
-      const pillar = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.15, 4.6),
-        new THREE.MeshBasicMaterial({
-          map: lightPillar(glowCss), transparent: true,
-          blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-          opacity: 0.55, side: THREE.DoubleSide
-        })
-      );
+      // Световой пилон за постаментом — игрок «подсветлен» как на афише.
+      // Спрайт вместо плоскости: билборд всегда смотрит в камеру, поэтому
+      // сбоку не видно «срезанных по диагонали» граней
+      const pillar = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: lightPillar(glowCss), transparent: true, opacity: 0.5,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      }));
+      pillar.scale.set(1.15, 4.6, 1);
       pillar.position.set(0, 2.3, -0.75);
       g.add(pillar);
       g.position.set(x, FLOOR_Y, -0.3);
@@ -410,7 +414,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     /* ── Свет: тёплый прожектор сверху + цветные контровые ─────────────── */
     scene.add(new THREE.AmbientLight(0x6a5aa8, 0.7));
 
-    const spot = new THREE.SpotLight(0xfff0c0, 62, 26, Math.PI / 6.4, 0.42, 1.6);
+    const spot = new THREE.SpotLight(0xfff0c0, 62, 30, Math.PI / 5.8, 0.95, 1.5);
     spot.position.set(0.6, 8.4, 2.6);
     spot.target.position.set(0, 0, 0);
     if (quality === 'high') {
@@ -430,7 +434,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     const beamH = 9.4;
     const beamGeo = new THREE.ConeGeometry(2.9, beamH, 40, 1, true);
     const beamMat = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.16 } },
+      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.1 } },
       vertexShader: /* glsl */`
         varying float vFall;
         varying vec3 vNormalV;
@@ -451,7 +455,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
           // Светлее к широкому концу и только на силуэте конуса: середину
           // насквозь видеть не должны, иначе луч выглядит стеклянной воронкой
           float edge = 1.0 - abs(dot(normalize(vNormalV), vec3(0.0, 0.0, 1.0)));
-          float a = uOpacity * pow(clamp(vFall, 0.0, 1.0), 1.7) * pow(edge, 1.4);
+          float a = uOpacity * pow(clamp(vFall, 0.0, 1.0), 1.7) * pow(edge, 2.0);
           gl_FragColor = vec4(uColor, a);
         }`,
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
