@@ -29,11 +29,12 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
+import { createStageSafe, startLoop, detectQuality, particleBudget } from '../lib/stage';
 import { createRng, fbm1, easeOutCubic } from '../lib/rng';
 import { gold, chrome, darkSteel, paintedHull, paintedRed, glass, neon, additive, composite, polishedGold, disposeObject } from '../lib/materials';
-import { glowSprite, starFlare, smokeSprite, nebula, hazardStripes, neonRing, radialGlow, streakSprite } from '../lib/textures';
+import { glowSprite, starFlare, smokeSprite, nebula, hazardStripes, neonRing, radialGlow, streakSprite, concrete, fireball } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
+import { loadModel, disposeModel } from '../lib/models';
 
 interface Props {
   phase: 'idle' | 'flying' | 'crashed' | 'cashed';
@@ -60,6 +61,8 @@ interface RocketParts {
   engineLight: THREE.PointLight;
   beacon: THREE.Mesh;
   beaconLight: THREE.PointLight;
+  /** Корпусные детали: при загрузке .glb они скрываются (модель вместо них). */
+  bodyParts: THREE.Object3D[];
 }
 
 /**
@@ -69,6 +72,7 @@ interface RocketParts {
  */
 function buildRocket(ghost = false): RocketParts {
   const group = new THREE.Group();
+  const bodyParts: THREE.Object3D[] = [];
 
   /** Обёртка материала: в режиме призрака делаем прозрачным и не пишущим в depth. */
   const asGhost = <T extends THREE.Material>(m: T): T => {
@@ -108,6 +112,7 @@ function buildRocket(ghost = false): RocketParts {
   const hull = new THREE.Mesh(new THREE.LatheGeometry(profile, 56), hullMat);
   hull.castShadow = !ghost;
   group.add(hull);
+  bodyParts.push(hull);
 
   /* ── Носовой обтекатель: красный лак поверх белого корпуса ────────────── */
   const noseProfile: THREE.Vector2[] = [];
@@ -120,6 +125,7 @@ function buildRocket(ghost = false): RocketParts {
   const nose = new THREE.Mesh(new THREE.LatheGeometry(noseProfile, 56), asGhost(paintedRed()));
   nose.castShadow = !ghost;
   group.add(nose);
+  bodyParts.push(nose);
 
   /* ── Золотые акцентные кольца: читаются как «дорогой» объект ─────────── */
   [-0.52, 0.34, 0.92].forEach((y, i) => {
@@ -131,11 +137,16 @@ function buildRocket(ghost = false): RocketParts {
     band.rotation.x = Math.PI / 2;
     band.position.y = y;
     group.add(band);
+  bodyParts.push(band);
   });
 
   /* ── Иллюминатор: стекло в металлическом кольце ──────────────────────── */
   const windowGroup = new THREE.Group();
-  const glassBall = new THREE.Mesh(new THREE.SphereGeometry(0.155, 28, 20), asGhost(glass({ color: 0x9fd8ff })));
+  const glassMat = asGhost(glass({ color: 0x9fd8ff }));
+  glassMat.emissive = new THREE.Color(0x2e5a86);
+  glassMat.emissiveIntensity = 0.55;
+  glassMat.envMapIntensity = 2.2;
+  const glassBall = new THREE.Mesh(new THREE.SphereGeometry(0.155, 28, 20), glassMat);
   windowGroup.add(glassBall);
   const windowRing = new THREE.Mesh(
     new THREE.TorusGeometry(0.175, 0.032, 12, 40),
@@ -151,6 +162,7 @@ function buildRocket(ghost = false): RocketParts {
   windowGroup.position.set(0, 0.42, R * 0.94);
   windowGroup.rotation.x = -0.12;
   group.add(windowGroup);
+  bodyParts.push(windowGroup);
 
   /* ── Кили: выдавленный профиль с фаской (не конусы) ───────────────────── */
   const finShape = new THREE.Shape();
@@ -173,6 +185,7 @@ function buildRocket(ghost = false): RocketParts {
     fin.rotation.z = 0;
     fin.castShadow = !ghost;
     group.add(fin);
+  bodyParts.push(fin);
 
     // Золотая кромка киля — тонкая полоска, ловит блик
     const edge = new THREE.Mesh(
@@ -182,6 +195,7 @@ function buildRocket(ghost = false): RocketParts {
     edge.position.set(Math.cos(a) * (R * 0.86 + 0.3), -H * 0.32 - 0.3, Math.sin(a) * (R * 0.86 + 0.3));
     edge.rotation.y = -a + Math.PI / 2;
     group.add(edge);
+  bodyParts.push(edge);
   }
 
   /* ── Сопловой раструб ────────────────────────────────────────────────── */
@@ -194,6 +208,7 @@ function buildRocket(ghost = false): RocketParts {
   const bell = new THREE.Mesh(new THREE.LatheGeometry(bellProfile, 40), asGhost(darkSteel({ roughness: 0.5 })));
   bell.castShadow = !ghost;
   group.add(bell);
+  bodyParts.push(bell);
 
   // Раскалённая внутренняя поверхность сопла
   const innerProfile = bellProfile.map((p) => new THREE.Vector2(p.x * 0.93, p.y + 0.01));
@@ -250,12 +265,14 @@ function buildRocket(ghost = false): RocketParts {
   );
   beacon.position.y = H * 0.5 + 0.05;
   group.add(beacon);
+  bodyParts.push(beacon);
   const antenna = new THREE.Mesh(
     new THREE.CylinderGeometry(0.012, 0.016, 0.16, 8),
     asGhost(chrome())
   );
   antenna.position.y = H * 0.5 - 0.02;
   group.add(antenna);
+  bodyParts.push(antenna);
 
   /* ── Свет ────────────────────────────────────────────────────────────── */
   const engineLight = new THREE.PointLight(0xff7a2a, 0, 26, 2);
@@ -274,7 +291,7 @@ function buildRocket(ghost = false): RocketParts {
     }
   });
 
-  return { group, flameCore, flameMid, flameOuter, diamonds, nozzleGlow, engineLight, beacon, beaconLight };
+  return { group, flameCore, flameMid, flameOuter, diamonds, nozzleGlow, engineLight, beacon, beaconLight, bodyParts };
 }
 
 /* ═══════════════════════════ ПЛАТФОРМА И КОСМОС ══════════════════════ */
@@ -282,45 +299,94 @@ function buildRocket(ghost = false): RocketParts {
 function buildPad(quality: string): THREE.Group {
   const pad = new THREE.Group();
 
-  // Основание: композитный диск с фаской
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 2.6, 0.26, 64), composite());
-  base.position.y = -0.13;
+  // Бетонная юбка — площадка стоит на «земле», а не висит в пустоте
+  const skirt = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.95, 3.2, 0.24, 72),
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x424650, roughness: 0.9, metalness: 0.05 })
+  );
+  skirt.position.y = -0.5;
+  skirt.receiveShadow = quality === 'high';
+  pad.add(skirt);
+
+  // Бетонный пьедестал
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.35, 2.6, 0.3, 72),
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x565b68, roughness: 0.85, metalness: 0.08 })
+  );
+  base.position.y = -0.24;
   base.receiveShadow = quality === 'high';
   pad.add(base);
 
-  // Верхняя плита с полосами опасности
-  const hazard = hazardStripes('#f5c542', '#14141c', 30);
-  hazard.repeat.set(3, 3);
+  // Металлическая палуба с расшивкой
   const top = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.1, 2.1, 0.08, 64),
-    new THREE.MeshStandardMaterial({ map: hazard, metalness: 0.5, roughness: 0.62 })
+    new THREE.CylinderGeometry(2.1, 2.16, 0.1, 72),
+    new THREE.MeshStandardMaterial({ map: concrete(), color: 0x8a8fa0, metalness: 0.75, roughness: 0.5 })
   );
-  top.position.y = 0.04;
+  top.position.y = -0.04;
   top.receiveShadow = quality === 'high';
   pad.add(top);
 
-  // Внутренний золотой диск (пятачок под ракетой)
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 0.98, 0.06, 48), darkSteel({ roughness: 0.34 }));
-  disc.position.y = 0.1;
-  pad.add(disc);
+  // Золотые канты ярусов: без них платформа выглядела плоским цилиндром
+  const rimMat = polishedGold();
+  const rim1 = new THREE.Mesh(new THREE.TorusGeometry(2.13, 0.04, 10, 96), rimMat);
+  rim1.rotation.x = Math.PI / 2;
+  rim1.position.y = 0.015;
+  pad.add(rim1);
+  const rim2 = new THREE.Mesh(new THREE.TorusGeometry(2.47, 0.035, 10, 96), rimMat);
+  rim2.rotation.x = Math.PI / 2;
+  rim2.position.y = -0.09;
+  pad.add(rim2);
 
-  // Неоновое кольцо по кромке
+  // Кольцо опасной разметки вокруг ракеты
+  const hazard = hazardStripes('#f5c542', '#14141c', 30);
+  hazard.repeat.set(6, 1);
+  const hazardRing = new THREE.Mesh(
+    new THREE.RingGeometry(1.25, 1.62, 64),
+    new THREE.MeshStandardMaterial({ map: hazard, metalness: 0.4, roughness: 0.62, side: THREE.DoubleSide })
+  );
+  hazardRing.rotation.x = -Math.PI / 2;
+  hazardRing.position.y = 0.015;
+  pad.add(hazardRing);
+
+  // Газоотводный колодец под соплом: тёмная воронка со стальным кантом
+  const duct = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.92, 0.7, 0.5, 48, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x0a0b10, roughness: 0.95, metalness: 0.2, side: THREE.DoubleSide })
+  );
+  duct.position.y = -0.12;
+  pad.add(duct);
+  const ductRim = new THREE.Mesh(new THREE.TorusGeometry(0.94, 0.05, 12, 64), darkSteel({ roughness: 0.4 }));
+  ductRim.rotation.x = Math.PI / 2;
+  ductRim.position.y = 0.02;
+  pad.add(ductRim);
+
+  // Неоновое кольцо по кромке палубы
   const ringTex = neonRing('#22d3ee', 0.055);
   const ring = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 6.4), new THREE.MeshBasicMaterial({
-    map: ringTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    map: ringTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.7
   }));
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.09;
+  ring.position.y = 0.02;
   pad.add(ring);
 
-  // Второе, золотое кольцо внутри
+  // Золотое кольцо вокруг колодца
   const ring2Tex = neonRing('#f5c542', 0.04);
   const ring2 = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 3.1), new THREE.MeshBasicMaterial({
-    map: ring2Tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    map: ring2Tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.55
   }));
   ring2.rotation.x = -Math.PI / 2;
-  ring2.position.y = 0.13;
+  ring2.position.y = 0.06;
   pad.add(ring2);
+
+  // Трубопроводы от края к центру — площадка «обслуживается»
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.5;
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1.5, 10), darkSteel({ roughness: 0.5 }));
+    pipe.rotation.z = Math.PI / 2;
+    pipe.rotation.y = -a;
+    pipe.position.set(Math.cos(a) * 1.6, 0.05, Math.sin(a) * 1.6);
+    pad.add(pipe);
+  }
 
   // Три опорных пилона с огнями
   for (let i = 0; i < 3; i++) {
@@ -342,10 +408,10 @@ function buildPad(quality: string): THREE.Group {
   // Свечение под платформой (мягкая лужа света)
   const poolTex = radialGlow('#4f8dff', 0.1);
   const pool = new THREE.Mesh(new THREE.PlaneGeometry(11, 11), new THREE.MeshBasicMaterial({
-    map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.5, toneMapped: false
+    map: poolTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.4, toneMapped: false
   }));
   pool.rotation.x = -Math.PI / 2;
-  pool.position.y = -0.24;
+  pool.position.y = -0.6;
   pad.add(pool);
 
   return pad;
@@ -404,7 +470,8 @@ export default function RocketScene({
       bloom: quality === 'high' ? 0.92 : quality === 'medium' ? 0.6 : 0,
       bloomRadius: 0.66,
       bloomThreshold: 0.58,
-      exposure: 1.12
+      exposure: 1.12,
+      statsId: 'rocket'
     });
     // WebGL недоступен или контекст не создался: экран обязан остаться играбельным
     if (!stage) return;
@@ -473,7 +540,7 @@ export default function RocketScene({
       key.shadow.bias = -0.0012;
     }
     scene.add(key);
-    const rim = new THREE.DirectionalLight(0x4f8dff, 1.5);
+    const rim = new THREE.DirectionalLight(0x4f8dff, 2.3);
     rim.position.set(-6, 3, -5);
     scene.add(rim);
     const fill = new THREE.DirectionalLight(0x22d3ee, 0.7);
@@ -492,44 +559,116 @@ export default function RocketScene({
     ghost.group.visible = false;
     scene.add(ghost.group);
 
+    /* ═══ 3D-МОДЕЛЬ РАКЕТЫ (ТЗ): корпус из .glb, пламя/частицы — VFX сцены ═══
+     * Призрак после кэшаута остаётся процедурным (полупрозрачный дубль).
+     * Модель садится в группу ракеты и inherits покачивания/полёт; срез сопла
+     * (Anchor_Flame) совмещаем с верхом процедурного пламени.
+     */
+    let cancelled = false;
+    const rocketHolder = new THREE.Group();
+    rocket.group.add(rocketHolder);
+    loadModel('rocket.glb', { quality }).then((m) => {
+      if (cancelled || !m) return;
+      rocketHolder.add(m.root);
+      rocketHolder.updateMatrixWorld(true);
+      const anchor = m.anchors['Anchor_Flame'] ?? m.root;
+      const av = new THREE.Vector3();
+      anchor.getWorldPosition(av);
+      rocket.group.worldToLocal(av);
+      rocketHolder.position.add(new THREE.Vector3(0, -1.60, 0).sub(av));
+      rocket.bodyParts.forEach((o) => { o.visible = false; });
+      // «Спасаем» модель эффектами: иллюминатор светится и отражает,
+      // сопло тлеет изнутри
+      const porthole = m.root.getObjectByName('porthole_glass') as THREE.Mesh | null;
+      if (porthole) {
+        const gm = (porthole.material as THREE.MeshPhysicalMaterial).clone();
+        gm.roughness = 0.02;
+        gm.envMapIntensity = 2.4;
+        gm.emissive = new THREE.Color(0x2e5a86);
+        gm.emissiveIntensity = 0.6;
+        porthole.material = gm;
+      }
+      const nozzle = m.root.getObjectByName('rocket_nozzle') as THREE.Mesh | null;
+      if (nozzle) {
+        const nm = (nozzle.material as THREE.MeshStandardMaterial).clone();
+        nm.emissive = new THREE.Color(0xff5a1f);
+        nm.emissiveIntensity = 0.9;
+        nozzle.material = nm;
+      }
+      if (quality === 'high') {
+        m.root.traverse((o) => {
+          if (o instanceof THREE.Mesh) o.castShadow = true;
+        });
+      }
+    });
+
     /* ── Частицы ────────────────────────────────────────────────────────── */
-    const smoke = new ParticleField(quality === 'low' ? 90 : 220, smokeSprite(), {
+    const smoke = new ParticleField(Math.round(particleBudget(quality) * 220), smokeSprite(), {
       color: 0xbfc6e8, size: 1.5, gravity: -0.35, drag: 0.965,
       blending: THREE.NormalBlending, opacity: 0.5
     });
     scene.add(smoke.points);
 
-    const embers = new ParticleField(quality === 'low' ? 90 : 260, glowSprite('#ffd28a', 0.2), {
+    const embers = new ParticleField(Math.round(particleBudget(quality) * 260), glowSprite('#ffd28a', 0.2), {
       color: 0xffb347, size: 0.55, gravity: -1.1, drag: 0.975, opacity: 1
     });
     scene.add(embers.points);
 
-    const sparks = new ParticleField(quality === 'low' ? 110 : 320, glowSprite('#fff4d0', 0.35), {
+    const sparks = new ParticleField(Math.round(particleBudget(quality) * 320), glowSprite('#fff4d0', 0.35), {
       color: 0xffe9b0, size: 0.4, gravity: -3.2, drag: 0.965, opacity: 1
     });
     scene.add(sparks.points);
 
-    const speedLines = new ParticleField(quality === 'low' ? 60 : 160, streakSprite('#bfe6ff'), {
+    const speedLines = new ParticleField(Math.round(particleBudget(quality) * 160), streakSprite('#bfe6ff'), {
       color: 0xcfe9ff, size: 0.34, gravity: 0, drag: 1, opacity: 0.75
     });
     scene.add(speedLines.points);
 
-    /* ── Обломки (взрыв) ────────────────────────────────────────────────── */
+    /* ── Обломки (взрыв): не коробочки, а фрагменты самой ракеты ─────────
+     * Изогнутые куски обшивки (открытые цилиндры), рваный носовой конус,
+     * осколок киля, кольца силового набора, раскалённые «внутренности».
+     * Открытые поверхности — DoubleSide, иначе куски «исчезают» с изнанки.
+     */
     const debrisGroup = new THREE.Group();
-    const debrisMats = [paintedHull(), paintedRed(), darkSteel(), gold({ roughness: 0.35 })];
-    const debrisGeos = [
-      new THREE.BoxGeometry(0.2, 0.14, 0.22),
-      new THREE.TetrahedronGeometry(0.16),
-      new THREE.CylinderGeometry(0.05, 0.09, 0.3, 8),
-      new THREE.BoxGeometry(0.3, 0.05, 0.16)
-    ];
-    const DEBRIS = quality === 'low' ? 18 : 34;
+    const hullMatD = paintedHull(); hullMatD.side = THREE.DoubleSide;
+    const redMatD = paintedRed(); redMatD.side = THREE.DoubleSide;
+    // Раскалённый металл: тёмная сталь с остывающим свечением кромки
+    const charMat = new THREE.MeshStandardMaterial({
+      color: 0x24262e, roughness: 0.78, metalness: 0.85,
+      emissive: 0xff6a24, emissiveIntensity: 0.95
+    });
+    const tankMat = new THREE.MeshStandardMaterial({
+      color: 0xc8ccd8, roughness: 0.34, metalness: 1, side: THREE.DoubleSide
+    });
+    const debrisMats = [hullMatD, redMatD, darkSteel(), gold({ roughness: 0.35 }), charMat, tankMat];
+
+    // Кусок обшивки: открытый цилиндр с углом охвата ~90°
+    const hullShard = new THREE.CylinderGeometry(0.32, 0.34, 0.3, 10, 1, true, 0.4, 1.5);
+    // Рваный фрагмент носового конуса
+    const noseShard = new THREE.ConeGeometry(0.3, 0.42, 10, 1, true, 2.1, 1.4);
+    // Осколок киля: тонкий выдавленный треугольник
+    const finShape = new THREE.Shape();
+    finShape.moveTo(0, 0);
+    finShape.lineTo(0.34, -0.06);
+    finShape.quadraticCurveTo(0.4, -0.22, 0.26, -0.4);
+    finShape.lineTo(0, -0.3);
+    finShape.closePath();
+    const finShard = new THREE.ExtrudeGeometry(finShape, { depth: 0.02, bevelEnabled: false });
+    // Осколки силового кольца и соплового раструба
+    const ringShard = new THREE.TorusGeometry(0.26, 0.035, 8, 14, 2.1);
+    const ductShard = new THREE.TorusGeometry(0.2, 0.055, 8, 14, 1.7);
+    // Внутренности: раскалённый многогранник и осколок топливного бака
+    const charShard = new THREE.TetrahedronGeometry(0.17);
+    const tankShard = new THREE.SphereGeometry(0.24, 10, 8, 0, 2.3, 0.5, 1.5);
+    const debrisGeos = [hullShard, noseShard, finShard, ringShard, ductShard, charShard, tankShard];
+    const DEBRIS = quality === 'low' ? 18 : 38;
     const debris: Array<{ mesh: THREE.Mesh; v: THREE.Vector3; vr: THREE.Vector3 }> = [];
     for (let i = 0; i < DEBRIS; i++) {
       const mesh = new THREE.Mesh(
         debrisGeos[i % debrisGeos.length],
         debrisMats[rng.int(0, debrisMats.length - 1)]
       );
+      mesh.scale.setScalar(rng.range(0.72, 1.45));
       mesh.visible = false;
       debrisGroup.add(mesh);
       debris.push({ mesh, v: new THREE.Vector3(), vr: new THREE.Vector3() });
@@ -553,6 +692,61 @@ export default function RocketScene({
 
     const blastLight = new THREE.PointLight(0xff7a2a, 0, 40, 2);
     scene.add(blastLight);
+
+    // Огненный шар: два перекрещенных билборда с турбулентной текстурой
+    const fireMat = () => new THREE.MeshBasicMaterial({
+      map: fireball(), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      side: THREE.DoubleSide
+    });
+    const fireA = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+    const fireB = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+    fireA.visible = fireB.visible = false;
+    scene.add(fireA, fireB);
+
+    // Вторая ударная волна — догоняет первую
+    const shock2 = new THREE.Mesh(
+      new THREE.RingGeometry(0.4, 0.62, 64),
+      additive(0xfff0d0, 0)
+    );
+    shock2.visible = false;
+    scene.add(shock2);
+
+    /* ── Q4: облако огненных шаров — взрыв «объёмный», а не плоский ─────── */
+    interface CloudBall { mesh: THREE.Mesh; off: THREE.Vector3; delay: number; spin: number; rise: number }
+    const fireCloud: CloudBall[] = [];
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+      m.visible = false;
+      scene.add(m);
+      fireCloud.push({
+        mesh: m,
+        off: new THREE.Vector3(rng.spread(1.5), rng.range(0, 1.1), rng.spread(1.5)),
+        delay: rng.range(0, 0.22),
+        spin: rng.spread(2.6),
+        rise: rng.range(1.1, 2.6)
+      });
+    }
+    // Столб пламени: вертикальный билборд, растёт и тает — «ядерный гриб»
+    const flameCol = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+    flameCol.visible = false;
+    scene.add(flameCol);
+
+    // Цепная реакция: три вторичных детонации с задержкой и смещением —
+    // взрыв не один «бабах», а серия, как в настоящем крушении
+    interface After { mesh: THREE.Mesh; delay: number; off: THREE.Vector3; burst: boolean }
+    const afters: After[] = [];
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), fireMat());
+      m.visible = false;
+      scene.add(m);
+      afters.push({
+        mesh: m,
+        delay: 0.42 + i * rng.range(0.22, 0.34),
+        off: new THREE.Vector3(rng.spread(2.2), rng.range(-0.4, 1.0), rng.spread(2.2)),
+        burst: false
+      });
+    }
 
     /* ── Состояние анимации ─────────────────────────────────────────────── */
     let altitude = 0;
@@ -578,16 +772,16 @@ export default function RocketScene({
         d.mesh.visible = true;
         d.mesh.position.set(rng.spread(0.2), rng.spread(0.2), rng.spread(0.2));
         const [vx, vy, vz] = rng.onSphere(1);
-        d.v.set(vx * rng.range(2.4, 6.4), Math.abs(vy) * rng.range(1.6, 5.2), vz * rng.range(2.4, 6.4));
-        d.vr.set(rng.spread(9), rng.spread(9), rng.spread(9));
+        d.v.set(vx * rng.range(2.2, 7), Math.abs(vy) * rng.range(1.4, 5.6), vz * rng.range(2.2, 7));
+        d.vr.set(rng.spread(5.5), rng.spread(5.5), rng.spread(5.5));
       }
       // Искры и дым взрыва
-      for (let i = 0; i < (quality === 'low' ? 46 : 110); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 150); i++) {
         const [vx, vy, vz] = rng.onSphere(1);
         const sp = rng.range(2.5, 9);
         sparks.emit(at, tmp.set(vx * sp, vy * sp * 0.9 + 1.4, vz * sp), rng.range(0.5, 1.5), rng.range(0.3, 0.8));
       }
-      for (let i = 0; i < (quality === 'low' ? 14 : 34); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 34); i++) {
         const [vx, vy, vz] = rng.onSphere(1);
         smoke.emit(at, tmp.set(vx * rng.range(0.5, 1.9), Math.abs(vy) * rng.range(0.4, 1.4), vz * rng.range(0.5, 1.9)), rng.range(1.4, 3), rng.range(1.4, 3.2));
       }
@@ -595,8 +789,47 @@ export default function RocketScene({
       flash.visible = true;
       shock.position.copy(at);
       shock.visible = true;
+      shock2.position.copy(at);
+      shock2.visible = false;
+      fireA.position.copy(at);
+      fireB.position.copy(at);
+      fireA.visible = fireB.visible = true;
+      fireA.scale.setScalar(0.6);
+      fireB.scale.setScalar(0.6);
+      (fireA.material as THREE.MeshBasicMaterial).opacity = 1;
+      (fireB.material as THREE.MeshBasicMaterial).opacity = 1;
       blastLight.position.copy(at);
-      shake = 1;
+      // Облако огненных шаров вокруг эпицентра + столб пламени
+      for (const b of fireCloud) {
+        b.mesh.visible = true;
+        b.mesh.position.copy(at).add(b.off);
+        b.mesh.scale.setScalar(0.5);
+        (b.mesh.material as THREE.MeshBasicMaterial).opacity = 0;
+      }
+      flameCol.visible = true;
+      flameCol.position.copy(at);
+      flameCol.scale.set(1.4, 0.6, 1);
+      (flameCol.material as THREE.MeshBasicMaterial).opacity = 1;
+      for (const a of afters) {
+        a.mesh.visible = false;
+        a.burst = false;
+        a.mesh.position.copy(at).add(a.off);
+        a.mesh.scale.setScalar(0.4);
+      }
+      // Фонтан раскалённых углей вверх — взрыв не только вширь, но и вверх
+      for (let i = 0; i < Math.round(particleBudget(quality) * 92); i++) {
+        const a = rng.rand() * Math.PI * 2;
+        const rr = rng.range(0, 0.5);
+        tmp.set(at.x + Math.cos(a) * rr, at.y, at.z + Math.sin(a) * rr);
+        tmp2.set(Math.cos(a) * rng.range(0.3, 1.7), rng.range(2.8, 7.4), Math.sin(a) * rng.range(0.3, 1.7));
+        embers.emit(tmp, tmp2, rng.range(0.7, 1.6), rng.range(0.2, 0.5));
+      }
+      // Первый кадр: плотный выброс дыма из точки взрыва
+      for (let i = 0; i < Math.round(particleBudget(quality) * 60); i++) {
+        const [vx, vy, vz] = rng.onSphere(1);
+        smoke.emit(at, tmp.set(vx * rng.range(0.4, 1.4), Math.abs(vy) * rng.range(0.5, 1.6), vz * rng.range(0.4, 1.4)), rng.range(1.8, 3.4), rng.range(0.9, 1.9));
+      }
+      shake = 1.6;
     };
 
     const stopLoop = startLoop(stage, (dt, elapsed) => {
@@ -625,6 +858,9 @@ export default function RocketScene({
         shock.visible = false;
         blastLight.intensity = 0;
         debris.forEach((d) => { d.mesh.visible = false; });
+        fireCloud.forEach((b) => { b.mesh.visible = false; });
+        flameCol.visible = false;
+        afters.forEach((a) => { a.mesh.visible = false; });
         smoke.clear(); embers.clear(); sparks.clear(); speedLines.clear();
 
         // Предстартовое покачивание + лёгкое дрожание (двигатель на холостых)
@@ -658,10 +894,11 @@ export default function RocketScene({
 
         // Киношный облёт площадки
         const orbit = elapsed * 0.16;
-        camTarget.set(Math.sin(orbit) * 1.5, 1.7 + Math.sin(elapsed * 0.3) * 0.18, 8.1 + Math.cos(orbit) * 0.5);
+        // Hero-angle: камера ниже и ближе — ракета выглядит массивнее
+        camTarget.set(Math.sin(orbit) * 1.5, 1.15 + Math.sin(elapsed * 0.3) * 0.16, 7.7 + Math.cos(orbit) * 0.5);
         camera.position.lerp(camTarget, 1 - Math.pow(0.001, dt));
-        camera.lookAt(0, rocket.group.position.y + 0.5, 0);
-        camera.fov += (52 - camera.fov) * 0.06;
+        camera.lookAt(0, rocket.group.position.y + 1.0, 0);
+        camera.fov += (50 - camera.fov) * 0.06;
         camera.updateProjectionMatrix();
       } else if (phase === 'flying') {
         flightT += dt;
@@ -673,6 +910,9 @@ export default function RocketScene({
         shock.visible = false;
         blastLight.intensity = 0;
         debris.forEach((d) => { d.mesh.visible = false; });
+        fireCloud.forEach((b) => { b.mesh.visible = false; });
+        flameCol.visible = false;
+        afters.forEach((a) => { a.mesh.visible = false; });
 
         // Набор высоты логарифмический: ракета уходит вверх, но остаётся в кадре
         const targetAlt = Math.log(1 + flightT * 0.62) * 4.2;
@@ -850,39 +1090,144 @@ export default function RocketScene({
 
       function runExplosion(dt: number, elapsed: number) {
         explodedAt += dt;
-        // Обломки: гравитация + кувыркание
-        for (const d of debris) {
+        // Обломки: гравитация + сопротивление + огненные шлейфы.
+        // Куски кувыркаются медленно (крупные детали так и летят), шлейф
+        // искр тянется дольше, а самые большие оставляют дымный след.
+        const trailOn = explodedAt < 1.7;
+        for (let di = 0; di < debris.length; di++) {
+          const d = debris[di];
           if (!d.mesh.visible) continue;
           d.v.y -= 5.4 * dt;
+          d.v.multiplyScalar(1 - 0.35 * dt);
           d.mesh.position.addScaledVector(d.v, dt);
           d.mesh.rotation.x += d.vr.x * dt;
           d.mesh.rotation.y += d.vr.y * dt;
           d.mesh.rotation.z += d.vr.z * dt;
-          if (explodedAt > 2.6) d.mesh.visible = false;
+          if (trailOn) {
+            tmp.copy(d.mesh.position);
+            tmp2.copy(d.v).multiplyScalar(-0.16);
+            if (rng.rand() < 0.5) sparks.emit(tmp, tmp2, rng.range(0.16, 0.34), rng.range(0.05, 0.12));
+            // Каждый третий кусок — «крупный»: дымный след
+            if (di % 3 === 0 && rng.rand() < 0.3) {
+              smoke.emit(tmp, tmp2.multiplyScalar(0.3), rng.range(0.5, 0.9), rng.range(0.3, 0.6));
+            }
+          }
+          if (explodedAt > 3.2) d.mesh.visible = false;
         }
         // Вспышка гаснет за ~0.4 с
-        const f = Math.max(0, 1 - explodedAt / 0.4);
-        (flash.material as THREE.MeshBasicMaterial).opacity = f * f * 0.92;
-        flash.scale.setScalar(1 + explodedAt * 2.4);
+        const f = Math.max(0, 1 - explodedAt / 0.45);
+        (flash.material as THREE.MeshBasicMaterial).opacity = f * f;
+        flash.scale.setScalar(1.3 + explodedAt * 3.1);
         flash.lookAt(camera.position);
         flash.visible = f > 0.01;
-        // Ударное кольцо расходится и тает
+        // Огненный шар растёт и тает, билборды к камере
+        const ft = explodedAt;
+        const fscale = 0.6 + easeOutCubic(Math.min(1, ft / 0.55)) * 7.5;
+        const fop = Math.max(0, 1 - ft / 0.95);
+        fireA.visible = fireB.visible = fop > 0.01;
+        if (fireA.visible) {
+          fireA.scale.setScalar(fscale * (1 + Math.sin(elapsed * 31) * 0.05));
+          fireB.scale.setScalar(fscale * (1 + Math.cos(elapsed * 27) * 0.05));
+          (fireA.material as THREE.MeshBasicMaterial).opacity = fop * fop;
+          (fireB.material as THREE.MeshBasicMaterial).opacity = fop * fop * 0.85;
+          fireA.lookAt(camera.position);
+          fireB.lookAt(camera.position);
+          fireB.rotateZ(Math.PI / 2);
+        }
+        // Облако огненных шаров: растёт, поднимается, вращается, гаснет с задержкой
+        for (const b of fireCloud) {
+          const bt = explodedAt - b.delay;
+          if (bt < 0) { b.mesh.visible = false; continue; }
+          const bScale = 0.5 + easeOutCubic(Math.min(1, bt / 0.5)) * (2.4 + b.delay * 3);
+          const bOp = Math.max(0, 1 - bt / 1.35);
+          b.mesh.visible = bOp > 0.01;
+          if (b.mesh.visible) {
+            b.mesh.position.y += b.rise * dt;
+            b.mesh.scale.setScalar(bScale * (1 + Math.sin(elapsed * 23 + b.delay * 40) * 0.07));
+            (b.mesh.material as THREE.MeshBasicMaterial).opacity = bOp * bOp * 0.9;
+            b.mesh.lookAt(camera.position);
+            b.mesh.rotateZ(b.spin * elapsed);
+          }
+        }
+        // Столб пламени: быстро растёт вверх, гаснет за 0.7 с
+        const colT = explodedAt;
+        const colOp = Math.max(0, 1 - colT / 0.7);
+        flameCol.visible = colOp > 0.01;
+        if (flameCol.visible) {
+          flameCol.scale.set(1.4 + colT * 1.2, 0.6 + easeOutCubic(Math.min(1, colT / 0.4)) * 7.5, 1);
+          flameCol.position.y = debrisGroup.position.y + flameCol.scale.y * 0.32;
+          (flameCol.material as THREE.MeshBasicMaterial).opacity = colOp * colOp;
+          flameCol.lookAt(camera.position);
+        }
+        // Цепная реакция: вторичные детонации вспыхивают по очереди,
+        // каждая со своим всплеском искр
+        for (const a of afters) {
+          const at2 = explodedAt - a.delay;
+          if (at2 < 0) { a.mesh.visible = false; continue; }
+          const aOp = Math.max(0, 1 - at2 / 0.6);
+          a.mesh.visible = aOp > 0.01;
+          if (a.mesh.visible) {
+            a.mesh.scale.setScalar(0.4 + easeOutCubic(Math.min(1, at2 / 0.3)) * 4.6);
+            (a.mesh.material as THREE.MeshBasicMaterial).opacity = aOp * aOp;
+            a.mesh.lookAt(camera.position);
+            a.mesh.rotateZ(at2 * 2.4);
+          }
+          if (!a.burst && at2 >= 0) {
+            a.burst = true;
+            tmp.copy(a.mesh.position);
+            for (let k = 0; k < Math.round(particleBudget(quality) * 26); k++) {
+              const [vx, vy, vz] = rng.onSphere(1);
+              const sp = rng.range(1.4, 5);
+              sparks.emit(tmp, tmp2.set(vx * sp, vy * sp, vz * sp), rng.range(0.3, 0.8), rng.range(0.16, 0.34));
+            }
+            blastLight.intensity += 8;
+          }
+        }
+        // Дымовая колонна поднимается ещё полторы секунды
+        if (ft < 1.6) {
+          smokeTimer += dt;
+          if (smokeTimer > 0.03) {
+            smokeTimer = 0;
+            tmp.copy(debrisGroup.position);
+            tmp.x += rng.spread(0.5); tmp.y += rng.range(0, 0.6); tmp.z += rng.spread(0.5);
+            tmp2.set(rng.spread(0.4), rng.range(1.2, 2.6), rng.spread(0.4));
+            smoke.emit(tmp, tmp2, rng.range(1.6, 3), rng.range(0.8, 1.7));
+          }
+        }
+        // Ударные кольца: первое + догоняющая вторая волна
         const sr = Math.max(0, 1 - explodedAt / 0.95);
         (shock.material as THREE.MeshBasicMaterial).opacity = sr * 0.8;
         shock.scale.setScalar(1 + easeOutCubic(Math.min(1, explodedAt / 0.95)) * 16);
         shock.lookAt(camera.position);
         shock.visible = sr > 0.01;
-        blastLight.intensity = Math.max(0, 26 * (1 - explodedAt / 0.7));
-        // Камера отъезжает и слегка дрожит
+        const s2t = Math.max(0, explodedAt - 0.14);
+        const s2r = Math.max(0, 1 - s2t / 0.8);
+        (shock2.material as THREE.MeshBasicMaterial).opacity = s2r * 0.55;
+        shock2.scale.setScalar(1 + easeOutCubic(Math.min(1, s2t / 0.8)) * 22);
+        shock2.lookAt(camera.position);
+        shock2.visible = s2r > 0.01;
+        // Свет: главный пик + вторичный от огненного шара
+        blastLight.intensity = Math.max(blastLight.intensity - 40 * dt,
+          Math.max(0, 34 * (1 - explodedAt / 0.7)) +
+          (ft > 0.1 ? 16 * Math.max(0, 1 - Math.abs(ft - 0.3) / 0.5) : 0));
+        // Камера отъезжает и дрожит с лёгким креном — удар ощущается
         const back = 8.6 + Math.min(2.4, explodedAt * 1.4);
+        // Зум-панч: в первые 0.3 с камера резко расширяет поле зрения
+        const punch = Math.max(0, 1 - explodedAt / 0.3) * 9;
+        camera.fov += (60 + punch - camera.fov) * (1 - Math.pow(0.01, dt));
+        camera.updateProjectionMatrix();
         camTarget.set(0, debrisGroup.position.y + 0.4, back);
         camera.position.lerp(camTarget, 1 - Math.pow(0.02, dt));
         camera.lookAt(debrisGroup.position.x, debrisGroup.position.y, debrisGroup.position.z);
+        if (explodedAt < 0.9) camera.rotateZ(Math.sin(elapsed * 37) * 0.02 * (0.9 - explodedAt));
         void elapsed;
       }
     });
 
     // Первый кадр отрисован — можно сообщать о готовности
+    // Шейдеры всех объектов (включая скрытые) компилируем заранее:
+    // первый взрыв/запуск/открытие двери больше не фризит
+    stage.precompile();
     stage.render();
     onReadyRef.current?.();
 
@@ -891,6 +1236,8 @@ export default function RocketScene({
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      cancelled = true;
+      disposeModel('rocket.glb');
       document.removeEventListener('visibilitychange', onVisible);
       stopLoop();
       smoke.dispose(); embers.dispose(); sparks.dispose(); speedLines.dispose();
@@ -918,14 +1265,8 @@ export default function RocketScene({
 
       {ghostActive && (
         <div className="scene-hud">
-          <div className="scene-hud__top">
-            <div className="hud-pill hud-pill--green">
-              кэшаут x{cashoutAt.toFixed(2)}
-            </div>
-            <div className={`hud-pill ${ghostDone ? 'hud-pill--red' : 'hud-pill--gold'}`}>
-              {ghostDone ? 'финальная точка' : 'призрак летит'}
-            </div>
-          </div>
+          {/* Верхние плашки ушли в Rocket.tsx: два наложенных .scene-hud
+              (этот и внешний) дрались за правый верхний угол */}
           <div style={{ margin: '0 auto', textAlign: 'center' }}>
             <div
               className="mult"

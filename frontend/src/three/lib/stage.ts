@@ -28,11 +28,24 @@ export function detectQuality(): Quality {
   const cores = navigator.hardwareConcurrency ?? 4;
   const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 4;
   const dpr = window.devicePixelRatio || 1;
+  // Сенсорное устройство/мобильный UA — это телефон или планшет: им 'high'
+  // (тени + полный DPR) не по карману даже при свежих 8 ядрах
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  if (coarse || mobileUA) {
+    return cores >= 6 && mem >= 4 ? 'medium' : 'low';
+  }
   // Очень маленькие экраны в паре с высоким DPR — почти всегда бюджетные устройства
   const weak = cores <= 4 || mem <= 3;
   if (cores >= 8 && mem >= 6 && dpr <= 3) return 'high';
   if (weak && dpr >= 3) return 'low';
   return weak ? 'medium' : 'high';
+}
+
+/** Бюджет количества частиц: на средних устройствах режем наполнение,
+ *  на слабых — до трети. Сцены обязаны множить базовое число на бюджет. */
+export function particleBudget(quality: Quality): number {
+  return quality === 'high' ? 1 : quality === 'medium' ? 0.62 : 0.34;
 }
 
 export interface StageOptions {
@@ -51,6 +64,20 @@ export interface StageOptions {
   /** Ограничение pixelRatio: для bloom-сцен дешевле держать 1.5–1.75. */
   maxPixelRatio?: number;
   exposure?: number;
+  /** Идентификатор для дев-оверлея статистики (`/scenes.html`). */
+  statsId?: string;
+}
+
+/* ── Статистика для дев-оверлея (`/scenes.html`, ТЗ 6.4) ─────────────────
+ * Сцена с `statsId` раз в 500 мс пишет сюда FPS/треугольники/draw calls —
+ * оверлей читает реестр, не трогая сцены.
+ */
+export interface StageStats { fps: number; triangles: number; calls: number; }
+const statsRegistry = new Map<string, StageStats>();
+export function getStageStats(): Record<string, StageStats> {
+  const out: Record<string, StageStats> = {};
+  statsRegistry.forEach((v, k) => { out[k] = { ...v }; });
+  return out;
 }
 
 export interface Stage {
@@ -61,6 +88,9 @@ export interface Stage {
   quality: Quality;
   /** Пересобрать composer (после ресайза или смены качества). */
   setSize: () => void;
+  /** Преконтролировать шейдеры ВСЕХ объектов (включая скрытые), чтобы
+   *  первое появление взрыва/двери/пламени не давало фриза компиляции. */
+  precompile: () => void;
   /** Кадр. Возвращает false, если сцену уже уничтожили. */
   render: () => void;
   /** Замер FPS и авто-деградация; вызвать в цикле анимации. */
@@ -79,14 +109,17 @@ export function createStage(opts: StageOptions): Stage {
   const width = Math.max(1, container.clientWidth);
   const height = Math.max(1, container.clientHeight);
 
+  const dprNow = window.devicePixelRatio || 1;
   const renderer = new THREE.WebGLRenderer({
-    antialias: quality !== 'low',
+    // MSAA нужен только при низком DPR: на ретине пикселей и так с запасом,
+    // а антиалиасинг — дорогая операция полного разрешения
+    antialias: quality !== 'low' && dprNow < 1.75,
     alpha: opts.transparent ?? false,
     powerPreference: 'high-performance',
     stencil: false,
     depth: true
   });
-  const capByQuality = quality === 'high' ? 2 : quality === 'medium' ? 1.65 : 1.25;
+  const capByQuality = quality === 'high' ? 1.75 : quality === 'medium' ? 1.5 : 1.15;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, opts.maxPixelRatio ?? capByQuality));
   renderer.setSize(width, height, false);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -120,7 +153,9 @@ export function createStage(opts: StageOptions): Stage {
   if (wantBloom) {
     try {
       composer = new EffectComposer(renderer);
-      composer.setPixelRatio(renderer.getPixelRatio());
+      // Постобработка дешевле основного рендера: блум всё равно размывает,
+      // а пиксели экономятся кратно
+      composer.setPixelRatio(Math.min(renderer.getPixelRatio(), 1.35));
       composer.setSize(width, height);
       composer.addPass(new RenderPass(scene, camera));
       bloomPass = new UnrealBloomPass(
@@ -145,8 +180,27 @@ export function createStage(opts: StageOptions): Stage {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
-    composer?.setSize(w, h);
+    if (composer) {
+      composer.setPixelRatio(Math.min(renderer.getPixelRatio(), 1.35));
+      composer.setSize(w, h);
+    }
     bloomPass?.setSize(w, h);
+  };
+
+  /* ── Предкомпиляция: компилируем шейдеры даже скрытых объектов ─────────
+   * Иначе первая ракета/взрыв/открытая дверь дают фриз на 50–200 мс —
+   * three компилирует программу материала при ПЕРВОМ видимом рендере.
+   */
+  const precompile = () => {
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (!o.visible) {
+        o.visible = true;
+        hidden.push(o);
+      }
+    });
+    renderer.compile(scene, camera);
+    hidden.forEach((o) => { o.visible = false; });
   };
 
   /* ── Ресайз: ResizeObserver ловит и поворот экрана, и открытие клавиатуры ─ */
@@ -164,39 +218,98 @@ export function createStage(opts: StageOptions): Stage {
   let degraded = false;
   let disposed = false;
 
+  /* ── Динамическое разрешение (DRS) ─────────────────────────────────────
+   * Главный механизм плавности: рендерим в доле от базового разрешения и
+   * непрерывно подстраиваем её под реальное железо. Слабый ноутбук или
+   * телефон получает 0.55–0.7× разрешения и стабильные 50+ FPS; мощный ПК
+   * сидит на 1.0 и не теряет ни пикселя. Композиция сцены не меняется —
+   * меняется только плотность пикселей, под тонмаппингом это почти
+   * незаметно, а тайминг игр (ракета, барабаны) остаётся точным.
+   */
+  const baseCap = capByQuality;
+  let resScale = 1.0;
+  let fpsEma = 60;
+  let lastAdjust = 0;
+  let shadowsKilled = false;
+
+  const killShadows = () => {
+    if (shadowsKilled || !renderer.shadowMap.enabled) return;
+    shadowsKilled = true;
+    renderer.shadowMap.enabled = false;
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.material) {
+        const list = Array.isArray(m.material) ? m.material : [m.material];
+        list.forEach((x) => { x.needsUpdate = true; });
+      }
+    });
+  };
+
+  const applyResolution = () => {
+    renderer.setPixelRatio(Math.max(0.6, Math.min(window.devicePixelRatio || 1, baseCap * resScale)));
+    setSize();
+  };
+
   const tickPerf = () => {
-    if (disposed || degraded) return;
+    if (disposed) return;
     frames++;
     const now = performance.now();
     const elapsed = now - windowStart;
-    if (elapsed < 1600) return;
+    if (elapsed < 500) return;
     const fps = (frames * 1000) / elapsed;
     frames = 0;
     windowStart = now;
+    fpsEma = fpsEma * 0.65 + fps * 0.35;   // сглаживание против скачков
 
-    // Меньше 34 FPS два замера подряд — гасим bloom и режем pixelRatio.
-    // Композиция сцены не меняется, поэтому деградация не выглядит «поломкой».
-    if (fps < 34) {
+    // Первые две секунды сцена разогревается (компиляции, текстуры) —
+    // решения по качеству в это время не принимаем
+    if (now < firstFrameAt + 2000) return;
+
+    // Дорогая постобработка гасится первой и навсегда
+    if (fpsEma < 42 && bloomPass && bloomPass.strength > 0) {
+      bloomPass.strength = 0;
       degraded = true;
-      if (bloomPass) bloomPass.strength = 0;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.1));
-      setSize();
-      if (renderer.shadowMap.enabled) {
-        renderer.shadowMap.enabled = false;
-        scene.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (m.material) {
-            const list = Array.isArray(m.material) ? m.material : [m.material];
-            list.forEach((x) => { x.needsUpdate = true; });
-          }
-        });
-      }
-      console.info(`[3d] FPS ${fps.toFixed(0)} — постобработка отключена для плавности`);
+      console.info(`[3d] FPS ${fpsEma.toFixed(0)} — постобработка отключена`);
+      return;
+    }
+
+    // Кулдаун между изменениями разрешения, чтобы не дёргать канвас
+    if (now - lastAdjust < 1000) return;
+
+    if (fpsEma < 45 && resScale > 0.5) {
+      resScale = Math.max(0.5, resScale * (fpsEma < 30 ? 0.72 : 0.85));
+      lastAdjust = now;
+      applyResolution();
+      if (fpsEma < 26) killShadows();   // совсе́м слабое железо — без теней
+      console.info(`[3d] FPS ${fpsEma.toFixed(0)} — разрешение ${(resScale * 100).toFixed(0)}%`);
+    } else if (fpsEma > 58.5 && resScale < 1) {
+      resScale = Math.min(1, resScale * 1.12);
+      lastAdjust = now;
+      applyResolution();
+      console.info(`[3d] FPS ${fpsEma.toFixed(0)} — разрешение восстановлено до ${(resScale * 100).toFixed(0)}%`);
     }
   };
 
+  /* ── Статистика: FPS считаем всегда (не только до деградации) ────────── */
+  let statFrames = 0;
+  let statInterval: ReturnType<typeof setInterval> | null = null;
+  if (opts.statsId) {
+    const id = opts.statsId;
+    statInterval = setInterval(() => {
+      statsRegistry.set(id, {
+        fps: statFrames * 2,
+        triangles: renderer.info.render.triangles,
+        calls: renderer.info.render.calls
+      });
+      statFrames = 0;
+    }, 500);
+  }
+
+  let firstFrameAt = 0;
   const render = () => {
     if (disposed) return;
+    if (!firstFrameAt) firstFrameAt = performance.now();
+    statFrames++;
     if (composer) composer.render();
     else renderer.render(scene, camera);
   };
@@ -208,6 +321,8 @@ export function createStage(opts: StageOptions): Stage {
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    if (statInterval) clearInterval(statInterval);
+    if (opts.statsId) statsRegistry.delete(opts.statsId);
     ro?.disconnect();
     window.removeEventListener('resize', setSize);
     window.removeEventListener('orientationchange', setSize);
@@ -220,7 +335,7 @@ export function createStage(opts: StageOptions): Stage {
 
   return {
     renderer, scene, camera, composer, quality,
-    setSize, render, tickPerf, setBloom, dispose,
+    setSize, precompile, render, tickPerf, setBloom, dispose,
     width: () => Math.max(1, container.clientWidth),
     height: () => Math.max(1, container.clientHeight)
   };

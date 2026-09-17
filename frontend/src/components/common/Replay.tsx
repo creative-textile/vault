@@ -32,6 +32,8 @@ export default function Replay() {
   const [r, setR] = useState<any>();
   const [err, setErr] = useState('');
   const [elapsed, setElapsed] = useState(0);
+  /** Инкремент на «Смотреть заново»: перезапускает rAF-таймлайн. */
+  const [runId, setRunId] = useState(0);
   const [copied, setCopied] = useState(false);
   /** Звук по умолчанию включён, но браузер может потребовать жест пользователя. */
   const [soundOn, setSoundOn] = useState(true);
@@ -48,6 +50,8 @@ export default function Replay() {
   }, [game, id]);
 
   // ── Таймлайн повтора ────────────────────────────────────────────────────
+  // Зависит и от runId: без этого «Смотреть заново» обнулял elapsed, но
+  // цикл уже был остановлен — ракета улетала в бесконечный полёт на x1.
   useEffect(() => {
     if (!r) return;
     const start = performance.now();
@@ -58,7 +62,8 @@ export default function Replay() {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [r]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r, runId]);
 
   /** Однократные звуковые отметки таймлайна: каждая срабатывает ровно один раз. */
   const marksRef = useRef<Record<string, boolean>>({});
@@ -180,9 +185,20 @@ export default function Replay() {
   const restart = () => {
     marksRef.current = {};
     setElapsed(0);
+    setRunId((x) => x + 1);
     tickRef.current = createTickTracker();
     sfx.unlock();
-    if (soundOnRef.current) sfx.transition();
+    if (soundOnRef.current) {
+      sfx.transition();
+      // Эффект, заводящий турбину, исполняется только на загрузку данных
+      // ([r, soundOn]) — после «Смотреть заново» его никто не повторит,
+      // поэтому зажигаем двигатель прямо здесь
+      if (r?.game === 'rocket') {
+        sfx.engineStop();
+        sfx.ignite();
+        sfx.engineStart();
+      }
+    }
   };
 
   return (
@@ -218,6 +234,7 @@ export default function Replay() {
 
       {r.game === 'rocket' && (
         <RocketScene
+          key={`rocket-${runId}`}
           phase={rocketPhase} multiplier={mult} cashoutAt={r.outcome.cashout_at || 1}
           crashAt={r.outcome.crash_at} seed={r.animation.seed}
         />

@@ -807,6 +807,112 @@
   animation: rise-in .5s var(--ease-out) both;
 }
 .onboarding-dots { display: flex; gap: 9px; margin-top: 26px; }
+
+/* Вордмарк и слоган первого экрана онбординга */
+.onboarding-wordmark {
+  font-family: var(--font-head);
+  font-size: clamp(40px, 13vw, 58px);
+  font-weight: 900;
+  letter-spacing: .18em;
+  margin: 14px 0 2px;
+  padding-left: .18em; /* компенсация letter-spacing для центровки */
+  background: linear-gradient(180deg, #fff3c9 0%, var(--gold) 46%, #a8770f 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 4px 26px rgba(245,197,66,.4));
+  animation: rise-in .5s var(--ease-out) both;
+}
+.onboarding-tagline {
+  font-size: 15px;
+  color: var(--text-2);
+  letter-spacing: .02em;
+  margin-bottom: 14px;
+  animation: rise-in .56s var(--ease-out) both;
+}
+.onboarding-badges { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 22px; }
+.onb-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  color: var(--text-2);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+}
+
+/* Карточки четырёх игр */
+.onb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  max-width: 380px;
+  margin-bottom: 22px;
+}
+.onb-card {
+  padding: 14px 12px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255,255,255,.09);
+  background: var(--bg-3);
+  text-align: center;
+  animation: rise-in .5s var(--ease-out) both;
+}
+.onb-card:nth-child(2) { animation-delay: .06s; }
+.onb-card:nth-child(3) { animation-delay: .12s; }
+.onb-card:nth-child(4) { animation-delay: .18s; }
+.onb-card__icon {
+  width: 44px; height: 44px;
+  margin: 0 auto 8px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--gold);
+  background: rgba(245,197,66,.1);
+  border: 1px solid rgba(245,197,66,.3);
+}
+.onb-card--red .onb-card__icon { color: var(--red); background: rgba(255,59,92,.1); border-color: rgba(255,59,92,.3); }
+.onb-card--violet .onb-card__icon { color: #a78bfa; background: rgba(139,92,246,.12); border-color: rgba(139,92,246,.34); }
+.onb-card--green .onb-card__icon { color: var(--green); background: rgba(34,224,122,.1); border-color: rgba(34,224,122,.3); }
+.onb-card__name { font-family: var(--font-head); font-weight: 800; font-size: 15px; margin-bottom: 3px; }
+.onb-card__text { font-size: 12px; line-height: 1.35; color: var(--text-dim); }
+
+/* Экран пополнения */
+.onb-deposit {
+  width: 100%; max-width: 380px;
+  display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 24px;
+}
+.onb-deposit__row {
+  display: flex; align-items: center; gap: 12px;
+  text-align: left;
+  font-size: 14px; line-height: 1.4;
+  color: var(--text-2);
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255,255,255,.09);
+  background: var(--bg-3);
+  animation: rise-in .5s var(--ease-out) both;
+}
+.onb-deposit__row:nth-child(2) { animation-delay: .07s; }
+.onb-deposit__row:nth-child(3) { animation-delay: .14s; }
+.onb-deposit__icon {
+  flex: 0 0 auto;
+  width: 38px; height: 38px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--gold);
+  background: rgba(245,197,66,.1);
+  border: 1px solid rgba(245,197,66,.3);
+}
+
+/* Кнопки и «Пропустить» */
+.onb-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; max-width: 380px; }
+.onb-actions .btn { width: 100%; }
+.onb-skip {
+  background: none; border: none; padding: 4px 10px;
+  color: var(--text-dim); font-size: 13px;
+  cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.onb-skip:hover { color: var(--text-2); }
 .onboarding-dot {
   width: 9px; height: 9px;
   border-radius: 50%;

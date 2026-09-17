@@ -26,10 +26,11 @@
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
+import { createStageSafe, startLoop, detectQuality, particleBudget } from '../lib/stage';
 import { createRng, easeOutCubic } from '../lib/rng';
 import { gold, polishedGold, darkSteel, neon, additive, disposeObject } from '../lib/materials';
-import { coinFace, coinEdge, brushedMetal, arenaFloor, neonRing, radialGlow, glowSprite, smokeSprite } from '../lib/textures';
+import { coinFace, coinEdge, brushedMetal, blackMarble, arenaMedallion, nebula, neonRing, radialGlow, radialFade, glowSprite, smokeSprite, lightPillar, engravedPlate } from '../lib/textures';
+import { loadModel, disposeModel } from '../lib/models';
 import { ParticleField } from '../lib/particles';
 import { FLIP_MS, sampleFlip } from './flipMath';
 
@@ -88,7 +89,8 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       bloom: quality === 'high' ? 0.78 : quality === 'medium' ? 0.5 : 0,
       bloomRadius: 0.6,
       bloomThreshold: 0.62,
-      exposure: 1.1
+      exposure: 1.1,
+      statsId: 'duel'
     });
     if (!stage) return;
     const { scene, camera } = stage;
@@ -170,19 +172,93 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     coin.position.y = 0.1;
     scene.add(coin);
 
-    /* ══════════════════════════ АРЕНА ═══════════════════════════════════ */
-    const floorTex = arenaFloor();
-    floorTex.repeat.set(2.4, 2.4);
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(7.4, 96),
-      new THREE.MeshStandardMaterial({
-        map: floorTex, metalness: 0.42, roughness: 0.34, envMapIntensity: 0.9
-      })
+    /* ═══ 3D-МОДЕЛЬ МОНЕТЫ (ТЗ): чеканка из .glb вместо плоских сторон ═══
+     * Группу `coin` сцена уже крутит/бросает — модель садится внутрь неё и
+     * наследует всю логику фаз. Процедурная монета остаётся фолбэком.
+     */
+    let cancelled = false;
+    const coinHolder = new THREE.Group();
+    coin.add(coinHolder);
+    loadModel('coin.glb', { quality, targetHeight: COIN_R * 2 }).then((m) => {
+      if (cancelled || !m) return;
+      coinHolder.add(m.root);
+      // лоадер ставит низ на floorY=0 → центр монеты на R выше; возвращаем в 0
+      coinHolder.position.y = -COIN_R;
+      [body, edge, heads, tails].forEach((o) => { o.visible = false; });
+    });
+
+    /* ══════════════════════════ ПАНТЕОН СУДЬБЫ (арена с нуля, R3) ═══════
+     * Фидбек: «всё, кроме монеты, не нравится — переделать с нуля».
+     * Новый сеттинг: храм судьбы — чёрный мрамор, золотая компасная роза,
+     * кольцо каннелированных колонн с жаровнями, открытый космос за ними.
+     */
+    // Небо: туманность за колоннадой
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(60, 32, 20),
+      new THREE.MeshBasicMaterial({ map: nebula(), side: THREE.BackSide, depthWrite: false })
     );
+    scene.add(sky);
+
+    // Пол: полированный чёрный мрамор
+    const floorMat = new THREE.MeshPhysicalMaterial({
+      map: blackMarble(), color: 0xc8c8d4, metalness: 0.46, roughness: 0.14,
+      envMapIntensity: 1.25, clearcoat: 0.85, clearcoatRoughness: 0.12
+    });
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(7.4, 96), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = FLOOR_Y;
     floor.receiveShadow = quality === 'high';
     scene.add(floor);
+
+    // Золотая компасная роза под монетой — центр композиции
+    const medallion = new THREE.Mesh(
+      new THREE.CircleGeometry(3.1, 96),
+      new THREE.MeshBasicMaterial({
+        map: arenaMedallion(), transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      })
+    );
+    medallion.rotation.x = -Math.PI / 2;
+    medallion.position.y = FLOOR_Y + 0.01;
+    scene.add(medallion);
+    // Физическое золотое кольцо по краю розы — плашка больше не плоская
+    const roseRim = new THREE.Mesh(new THREE.TorusGeometry(3.1, 0.045, 10, 110), polishedGold());
+    roseRim.rotation.x = Math.PI / 2;
+    roseRim.position.y = FLOOR_Y + 0.03;
+    scene.add(roseRim);
+
+    // Радиальное затемнение пола под ареной — роза получает глубину
+    const floorAO = new THREE.Mesh(
+      new THREE.CircleGeometry(4.4, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, alphaMap: radialFade(),
+        opacity: 0.3, depthWrite: false
+      })
+    );
+    floorAO.rotation.x = -Math.PI / 2;
+    floorAO.position.y = FLOOR_Y + 0.016;
+    scene.add(floorAO);
+
+    // Контактная тень монеты — якорь, даже когда она левитирует
+    const coinShadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 2.6),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, alphaMap: radialFade(),
+        opacity: 0.4, depthWrite: false
+      })
+    );
+    coinShadow.rotation.x = -Math.PI / 2;
+    coinShadow.position.y = FLOOR_Y + 0.02;
+    scene.add(coinShadow);
+
+    // Ореол за монетой — главный приз обязан гореть (подхватывается блумом)
+    const coinHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: radialGlow('#ffcf5e', 0.05), transparent: true, opacity: 0.34,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    coinHalo.scale.setScalar(4.6);
+    coinHalo.position.set(0, 0.5, -1.4);
+    scene.add(coinHalo);
 
     // Неоновые кольца на полу
     const ringOuter = new THREE.Mesh(
@@ -207,6 +283,71 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     ringInner.position.y = FLOOR_Y + 0.02;
     scene.add(ringInner);
 
+    // Золотой обод арены: физическая геометрия вместо плоского рисунка
+    const arenaRim = new THREE.Mesh(new THREE.TorusGeometry(7.42, 0.09, 12, 128), polishedGold());
+    arenaRim.rotation.x = Math.PI / 2;
+    arenaRim.position.y = FLOOR_Y + 0.05;
+    arenaRim.castShadow = quality === 'high';
+    scene.add(arenaRim);
+
+    /* ── Колоннада: 10 каннелированных колонн с жаровнями ──────────────── */
+    // Каннелюры — геометрией (смещение вершин по синусу угла), а не текстурой:
+    // блик реально бежит по граням при облете камеры
+    const flutedColumn = (r: number, h: number): THREE.CylinderGeometry => {
+      const geo = new THREE.CylinderGeometry(r, r * 1.06, h, 60, 4, false);
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const y = pos.getY(i);
+        const ang = Math.atan2(z, x);
+        const flute = 1 + Math.cos(ang * 14) * 0.05;
+        const entasis = 1 - (y / h + 0.5) * 0.1; // лёгкое утоньшение к верху
+        pos.setX(i, x * flute * entasis);
+        pos.setZ(i, z * flute * entasis);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+    const columnMat = new THREE.MeshStandardMaterial({
+      map: blackMarble(), color: 0x9a9ab0, roughness: 0.42, metalness: 0.2,
+      envMapIntensity: 0.75
+    });
+    const flames: Array<{ s: THREE.Sprite; ph: number }> = [];
+    const COLS = quality === 'low' ? 6 : 10;
+    for (let i = 0; i < COLS; i++) {
+      const a = (i / COLS) * Math.PI * 2 + Math.PI / COLS;
+      const x = Math.cos(a) * 10.6;
+      const z = Math.sin(a) * 10.6;
+      const col = new THREE.Group();
+      const shaft = new THREE.Mesh(flutedColumn(0.52, 6.4), columnMat);
+      shaft.position.y = 3.2;
+      shaft.castShadow = quality === 'high';
+      col.add(shaft);
+      // База и капитель: золото
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.8, 0.3, 24), gold());
+      base.position.y = 0.15;
+      col.add(base);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.6, 0.34, 24), gold());
+      cap.position.y = 6.5;
+      col.add(cap);
+      // Жаровня: чаша + живой огонь-спрайт
+      const bowl = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.1, 10, 24), darkSteel({ roughness: 0.44 }));
+      bowl.rotation.x = Math.PI / 2;
+      bowl.position.y = 6.78;
+      col.add(bowl);
+      const flame = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowSprite('#ffb347', 0.3), transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      }));
+      flame.position.y = 7.15;
+      flame.scale.setScalar(0.9);
+      col.add(flame);
+      flames.push({ s: flame, ph: i * 1.7 });
+      col.position.set(x, FLOOR_Y, z);
+      scene.add(col);
+    }
+
     // Лужа света под монетой
     const pool = new THREE.Mesh(
       new THREE.PlaneGeometry(6.4, 6.4),
@@ -219,27 +360,57 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     pool.position.y = FLOOR_Y + 0.008;
     scene.add(pool);
 
-    /* ── Постаменты игроков: золото (создатель) и циан (соперник) ───────── */
+    /* ── Постаменты игроков: мрамор + золото, цвета идентичности ───────── */
     const podiums: THREE.Group[] = [];
-    const makePodium = (x: number, colorHex: number, glowCss: string): THREE.Group => {
+    // Тумбы приглушены: монета — единственный герой кадра
+    const podiumMarble = new THREE.MeshStandardMaterial({
+      map: blackMarble(), color: 0x4c5066, roughness: 0.45, metalness: 0.35,
+      envMapIntensity: 0.6
+    });
+    const makePodium = (x: number, colorHex: number, glowCss: string, label: string): THREE.Group => {
+      const plateTex = engravedPlate(label);
+      plateTex.repeat.set(2, 1);
       const g = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 1.02, 0.5, 6), darkSteel({ roughness: 0.5 }));
-      base.position.y = 0.25;
+      // Ярус 1: восьмигранная мраморная плита с золотым кантом
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.08, 0.22, 8), podiumMarble);
+      base.position.y = 0.11;
       base.castShadow = quality === 'high';
       base.receiveShadow = quality === 'high';
       g.add(base);
+      const baseRim = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.03, 8, 8), polishedGold());
+      baseRim.rotation.x = Math.PI / 2;
+      baseRim.position.y = 0.23;
+      g.add(baseRim);
 
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.07, 48), neon(colorHex, 1.9));
-      top.position.y = 0.53;
-      g.add(top);
-
-      const rim = new THREE.Mesh(
-        new THREE.TorusGeometry(0.84, 0.028, 10, 56),
-        polishedGold()
+      // Ярус 2: каннелированный мраморный барабан с гравированной лентой
+      const shaft = new THREE.Mesh(flutedColumn(0.56, 0.72), podiumMarble);
+      shaft.position.y = 0.58;
+      shaft.castShadow = quality === 'high';
+      g.add(shaft);
+      const plate = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.635, 0.635, 0.2, 48, 1, true),
+        new THREE.MeshStandardMaterial({
+          map: plateTex, metalness: 0.82, roughness: 0.34,
+          envMapIntensity: 1.1, side: THREE.DoubleSide
+        })
       );
-      rim.rotation.x = Math.PI / 2;
-      rim.position.y = 0.52;
-      g.add(rim);
+      plate.position.y = 0.56;
+      g.add(plate);
+      // Золотые кольца барабана
+      for (const [ry, rr] of [[0.94, 0.6], [0.24, 0.66]] as const) {
+        const rimG = new THREE.Mesh(new THREE.TorusGeometry(rr, 0.032, 10, 64), polishedGold());
+        rimG.rotation.x = Math.PI / 2;
+        rimG.position.y = ry;
+        g.add(rimG);
+      }
+
+      // Ярус 3: капитель и светящаяся столешница цвета игрока
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.62, 0.14, 24), podiumMarble);
+      cap.position.y = 1.0;
+      g.add(cap);
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.06, 48), neon(colorHex, 1.9));
+      top.position.y = 1.1;
+      g.add(top);
 
       const glow = new THREE.Mesh(
         new THREE.PlaneGeometry(3.6, 3.6),
@@ -253,21 +424,31 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       g.add(glow);
 
       const light = new THREE.PointLight(colorHex, 2.4, 6.5, 2);
-      light.position.y = 1.1;
+      light.position.y = 1.7;
       g.add(light);
 
+      // Световой пилон за постаментом — игрок «подсветлен» как на афише.
+      // Спрайт вместо плоскости: билборд всегда смотрит в камеру, поэтому
+      // сбоку не видно «срезанных по диагонали» граней
+      const pillar = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: lightPillar(glowCss), transparent: true, opacity: 0.5,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+      }));
+      pillar.scale.set(1.15, 4.6, 1);
+      pillar.position.set(0, 2.3, -0.75);
+      g.add(pillar);
       g.position.set(x, FLOOR_Y, -0.3);
       scene.add(g);
       podiums.push(g);
       return g;
     };
-    makePodium(-2.85, 0xf5c542, '#f5c542');
-    makePodium(2.85, 0x22d3ee, '#22d3ee');
+    makePodium(-2.85, 0xf5c542, '#f5c542', 'СОЗДАТЕЛЬ');
+    makePodium(2.85, 0x22d3ee, '#22d3ee', 'СОПЕРНИК');
 
     /* ── Свет: тёплый прожектор сверху + цветные контровые ─────────────── */
     scene.add(new THREE.AmbientLight(0x6a5aa8, 0.7));
 
-    const spot = new THREE.SpotLight(0xfff0c0, 62, 26, Math.PI / 6.4, 0.42, 1.6);
+    const spot = new THREE.SpotLight(0xfff0c0, 62, 30, Math.PI / 5.8, 0.95, 1.5);
     spot.position.set(0.6, 8.4, 2.6);
     spot.target.position.set(0, 0, 0);
     if (quality === 'high') {
@@ -287,7 +468,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     const beamH = 9.4;
     const beamGeo = new THREE.ConeGeometry(2.9, beamH, 40, 1, true);
     const beamMat = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.16 } },
+      uniforms: { uColor: { value: new THREE.Color(0xffe6a8) }, uOpacity: { value: 0.065 } },
       vertexShader: /* glsl */`
         varying float vFall;
         varying vec3 vNormalV;
@@ -308,7 +489,7 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
           // Светлее к широкому концу и только на силуэте конуса: середину
           // насквозь видеть не должны, иначе луч выглядит стеклянной воронкой
           float edge = 1.0 - abs(dot(normalize(vNormalV), vec3(0.0, 0.0, 1.0)));
-          float a = uOpacity * pow(clamp(vFall, 0.0, 1.0), 1.7) * pow(edge, 1.4);
+          float a = uOpacity * pow(clamp(vFall, 0.0, 1.0), 1.7) * pow(edge, 2.0);
           gl_FragColor = vec4(uColor, a);
         }`,
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
@@ -331,23 +512,23 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     scene.add(bounceLight);
 
     /* ── Частицы: пыль в луче и дым от приземления ─────────────────────── */
-    const dust = new ParticleField(quality === 'low' ? 60 : 170, glowSprite('#fff3d0', 0.1), {
+    const dust = new ParticleField(Math.round(particleBudget(quality) * 170), glowSprite('#fff3d0', 0.1), {
       color: 0xffe6b0, size: 0.14, gravity: 0.02, drag: 0.995, opacity: 0.5, scale: 120
     });
     scene.add(dust.points);
 
-    const impact = new ParticleField(quality === 'low' ? 60 : 180, smokeSprite(), {
+    const impact = new ParticleField(Math.round(particleBudget(quality) * 180), smokeSprite(), {
       color: 0xd8cdf0, size: 0.9, gravity: 0.5, drag: 0.94,
       blending: THREE.NormalBlending, opacity: 0.45, scale: 260
     });
     scene.add(impact.points);
 
-    const sparks = new ParticleField(quality === 'low' ? 50 : 150, glowSprite('#fff8dd', 0.3), {
+    const sparks = new ParticleField(Math.round(particleBudget(quality) * 150), glowSprite('#fff8dd', 0.3), {
       color: 0xffdf8a, size: 0.3, gravity: -2.6, drag: 0.96, opacity: 1, scale: 240
     });
     scene.add(sparks.points);
 
-    // Ударное кольцо приземления
+    // Ударное кольцо приземления + догоняющая вторая волна
     const shock = new THREE.Mesh(
       new THREE.RingGeometry(0.5, 0.78, 72),
       additive(0xffd76a, 0)
@@ -356,6 +537,25 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
     shock.position.y = FLOOR_Y + 0.03;
     shock.visible = false;
     scene.add(shock);
+    const shock2 = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 0.66, 72),
+      additive(0x22d3ee, 0)
+    );
+    shock2.rotation.x = -Math.PI / 2;
+    shock2.position.y = FLOOR_Y + 0.025;
+    shock2.visible = false;
+    scene.add(shock2);
+
+    // Вспышка на монете в момент касания
+    const landFlash = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowSprite('#ffe9a8', 0.4), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    landFlash.scale.setScalar(3.4);
+    scene.add(landFlash);
+    let poolPulse = 0;
+    let flashT = -1;
+    let shock2T = -1;
 
     /* ══════════════════════════ АНИМАЦИЯ ════════════════════════════════ */
     const tmp = new THREE.Vector3();
@@ -379,20 +579,25 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       shock.visible = true;
       shock.position.set(0, FLOOR_Y + 0.03, 0);
       // Пыль и искры из-под монеты
-      for (let i = 0; i < (quality === 'low' ? 16 : 42); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 42); i++) {
         const a = rng.rand() * Math.PI * 2;
         const sp = rng.range(0.9, 3.4);
         tmp.set(Math.cos(a) * 0.2, y, Math.sin(a) * 0.2);
         tmp2.set(Math.cos(a) * sp, rng.range(0.4, 1.9), Math.sin(a) * sp);
         impact.emit(tmp, tmp2, rng.range(0.6, 1.4), rng.range(0.5, 1.2));
       }
-      for (let i = 0; i < (quality === 'low' ? 8 : 22); i++) {
+      for (let i = 0; i < Math.round(particleBudget(quality) * 22); i++) {
         const a = rng.rand() * Math.PI * 2;
         tmp.set(Math.cos(a) * 0.25, y + 0.05, Math.sin(a) * 0.25);
         tmp2.set(Math.cos(a) * rng.range(1.4, 4.2), rng.range(1.2, 3.4), Math.sin(a) * rng.range(1.4, 4.2));
         sparks.emit(tmp, tmp2, rng.range(0.4, 0.9), rng.range(0.2, 0.45));
       }
       bounceLight.intensity = 9;
+      poolPulse = 1;
+      flashT = 0;
+      shock2T = 0;
+      landFlash.position.set(0, y + 0.4, 0);
+      shock2.visible = false;
     };
 
     const stopLoop = startLoop(stage, (dt, elapsed) => {
@@ -411,7 +616,18 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
           }
         });
       });
+      // Жаровни колоннады: живой огонь
+      for (const f of flames) {
+        const fl = 0.82 + Math.sin(elapsed * 7.3 + f.ph) * 0.12 + Math.sin(elapsed * 13.7 + f.ph * 2.3) * 0.07;
+        f.s.scale.set(0.9 * fl, 1.1 * fl, 1);
+        f.s.material.opacity = 0.75 + Math.sin(elapsed * 9.1 + f.ph) * 0.15;
+      }
+      sky.rotation.y = elapsed * 0.006;
       bounceLight.intensity += (3.2 - bounceLight.intensity) * (1 - Math.pow(0.02, dt));
+      // Контактная тень монеты: ниже монета — плотнее и крупнее тень
+      const coinH = Math.max(0, coin.position.y - REST_Y);
+      (coinShadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0.12, 0.42 - coinH * 0.24);
+      coinShadow.scale.setScalar(Math.max(0.55, 1 - coinH * 0.18));
 
       // Пыль в луче прожектора
       dustTimer += dt;
@@ -519,6 +735,25 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       }
 
       /* ── Эффекты приземления ─────────────────────────────────────────── */
+      poolPulse = Math.max(0, poolPulse - dt * 2.2);
+      (pool.material as THREE.MeshBasicMaterial).opacity = 0.4 + poolPulse * 0.45;
+      if (flashT >= 0) {
+        flashT += dt;
+        const k = Math.max(0, 1 - flashT / 0.35);
+        landFlash.material.opacity = k * k * 0.9;
+        landFlash.scale.setScalar(3.4 + flashT * 6);
+        if (k <= 0.01) flashT = -1;
+      }
+      if (shock2T >= 0) {
+        shock2T += dt;
+        if (shock2T > 0.09) {
+          shock2.visible = true;
+          const q = Math.max(0, 1 - (shock2T - 0.09) / 0.7);
+          (shock2.material as THREE.MeshBasicMaterial).opacity = q * 0.6;
+          shock2.scale.setScalar(1 + (shock2T - 0.09) * 9);
+          if (q <= 0.01) shock2T = -1;
+        }
+      }
       if (shockT >= 0) {
         shockT += dt;
         const k = Math.min(1, shockT / 0.62);
@@ -540,11 +775,16 @@ export default function DuelScene({ phase, result, trajectory, onFinish }: Props
       lastFlipPhase = phaseNow;
     });
 
+    // Шейдеры всех объектов (включая скрытые) компилируем заранее:
+    // первый взрыв/запуск/открытие двери больше не фризит
+    stage.precompile();
     stage.render();
 
     return () => {
       stopLoop();
       dust.dispose(); impact.dispose(); sparks.dispose();
+      cancelled = true;
+      disposeModel('coin.glb');
       disposeObject(coin);
       disposeObject(scene);
       beamGeo.dispose(); beamMat.dispose();

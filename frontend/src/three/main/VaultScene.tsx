@@ -1,37 +1,49 @@
 /**
- * 🏦 ВИТРИНА ХРАНИЛИЩА — герой-сцена онбординга и главного экрана.
+ * 🏦 ВИТРИНА ХРАНИЛИЩА — герой-сцена онбординга (v4).
  *
- * Это первое, что видит игрок, поэтому задача сцены — продать: открытый сейф,
- * из которого льётся золотой свет, слитки, монеты на орбитах и пыль в луче.
+ * Фидбек раунда Q: «монеты из сейфа выглядят странно, лучше наполнить сейф
+ * красивыми слитками». Концепция: ХРАНИЛИЩЕ, полное золота. Композиция:
+ *  - полированный чёрный мраморный подиум с золотым кантом;
+ *  - сейф v2 с распахнутой дверью; внутри — ПИРАМИДА ЗОЛОТЫХ СЛИТКОВ
+ *    (процедурные, с клеймом «VAULT 999.9»), тёплый луч из проёма;
+ *  - пара слитков небрежно лежит на подиуме у сейфа — богатство «выплёскивается»;
+ *  - колонны зала и мягкие ореолы для глубины; тёплый свет БЕЗ циана.
  *
- * Прежняя версия — серый ящик с торусом и четырьмя шариками, десять жёлтых
- * цилиндров по полу. Никакого «дорогого казино» в ней не было.
- *
- * Технические решения:
- *  - ПРОЗРАЧНЫЙ фон (transparent + background: null): сцена встроена в карточку
- *    онбординга и не должна перекрывать градиент страницы чёрным квадратом.
- *  - Bloom поэтому ВЫКЛЮЧЕН: EffectComposer рендерит в собственную цель и
- *    прозрачность теряется — фон стал бы чёрным. Свечение сделано аддитивными
- *    плоскостями (radialGlow/neonRing) — они честно смешиваются с альфой и
- *    дают тот же эффект ореола дешевле.
- *  - Туман тоже выключен: FogExp2 тянет цвет к своему, и на прозрачном фоне
- *    появился бы серый ореол вокруг сейфа.
- *  - Дверь с фаской (LatheGeometry), заклёпки, штурвал, петли — тот же набор
- *    признаков сейфа, что и в SafeCrackScene: оба экрана должны выглядеть
- *    одним продуктом.
- *  - createStageSafe: без WebGL онбординг остаётся читаемым (вернётся null).
+ * Монет больше нет вообще: фонтан и стопки удалены — они читались как мусор.
+ * Техника: прозрачный фон (сцена встроена в карточку), bloom выключен —
+ * свечение спрайтами и аддитивными плоскостями с круглой альфой.
  */
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { createStageSafe, startLoop, detectQuality } from '../lib/stage';
+import { createStageSafe, startLoop, detectQuality, particleBudget } from '../lib/stage';
 import { createRng } from '../lib/rng';
-import { gold, polishedGold, chrome, darkSteel, disposeObject } from '../lib/materials';
-import { brushedMetal, radialGlow, glowSprite, neonRing, coinFace } from '../lib/textures';
+import { gold, polishedGold, disposeObject } from '../lib/materials';
+import { blackMarble, radialGlow, radialFade, glowSprite, neonRing, ingotStamp } from '../lib/textures';
 import { ParticleField } from '../lib/particles';
+import { loadModel, disposeModel, acquireRoot } from '../lib/models';
 
 const FLOOR_Y = -1.22;
-const DOOR_R = 1.02;
-const HINGE_X = -1.06;
+
+/* ═══════════════ СЛИТОК ══════════════════════════════════════════════ */
+
+/** Геометрия слитка: трапеция в сечении, лёгкая фаска — как настоящий. */
+function buildIngotGeometry(): THREE.ExtrudeGeometry {
+  const w = 0.42;   // низ
+  const tw = 0.30;  // верх
+  const h = 0.15;   // высота
+  const shape = new THREE.Shape();
+  shape.moveTo(-w / 2, 0);
+  shape.lineTo(w / 2, 0);
+  shape.lineTo(tw / 2, h);
+  shape.lineTo(-tw / 2, h);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.62, bevelEnabled: true, bevelThickness: 0.014,
+    bevelSize: 0.012, bevelSegments: 2
+  });
+  geo.translate(0, 0, -0.31); // центр по длине
+  return geo;
+}
 
 export default function VaultScene({ size = 300 }: { size?: number }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -49,347 +61,354 @@ export default function VaultScene({ size = 300 }: { size?: number }) {
       transparent: true,
       background: null,
       fog: null,
-      bloom: 0,                                  // см. шапку: composer съедает альфу
+      bloom: 0,
       fov: 40,
       position: [0, 0.34, 5.5],
-      exposure: 1.12
+      exposure: 1.12,
+      statsId: 'vault'
     });
     if (!stage) return;
     const { scene, camera } = stage;
 
-    /* ═══════════════════ ОРЕОЛ ЗА СЕЙФОМ (вместо bloom) ═════════════════ */
-    const halo = new THREE.Mesh(
-      new THREE.PlaneGeometry(7.4, 7.4),
-      new THREE.MeshBasicMaterial({
-        map: radialGlow('#ffb52e', 0.02), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.42
-      })
-    );
-    halo.position.set(0, 0.1, -1.9);
-    scene.add(halo);
+    /* ═══════════════ ГЛУБИНА: ореолы и колонны зала ══════════════════════ */
+    const aura = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowSprite('#ff9d2e', 0.5), transparent: true, opacity: 0.46,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    aura.scale.setScalar(8.5);
+    aura.position.set(0, 0.2, -2.4);
+    scene.add(aura);
+    const auraViolet = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowSprite('#7c3aed', 0.5), transparent: true, opacity: 0.26,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+    }));
+    auraViolet.scale.setScalar(10);
+    auraViolet.position.set(1.4, 0.7, -3.4);
+    scene.add(auraViolet);
 
-    const haloViolet = new THREE.Mesh(
-      new THREE.PlaneGeometry(8.6, 8.6),
-      new THREE.MeshBasicMaterial({
-        map: radialGlow('#7c3aed', 0.02), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.3
-      })
-    );
-    haloViolet.position.set(0, 0.1, -2.6);
-    scene.add(haloViolet);
+    // Колонны зала: мрамор с золотыми поясами, уходят в темноту
+    const columnMat = new THREE.MeshStandardMaterial({
+      map: blackMarble(), color: 0x8a8a9a, roughness: 0.5, metalness: 0.3, envMapIntensity: 0.5
+    });
+    const columns: THREE.Group[] = [];
+    for (const [cx, cz, s] of [[-3.6, -3.4, 1], [3.7, -3.1, 0.9], [-4.8, -4.6, 1.15], [4.9, -4.8, 1.1]] as const) {
+      const g = new THREE.Group();
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.26 * s, 0.3 * s, 5.2 * s, 24), columnMat);
+      shaft.position.y = 2.4 * s;
+      g.add(shaft);
+      for (const by of [0.12, 4.9 * s]) {
+        const band = new THREE.Mesh(new THREE.TorusGeometry(0.3 * s, 0.035, 8, 32), polishedGold());
+        band.rotation.x = Math.PI / 2;
+        band.position.y = by;
+        g.add(band);
+      }
+      g.position.set(cx, FLOOR_Y, cz);
+      scene.add(g);
+      columns.push(g);
+    }
 
-    /* ═══════════════════════════ ПОДИУМ ═════════════════════════════════ */
-    const podiumTex = brushedMetal({ base: 40, strength: 20, circular: true });
-    const podium = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.05, 2.25, 0.22, 64),
+    /* ═══════════════ ПОЛ ЗАЛА: мрамор, тающий к краям карточки ═══════════
+     * Фидбек: «под колоннами нет поверхности». Диск лежит на уровне базы
+     * колонн и растворяется радиальной альфой — колонны больше не висят.
+     */
+    const hallFloor = new THREE.Mesh(
+      new THREE.CircleGeometry(11, 72),
       new THREE.MeshStandardMaterial({
-        map: podiumTex, color: 0x2b2c42, metalness: 0.72, roughness: 0.36, envMapIntensity: 0.8
+        map: blackMarble(), color: 0x3a3a4c, roughness: 0.34, metalness: 0.42,
+        envMapIntensity: 0.7, transparent: true, alphaMap: radialFade(),
+        depthWrite: true
       })
     );
-    podium.position.y = FLOOR_Y - 0.11;
+    hallFloor.rotation.x = -Math.PI / 2;
+    hallFloor.position.y = FLOOR_Y - 0.30;
+    scene.add(hallFloor);
+
+    /* ═══════════════ ПОДИУМ: полированный мрамор с кантом ════════════════ */
+    const marble = new THREE.MeshPhysicalMaterial({
+      map: blackMarble(), color: 0xb8b8c8, metalness: 0.42, roughness: 0.16,
+      envMapIntensity: 1.35, clearcoat: 0.7, clearcoatRoughness: 0.16
+    });
+    const podium = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.72, 0.24, 96), marble);
+    podium.position.y = FLOOR_Y - 0.12;
     scene.add(podium);
-
-    // Неоновое кольцо по кромке подиума
-    const podiumRing = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.4, 5.4),
-      new THREE.MeshBasicMaterial({
-        map: neonRing('#22d3ee', 0.022), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.85
-      })
+    const podium2 = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.95, 3.2, 0.18, 96),
+      new THREE.MeshStandardMaterial({ map: blackMarble(), color: 0x55556a, roughness: 0.4, metalness: 0.35 })
     );
-    podiumRing.rotation.x = -Math.PI / 2;
-    podiumRing.position.y = FLOOR_Y + 0.005;
-    scene.add(podiumRing);
-
-    const podiumRing2 = new THREE.Mesh(
-      new THREE.PlaneGeometry(6.6, 6.6),
+    podium2.position.y = FLOOR_Y - 0.32;
+    scene.add(podium2);
+    const trim = new THREE.Mesh(new THREE.TorusGeometry(2.51, 0.025, 10, 128), polishedGold());
+    trim.rotation.x = Math.PI / 2;
+    trim.position.y = FLOOR_Y - 0.005;
+    scene.add(trim);
+    const ring = new THREE.Mesh(
+      new THREE.PlaneGeometry(7.2, 7.2),
       new THREE.MeshBasicMaterial({
-        map: neonRing('#a855f7', 0.018), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.55
-      })
-    );
-    podiumRing2.rotation.x = -Math.PI / 2;
-    podiumRing2.position.y = FLOOR_Y + 0.002;
-    scene.add(podiumRing2);
-
-    // Лужа золотого света, вытекшего из сейфа
-    const spill = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.2, 4.4),
-      new THREE.MeshBasicMaterial({
-        map: radialGlow('#ffd76a', 0.05), transparent: true,
+        map: neonRing('#f5c542', 0.02), transparent: true,
         blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.5
       })
     );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = FLOOR_Y - 0.225;
+    scene.add(ring);
+
+    // Лужа тёплого света на мраморе
+    const spill = new THREE.Mesh(
+      new THREE.PlaneGeometry(5.6, 4.6),
+      new THREE.MeshBasicMaterial({
+        map: radialGlow('#ffd76a', 0.05), transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.42
+      })
+    );
     spill.rotation.x = -Math.PI / 2;
-    spill.position.set(0.15, FLOOR_Y + 0.008, 0.5);
+    spill.position.set(0.2, FLOOR_Y + 0.012, 0.6);
     scene.add(spill);
 
-    /* ═══════════════════════════ КОРПУС СЕЙФА ═══════════════════════════ */
+    /* ═══════════════ СЕЙФ v2: распахнут, внутри золото ═══════════════════ */
     const safe = new THREE.Group();
-    safe.position.y = 0.06;
-    safe.rotation.y = -0.30;                      // трёхчетвертной ракурс
+    safe.position.y = FLOOR_Y + 0.02;
+    safe.rotation.y = -0.34;
     scene.add(safe);
 
-    const bodyMat = darkSteel({ roughness: 0.44 });
-    bodyMat.envMapIntensity = 0.85;
-    bodyMat.map = brushedMetal({ base: 66, strength: 22 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.34, 1.6), bodyMat);
-    body.position.set(0, 0, -0.72);
-    safe.add(body);
-
-    const frameMat = darkSteel({ roughness: 0.3 });
-    frameMat.envMapIntensity = 1.15;
-    frameMat.map = brushedMetal({ base: 80, strength: 18 });
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(2.72, 2.56, 0.2), frameMat);
-    frame.position.set(0, 0, 0.12);
-    safe.add(frame);
-
-    const collar = new THREE.Mesh(
-      new THREE.TorusGeometry(DOOR_R + 0.14, 0.115, 14, 64),
-      chrome()
-    );
-    collar.position.z = 0.2;
-    safe.add(collar);
-
-    /* ── Внутренности: золото, которое и продаёт игру ───────────────────── */
-    const inner = new THREE.Group();
-    inner.position.z = -0.55;
-    safe.add(inner);
-
-    const cavity = new THREE.Mesh(
-      new THREE.BoxGeometry(DOOR_R * 1.86, DOOR_R * 1.86, 1.0),
-      new THREE.MeshStandardMaterial({ color: 0x241803, roughness: 0.88, metalness: 0.15, side: THREE.BackSide })
-    );
-    inner.add(cavity);
-
-    const innerGlow = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.9, 2.9),
-      new THREE.MeshBasicMaterial({
-        map: radialGlow('#ffca4a', 0.03), transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.95
-      })
-    );
-    innerGlow.position.z = -0.42;
-    inner.add(innerGlow);
-
-    const barGeo = new THREE.BoxGeometry(0.4, 0.15, 0.23);
-    const barMat = polishedGold();
-    const bars: THREE.Mesh[] = [];
-    for (let row = 0; row < 3; row++) {
-      const n = 3 - row;
-      for (let i = 0; i < n; i++) {
-        const b = new THREE.Mesh(barGeo, barMat);
-        b.position.set((i - (n - 1) / 2) * 0.44, -0.6 + row * 0.165, -0.18 + rng.spread(0.04));
-        b.rotation.y = rng.spread(0.12);
-        inner.add(b);
-        bars.push(b);
-      }
-    }
     const goldLight = new THREE.PointLight(0xffc44d, 9, 6.5, 2);
-    goldLight.position.set(0, -0.1, -0.2);
-    inner.add(goldLight);
+    safe.add(goldLight);
 
-    /* ── Дверь: распахнута, свет льётся наружу ─────────────────────────── */
-    const doorPivot = new THREE.Group();
-    doorPivot.position.set(HINGE_X, 0, 0.26);
-    safe.add(doorPivot);
-
-    const profile: THREE.Vector2[] = [];
-    const bev = 0.06;
-    const halfT = 0.115;
-    profile.push(new THREE.Vector2(0.0001, -halfT));
-    profile.push(new THREE.Vector2(DOOR_R - bev, -halfT));
-    for (let i = 1; i <= 8; i++) {
-      const a = (i / 8) * (Math.PI / 2);
-      profile.push(new THREE.Vector2(DOOR_R - bev + Math.sin(a) * bev, -halfT + bev - Math.cos(a) * bev));
-    }
-    for (let i = 8; i >= 1; i--) {
-      const a = (i / 8) * (Math.PI / 2);
-      profile.push(new THREE.Vector2(DOOR_R - bev + Math.sin(a) * bev, halfT - bev + Math.cos(a) * bev));
-    }
-    profile.push(new THREE.Vector2(DOOR_R - bev, halfT));
-    profile.push(new THREE.Vector2(0.0001, halfT));
-
-    const doorGeo = new THREE.LatheGeometry(profile, 72);
-    doorGeo.rotateX(Math.PI / 2);
-    const doorMat = darkSteel({ roughness: 0.26 });
-    doorMat.envMapIntensity = 1.3;
-    doorMat.map = brushedMetal({ base: 92, strength: 20, circular: true });
-    const door = new THREE.Mesh(doorGeo, doorMat);
-    door.position.x = -HINGE_X;
-    doorPivot.add(door);
-    doorPivot.rotation.y = 1.02;                   // открыта на игрока
-
-    const rivetGeo = new THREE.SphereGeometry(0.042, 12, 9);
-    const rivetMat = chrome();
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const r = new THREE.Mesh(rivetGeo, rivetMat);
-      r.position.set(-HINGE_X + Math.cos(a) * (DOOR_R - 0.085), Math.sin(a) * (DOOR_R - 0.085), halfT + 0.01);
-      r.scale.z = 0.6;
-      doorPivot.add(r);
-    }
-
-    // Штурвал на внешней стороне двери
-    const wheel = new THREE.Group();
-    wheel.position.set(-HINGE_X, 0, halfT + 0.09);
-    doorPivot.add(wheel);
-    wheel.add(new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.042, 12, 48), chrome()));
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.12, 28), polishedGold());
-    hub.rotation.x = Math.PI / 2;
-    wheel.add(hub);
-    for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI * 2;
-      const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.036, 0.38, 12), chrome());
-      spoke.position.set(Math.cos(a) * 0.19, Math.sin(a) * 0.19, 0);
-      spoke.rotation.z = a + Math.PI / 2;
-      wheel.add(spoke);
-      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.048, 12, 9), gold({ roughness: 0.18 }));
-      knob.position.set(Math.cos(a) * 0.4, Math.sin(a) * 0.4, 0.05);
-      wheel.add(knob);
-    }
-
-    // Петли
-    for (const hy of [-0.62, 0.62]) {
-      const hinge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.46, 0.3), chrome());
-      hinge.position.set(HINGE_X + 0.02, hy, 0.14);
-      safe.add(hinge);
-    }
-
-    /* ═══════════════════════ МОНЕТЫ НА ОРБИТАХ ══════════════════════════ */
-    // Монеты — та же чеканка, что и в дуэли: игрок узнаёт «свою» валюту
-    const coinR = 0.155;
-    const coinGeo = new THREE.CylinderGeometry(coinR, coinR, 0.028, 40);
-    coinGeo.rotateX(Math.PI / 2);                  // плоскость монеты ⟂ Z
-    const coinMats = [
-      new THREE.MeshPhysicalMaterial({
-        map: coinFace('heads'), metalness: 1, roughness: 0.22, envMapIntensity: 1.8, clearcoat: 0.4
-      }),
-      new THREE.MeshPhysicalMaterial({
-        map: coinFace('tails'), metalness: 1, roughness: 0.22, envMapIntensity: 1.8, clearcoat: 0.4
+    const shaft = new THREE.Mesh(
+      new THREE.ConeGeometry(1.5, 3.4, 40, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xffca4a, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        toneMapped: false
       })
-    ];
-    const coinSide = gold({ roughness: 0.2 });
+    );
+    shaft.rotation.x = Math.PI / 2 - 0.28;
+    shaft.position.set(0.1, 0.9, 1.5);
+    safe.add(shaft);
 
-    interface Orbit { mesh: THREE.Mesh; radius: number; speed: number; phase: number; tilt: number; yBase: number; spin: number; }
-    const orbits: Orbit[] = [];
-    const COUNT = quality === 'low' ? 7 : 13;
-    for (let i = 0; i < COUNT; i++) {
-      const mesh = new THREE.Mesh(coinGeo, [coinSide, coinMats[i % 2], coinMats[(i + 1) % 2]]);
-      const o: Orbit = {
-        mesh,
-        radius: 1.5 + rng.range(0, 1.25),
-        speed: rng.range(0.16, 0.42) * (rng.rand() < 0.22 ? -1 : 1),
-        phase: rng.rand() * Math.PI * 2,
-        tilt: rng.spread(0.42),
-        yBase: rng.range(-0.55, 0.95),
-        spin: rng.range(0.7, 2.6)
-      };
-      scene.add(mesh);
-      orbits.push(o);
-    }
+    /* ═══════════════ СЛИТКИ: пирамида в сейфе + пара на подиуме ══════════
+     * Кладём после загрузки модели — позиция считается от реального бокса
+     * интерьера (узел `safe_interior`), поэтому не зависит от нормализации.
+     */
+    const ingotGeo = buildIngotGeometry();
+    const ingotMat = new THREE.MeshPhysicalMaterial({
+      color: 0xf0b429, metalness: 1, roughness: 0.2, envMapIntensity: 1.3,
+      clearcoat: 0.34, clearcoatRoughness: 0.22
+    });
+    const stampTex = ingotStamp();
+    const stampMat = new THREE.MeshBasicMaterial({
+      map: stampTex, transparent: true, toneMapped: false, depthWrite: false
+    });
+    const stampGeo = new THREE.PlaneGeometry(0.44, 0.15);
+    const ingotGroup = new THREE.Group();
+    safe.add(ingotGroup);
+    /** Верхние точки слитков — источники бликов-искр. */
+    const sparkleAnchors: THREE.Vector3[] = [];
 
-    /* ═══════════════════════════ СВЕТ ═══════════════════════════════════ */
-    scene.add(new THREE.AmbientLight(0x6b6398, 0.95));
-    const key = new THREE.DirectionalLight(0xfff1cd, 2.5);
-    key.position.set(-2.6, 3.4, 3.6);
+    /** Положить слиток; `stamped` — клеймо на верхней грани. */
+    const placeIngot = (x: number, y: number, z: number, rotY = 0, rotX = 0, stamped = false): THREE.Mesh => {
+      const bar = new THREE.Mesh(ingotGeo, ingotMat);
+      bar.position.set(x, y, z);
+      bar.rotation.set(rotX, rotY, 0);
+      if (stamped) {
+        const st = new THREE.Mesh(stampGeo, stampMat);
+        st.position.y = 0.152;
+        st.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
+        bar.add(st);
+      }
+      ingotGroup.add(bar);
+      return bar;
+    };
+
+    let cancelled = false;
+    let modelHolder: THREE.Group | null = null;
+    loadModel('safe.glb', { quality }).then((m) => {
+      if (cancelled || !m) return;
+      const clone = acquireRoot(m);
+      modelHolder = new THREE.Group();
+      modelHolder.add(clone);
+      modelHolder.scale.setScalar(0.78);
+      safe.add(modelHolder);
+      modelHolder.updateMatrixWorld(true);
+      const doorNode = clone.getObjectByName('safe_door');
+      if (doorNode) {
+        doorNode.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -1.02);
+        doorNode.position.z += 0.16;
+      }
+      // лоадер уже центрировал X/Z; ставим низ модели на подиум
+      modelHolder.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(modelHolder);
+      const bottomLocal = safe.worldToLocal(new THREE.Vector3(0, bb.min.y, 0)).y;
+      modelHolder.position.y += -0.02 - bottomLocal;
+      const lightAnchor = clone.getObjectByName('Anchor_Light');
+      if (lightAnchor) lightAnchor.attach(goldLight);
+      goldLight.position.set(0, 1.0, -0.4);
+      (shaft.material as THREE.MeshBasicMaterial).opacity = 0.15;
+
+      /* ── Наполнение: от бокса интерьера в локальных координатах сейфа ── */
+      const interior = clone.getObjectByName('safe_interior');
+      const ib = interior
+        ? new THREE.Box3().setFromObject(interior)
+        : bb.clone();
+      const min = safe.worldToLocal(ib.min.clone());
+      const max = safe.worldToLocal(ib.max.clone());
+      const floorY = min.y + 0.02;
+      const frontZ = max.z - 0.42;         // передний ряд у самого проёма
+      const rowZ = 0.66;                    // шаг рядов вглубь
+      const stepX = 0.46;                   // шаг слитков по X
+      const barH = 0.178;                   // высота слитка с фаской
+
+      // Пирамида у проёма: 4 → 3 → 2, второй ряд 3 → 2 за ней.
+      // Верхние ярусы сдвинуты на полшага — слитки лежат в ложементах.
+      const rows: Array<[number, number, number]> = [
+        [4, 0, frontZ], [3, 1, frontZ], [2, 2, frontZ],
+        [3, 0, frontZ - rowZ], [2, 1, frontZ - rowZ]
+      ];
+      for (const [count, layer, z] of rows) {
+        const rowW = (count - 1) * stepX;
+        for (let i = 0; i < count; i++) {
+          const x = -rowW / 2 + i * stepX;
+          placeIngot(
+            x + rng.spread(0.012),
+            floorY + layer * barH,
+            z + rng.spread(0.015),
+            rng.spread(0.06), 0,
+            layer === 0 && Math.abs(x) < 0.8
+          );
+        }
+      }
+      // Акцентный слиток набекрень на вершине пирамиды
+      placeIngot(0.1, floorY + 2 * barH, frontZ - 0.1, 0.5, 0, true);
+      // Два слитка прислонены к задней стенке — ловят луч
+      placeIngot(-0.62, floorY + 0.3, min.z + 0.28, 0.2, -1.02, true);
+      placeIngot(0.55, floorY + 0.3, min.z + 0.24, -0.3, -1.08, true);
+
+      // Подсветка самой пирамиды
+      const pileLight = new THREE.PointLight(0xffd77a, 5, 3.4, 2);
+      pileLight.position.set(0, floorY + 0.9, frontZ + 0.2);
+      ingotGroup.add(pileLight);
+
+      // Якоря бликов — верхушки передних слитков
+      for (const [sx, sy, sz] of [[0, floorY + 3 * barH, frontZ], [-0.7, floorY + barH, frontZ], [0.66, floorY + barH, frontZ - rowZ]] as const) {
+        sparkleAnchors.push(new THREE.Vector3(sx, sy + 0.1, sz));
+      }
+    });
+
+    // Пара слитков на подиуме: богатство «выплёскивается» из хранилища
+    const podiumBars = new THREE.Group();
+    scene.add(podiumBars);
+    const pb1 = new THREE.Mesh(ingotGeo, ingotMat);
+    pb1.position.set(2.14, FLOOR_Y + 0.075, 1.12);
+    pb1.rotation.y = -0.55;
+    const pb1s = new THREE.Mesh(stampGeo, stampMat);
+    pb1s.position.y = 0.152;
+    pb1s.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
+    pb1.add(pb1s);
+    podiumBars.add(pb1);
+    const pb2 = new THREE.Mesh(ingotGeo, ingotMat);
+    pb2.position.set(1.96, FLOOR_Y + 0.24, 0.98);
+    pb2.rotation.y = -0.34;
+    podiumBars.add(pb2);
+    const pb3 = new THREE.Mesh(ingotGeo, ingotMat);
+    pb3.position.set(-2.24, FLOOR_Y + 0.075, 0.94);
+    pb3.rotation.y = 0.8;
+    podiumBars.add(pb3);
+    sparkleAnchors.push(new THREE.Vector3(2.14, FLOOR_Y + 0.3, 1.12));
+    sparkleAnchors.push(new THREE.Vector3(-2.24, FLOOR_Y + 0.24, 0.94));
+
+    /* ═══════════════ СВЕТ: тёплый, без циана ═════════════════════════════ */
+    scene.add(new THREE.AmbientLight(0x8a7a66, 0.72));
+    const key = new THREE.DirectionalLight(0xffd9a0, 2.6);
+    key.position.set(-2.5, 3.5, 3.2);
     scene.add(key);
-    const rimViolet = new THREE.DirectionalLight(0x8b5cf6, 2.1);
-    rimViolet.position.set(3.4, 1.4, -2.6);
+    // Контровой — глубже и холоднее, светит ИЗ-ЗА сейфа, чтобы золото на
+    // переднем плане не окрашивалось в розовый
+    const rimViolet = new THREE.DirectionalLight(0x6d4fd6, 1.1);
+    rimViolet.position.set(3.2, 2.4, -4.2);
     scene.add(rimViolet);
-    const rimCyan = new THREE.DirectionalLight(0x22d3ee, 1.15);
-    rimCyan.position.set(-3.2, -0.6, 1.4);
-    scene.add(rimCyan);
+    // Тёплая подсветка спереди слева — слитки на подиуме остаются золотыми
+    const warmFill = new THREE.DirectionalLight(0xffc880, 0.8);
+    warmFill.position.set(-3.4, 0.6, 3.6);
+    scene.add(warmFill);
+    const fillAmber = new THREE.DirectionalLight(0xff9d5c, 0.7);
+    fillAmber.position.set(-3, -0.8, 2.2);
+    scene.add(fillAmber);
 
-    /* ═══════════════════════════ ЧАСТИЦЫ ════════════════════════════════ */
-    const motes = new ParticleField(quality === 'low' ? 55 : 160, glowSprite('#ffe9a8', 0.18), {
-      color: 0xffd76a, size: 0.19, gravity: 0.16, drag: 0.99, opacity: 0.85, scale: 180
+    /* ═══════════════ ЧАСТИЦЫ: пыль в луче и искры на золоте ══════════════ */
+    const motes = new ParticleField(Math.round(particleBudget(quality) * 150), glowSprite('#ffe9a8', 0.18), {
+      color: 0xffd76a, size: 0.18, gravity: 0.14, drag: 0.99, opacity: 0.85, scale: 180
     });
     scene.add(motes.points);
-
-    const sparkles = new ParticleField(quality === 'low' ? 30 : 90, glowSprite('#ffffff', 0.5), {
-      color: 0xfff6dd, size: 0.13, gravity: -0.05, drag: 0.995, opacity: 0.9, scale: 150
+    const sparkles = new ParticleField(Math.round(particleBudget(quality) * 80), glowSprite('#ffffff', 0.5), {
+      color: 0xfff6dd, size: 0.12, gravity: -0.04, drag: 0.995, opacity: 0.9, scale: 150
     });
     scene.add(sparkles.points);
 
-    /* ═══════════════════════════ АНИМАЦИЯ ═══════════════════════════════ */
+    /* ═══════════════ АНИМАЦИЯ ════════════════════════════════════════════ */
     const tmp = new THREE.Vector3();
     const tmp2 = new THREE.Vector3();
     const camTarget = new THREE.Vector3(0, 0.34, 5.5);
     let moteTimer = 0;
 
     const stopLoop = startLoop(stage, (dt, elapsed) => {
-      // Медленный облёт: герой должен быть живым, но не отвлекать от текста
-      const a = elapsed * 0.11;
-      camTarget.set(Math.sin(a) * 0.85, 0.34 + Math.sin(elapsed * 0.21) * 0.12, 5.45 + Math.cos(a) * 0.35);
+      const a = elapsed * 0.1;
+      camTarget.set(Math.sin(a) * 0.8, 0.3 + Math.sin(elapsed * 0.21) * 0.1, 5.45 + Math.cos(a) * 0.3);
       camera.position.lerp(camTarget, 1 - Math.pow(0.02, dt));
-      camera.lookAt(0, 0.05 + Math.sin(elapsed * 0.17) * 0.04, 0);
+      camera.lookAt(0, 0.1 + Math.sin(elapsed * 0.17) * 0.04, 0);
 
-      // Сейф дышит
-      safe.position.y = 0.06 + Math.sin(elapsed * 0.7) * 0.028;
-      safe.rotation.y = -0.30 + Math.sin(elapsed * 0.23) * 0.075;
-      wheel.rotation.z = elapsed * 0.28;
-
-      // Свет изнутри пульсирует — золото «дышит»
+      // Сейф дышит; золото пульсирует
+      safe.position.y = FLOOR_Y + 0.02 + Math.sin(elapsed * 0.7) * 0.02;
+      safe.rotation.y = -0.34 + Math.sin(elapsed * 0.23) * 0.06;
       const breathe = 0.82 + Math.sin(elapsed * 1.5) * 0.18;
       goldLight.intensity = 9 * breathe;
-      (innerGlow.material as THREE.MeshBasicMaterial).opacity = 0.9 * breathe;
-      (spill.material as THREE.MeshBasicMaterial).opacity = 0.42 * breathe;
-      (halo.material as THREE.MeshBasicMaterial).opacity = 0.36 + Math.sin(elapsed * 0.9) * 0.07;
-      podiumRing.rotation.z = elapsed * 0.16;
-      podiumRing2.rotation.z = -elapsed * 0.11;
-      (podiumRing.material as THREE.MeshBasicMaterial).opacity = 0.7 + Math.sin(elapsed * 1.3) * 0.16;
-
-      bars.forEach((b, i) => {
-        b.rotation.y = Math.sin(elapsed * 0.5 + i * 0.7) * 0.06;
-      });
-
-      // Монеты по орбитам: каждая со своим наклоном и вращением
-      for (const o of orbits) {
-        const t = elapsed * o.speed + o.phase;
-        o.mesh.position.set(
-          Math.cos(t) * o.radius,
-          o.yBase + Math.sin(t * 1.7) * 0.22 + Math.sin(elapsed * 0.6 + o.phase) * 0.06,
-          Math.sin(t) * o.radius * 0.72 + o.tilt
-        );
-        o.mesh.rotation.y = elapsed * o.spin + o.phase;
-        o.mesh.rotation.x = Math.sin(t) * 0.5;
-        // Монета, ушедшая за сейф, чуть тусклее — дешёвая имитация глубины
-        const depth = (o.mesh.position.z + 1.4) / 2.8;
-        o.mesh.scale.setScalar(0.86 + Math.max(0, Math.min(1, depth)) * 0.2);
+      (spill.material as THREE.MeshBasicMaterial).opacity = 0.36 * breathe;
+      if ((shaft.material as THREE.MeshBasicMaterial).opacity > 0) {
+        (shaft.material as THREE.MeshBasicMaterial).opacity = 0.12 * breathe;
       }
+      aura.material.opacity = 0.4 + Math.sin(elapsed * 0.9) * 0.05;
+      ring.rotation.z = elapsed * 0.1;
 
-      // Золотая пыль вытекает из сейфа
+      // Пыль в луче из проёма
       moteTimer += dt;
       if (moteTimer > 0.06) {
         moteTimer = 0;
-        tmp.set(rng.spread(0.55), rng.range(-0.55, 0.6), -0.1 + rng.spread(0.25));
-        tmp2.set(rng.spread(0.34), rng.range(0.16, 0.72), rng.range(0.5, 1.5));
-        motes.emit(tmp, tmp2, rng.range(1.6, 3.2), rng.range(0.08, 0.22));
+        tmp.set(0.3 + rng.spread(0.5), 0.4 + rng.spread(0.5), 0.8 + rng.spread(0.3));
+        tmp2.set(rng.spread(0.3), rng.range(0.1, 0.6), rng.range(0.4, 1.3));
+        motes.emit(tmp, tmp2, rng.range(1.4, 2.8), rng.range(0.07, 0.2));
       }
-      // Искры на металле — редкие, чтобы не «шумело»
-      if (rng.rand() < dt * 7) {
-        const o = orbits[rng.int(0, orbits.length - 1)];
-        tmp.copy(o.mesh.position);
-        tmp2.set(rng.spread(0.3), rng.range(0.1, 0.5), rng.spread(0.3));
-        sparkles.emit(tmp, tmp2, rng.range(0.4, 1.0), rng.range(0.07, 0.16));
+      // Искры на верхушках слитков
+      if (sparkleAnchors.length && rng.rand() < dt * 9) {
+        const p = sparkleAnchors[rng.int(0, sparkleAnchors.length - 1)];
+        tmp.copy(p);
+        tmp.x += rng.spread(0.3);
+        tmp.z += rng.spread(0.24);
+        tmp2.set(rng.spread(0.2), rng.range(0.05, 0.3), rng.spread(0.2));
+        sparkles.emit(tmp, tmp2, rng.range(0.35, 0.9), rng.range(0.06, 0.14));
       }
       motes.update(dt);
       sparkles.update(dt);
     });
 
+    // Шейдеры всех объектов (включая скрытые) компилируем заранее:
+    // первый взрыв/запуск/открытие двери больше не фризит
+    stage.precompile();
     stage.render();
 
     return () => {
+      cancelled = true;
+      if (modelHolder) safe.remove(modelHolder);
+      disposeModel('safe.glb');
       stopLoop();
       motes.dispose();
       sparkles.dispose();
-      barGeo.dispose();
-      coinGeo.dispose();
-      rivetGeo.dispose();
-      doorGeo.dispose();
-      coinMats.forEach((m) => m.dispose());
+      ingotGeo.dispose();
+      ingotMat.dispose();
+      stampGeo.dispose();
+      stampMat.dispose();
+      stampTex.dispose();
+      marble.dispose();
+      columnMat.dispose();
       disposeObject(safe);
+      disposeObject(podiumBars);
       disposeObject(scene);
       stage.dispose();
     };

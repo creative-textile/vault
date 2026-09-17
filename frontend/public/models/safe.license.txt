@@ -1,0 +1,24 @@
+safe.glb — VAULT «Neon Vault Luxury» bank vault door
+=====================================================
+
+Источник: сгенерировано полностью скриптом (Blender 4.2 via bpy, headless).
+Автор: VAULT project / исполнитель задачи TZ-3D-MODELS (AI-агент на Arena.ai).
+Дата: 2026-09-16.
+
+Лицензия: CC0 1.0 Universal (Public Domain Dedication).
+Ограничений нет: свободное использование, изменение, распространение,
+в том числе в составе продукта.
+
+Состав пакета:
+  - frontend/public/models/safe.glb        — модель (геометрия, PBR-материалы,
+    клипы idle/spin/open, якоря Anchor_*);
+  - frontend/public/models/safe.preview.jpg — превью-рендеры (Cycles CPU);
+  - frontend/models-src/safe/              — воспроизводимый исходник:
+      build_safe.py (геометрия/анимации/экспорт),
+      gen_safe_textures.py (процедурные PBR-карты),
+      render_safe_preview.py (превью),
+      safe.blend (сцена-исходник),
+      textures/safe/ (исходные PNG карт),
+      env_setup.sh (восстановление headless-окружения).
+
+Сторонних ассетов, стоковых моделей и чужих текстур не использовано.

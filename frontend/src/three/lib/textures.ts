@@ -137,18 +137,24 @@ export function streakSprite(color = '#ffd28a'): THREE.CanvasTexture {
 export function brushedMetal(opts: { base?: number; strength?: number; circular?: boolean } = {}): THREE.CanvasTexture {
   const { base = 128, strength = 46, circular = false } = opts;
   return cached(`brushed:${base}:${strength}:${circular}`, [512, 512], (ctx, w, h) => {
+    // Детерминированный ГПСЧ: риски металла одинаковы у всех игроков
+    let seed = ((base * 7919 + strength * 104729) ^ (circular ? 0x5f3759df : 0)) >>> 0 || 123456789;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     ctx.fillStyle = `rgb(${base},${base},${base})`;
     ctx.fillRect(0, 0, w, h);
     ctx.globalAlpha = 0.5;
     if (circular) {
       // Круговая шлифовка (как на настоящих монетах и циферблатах)
       for (let i = 0; i < 900; i++) {
-        const r = Math.random() * (w / 2);
-        const a0 = Math.random() * Math.PI * 2;
-        const a1 = a0 + (Math.random() * 0.5 + 0.08);
-        const v = base + (Math.random() - 0.5) * strength * 2;
+        const r = rnd() * (w / 2);
+        const a0 = rnd() * Math.PI * 2;
+        const a1 = a0 + (rnd() * 0.5 + 0.08);
+        const v = base + (rnd() - 0.5) * strength * 2;
         ctx.strokeStyle = `rgb(${v},${v},${v})`;
-        ctx.lineWidth = Math.random() * 1.4 + 0.2;
+        ctx.lineWidth = rnd() * 1.4 + 0.2;
         ctx.beginPath();
         ctx.arc(w / 2, h / 2, r, a0, a1);
         ctx.stroke();
@@ -156,15 +162,15 @@ export function brushedMetal(opts: { base?: number; strength?: number; circular?
     } else {
       // Продольная шлифовка
       for (let i = 0; i < 2600; i++) {
-        const y = Math.random() * h;
-        const x = Math.random() * w;
-        const len = Math.random() * 90 + 12;
-        const v = base + (Math.random() - 0.5) * strength * 2;
+        const y = rnd() * h;
+        const x = rnd() * w;
+        const len = rnd() * 90 + 12;
+        const v = base + (rnd() - 0.5) * strength * 2;
         ctx.strokeStyle = `rgb(${v},${v},${v})`;
-        ctx.lineWidth = Math.random() * 1.2 + 0.2;
+        ctx.lineWidth = rnd() * 1.2 + 0.2;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.lineTo(x + len, y + (Math.random() - 0.5) * 1.5);
+        ctx.lineTo(x + len, y + (rnd() - 0.5) * 1.5);
         ctx.stroke();
       }
     }
@@ -185,10 +191,16 @@ export function hazardStripes(yellow = '#f5c542', dark = '#14141c', stripe = 34)
     for (let x = -w; x < w * 2; x += stripe * 2) ctx.fillRect(x, 0, stripe, h * 2);
     ctx.restore();
     // Потёртости: полосы не должны быть идеальными
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777001 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     ctx.globalAlpha = 0.35;
     for (let i = 0; i < 260; i++) {
-      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.14)';
-      ctx.fillRect(Math.random() * w, Math.random() * h, Math.random() * 26, Math.random() * 3);
+      ctx.fillStyle = rnd() > 0.5 ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.14)';
+      ctx.fillRect(rnd() * w, rnd() * h, rnd() * 26, rnd() * 3);
     }
     ctx.globalAlpha = 1;
   });
@@ -201,11 +213,17 @@ export function hullPanels(): THREE.CanvasTexture {
   const t = cached('hull:v2', [512, 512], (ctx, w, h) => {
     ctx.fillStyle = '#f2f3f7';
     ctx.fillRect(0, 0, w, h);
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777002 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     // Лёгкая пятнистость краски
     for (let i = 0; i < 420; i++) {
-      ctx.fillStyle = `rgba(${180 + Math.random() * 40},${182 + Math.random() * 40},${190 + Math.random() * 40},0.10)`;
+      ctx.fillStyle = `rgba(${180 + rnd() * 40},${182 + rnd() * 40},${190 + rnd() * 40},0.10)`;
       ctx.beginPath();
-      ctx.arc(Math.random() * w, Math.random() * h, Math.random() * 26 + 4, 0, Math.PI * 2);
+      ctx.arc(rnd() * w, rnd() * h, rnd() * 26 + 4, 0, Math.PI * 2);
       ctx.fill();
     }
     // Линии расшивки
@@ -262,13 +280,19 @@ export function coinFace(side: CoinSide): THREE.CanvasTexture {
     // Круговая шлифовка поля
     ctx.save();
     ctx.beginPath(); ctx.arc(c, c, c * 0.99, 0, Math.PI * 2); ctx.clip();
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777003 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     ctx.globalAlpha = 0.16;
     for (let i = 0; i < 1500; i++) {
-      const r = Math.random() * c;
-      const a0 = Math.random() * Math.PI * 2;
-      ctx.strokeStyle = Math.random() > 0.5 ? '#fff8dd' : '#7a4e04';
-      ctx.lineWidth = Math.random() * 1.5 + 0.2;
-      ctx.beginPath(); ctx.arc(c, c, r, a0, a0 + Math.random() * 0.4 + 0.05); ctx.stroke();
+      const r = rnd() * c;
+      const a0 = rnd() * Math.PI * 2;
+      ctx.strokeStyle = rnd() > 0.5 ? '#fff8dd' : '#7a4e04';
+      ctx.lineWidth = rnd() * 1.5 + 0.2;
+      ctx.beginPath(); ctx.arc(c, c, r, a0, a0 + rnd() * 0.4 + 0.05); ctx.stroke();
     }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -364,10 +388,10 @@ export function coinFace(side: CoinSide): THREE.CanvasTexture {
     ctx.beginPath(); ctx.arc(c, c, c, 0, Math.PI * 2); ctx.clip();
     ctx.globalAlpha = 0.13;
     for (let i = 0; i < 90; i++) {
-      ctx.strokeStyle = Math.random() > 0.5 ? '#fffbe8' : '#6b4403';
-      ctx.lineWidth = Math.random() * 2.4 + 0.4;
-      const a = Math.random() * Math.PI * 2;
-      const r0 = c * (0.55 + Math.random() * 0.44);
+      ctx.strokeStyle = rnd() > 0.5 ? '#fffbe8' : '#6b4403';
+      ctx.lineWidth = rnd() * 2.4 + 0.4;
+      const a = rnd() * Math.PI * 2;
+      const r0 = c * (0.55 + rnd() * 0.44);
       ctx.beginPath();
       ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
       ctx.lineTo(c + Math.cos(a + 0.2) * r0 * 1.06, c + Math.sin(a + 0.2) * r0 * 1.06);
@@ -414,47 +438,59 @@ export function coinEdge(): THREE.CanvasTexture {
  * каждого барабана 10 таких плашек по окружности, и цифра читается на самой
  * модели (см. SafeCrackScene — поворот выводится из той же формулы digitAt).
  */
-export function digitPlate(digit: number, opts: { face?: string; accent?: string } = {}): THREE.CanvasTexture {
-  const { face = '#0d1024', accent = '#f5c542' } = opts;
-  return cached(`digit:${digit}:${face}:${accent}`, [256, 256], (ctx, w, h) => {
-    // Фон плашки: тёмный металл с виньеткой
+export function digitPlate(digit: number, opts: { face?: string; accent?: string; size?: number } = {}): THREE.CanvasTexture {
+  const { face = '#0d1024', accent = '#f5c542', size = 1024 } = opts;
+  // 1024px на мощных устройствах (плашки занимают пол-экрана при наезде),
+  // 512px на средних/слабых — втрое меньше памяти текстур
+  return cached(`digit:${digit}:${face}:${accent}:${size}`, [size, size], (ctx, w, h) => {
+    // Детерминированный шум вместо Math.random (ограничение ТЗ): риски
+    // металла обязаны быть одинаковыми от кадра к кадру и между клиентами.
+    let rs = (digit + 7) * 2654435761 % 4294967296;
+    const rnd = () => {
+      rs = (rs * 1664525 + 1013904223) % 4294967296;
+      return rs / 4294967296;
+    };
+
+    // Фон плашки: почти чёрный — цифра светится на нём как табло
     const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#1c2144');
+    g.addColorStop(0, '#141833');
     g.addColorStop(0.45, face);
-    g.addColorStop(1, '#05060f');
+    g.addColorStop(1, '#03040a');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    // Риски металла
-    ctx.globalAlpha = 0.14;
-    for (let i = 0; i < 220; i++) {
-      ctx.strokeStyle = Math.random() > 0.5 ? '#ffffff' : '#000000';
-      ctx.lineWidth = Math.random() * 1.6;
-      const y = Math.random() * h;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + (Math.random() - 0.5) * 3); ctx.stroke();
+    // Тонкие риски металла — только тёмные, чтобы не сбивать контраст цифры
+    ctx.globalAlpha = 0.09;
+    for (let i = 0; i < 100; i++) {
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = rnd() * 1.3;
+      const y = rnd() * h;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + (rnd() - 0.5) * 3); ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
-    // Цифра с тиснением: тень снизу, светлая кромка сверху
+    // Цифра: раскалённо-белая с золотым низом и ореолом — читается в любом
+    // свете. Крупная (0.86 высоты), жирная, с тёмным тиснением.
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `700 ${Math.round(h * 0.62)}px 'Orbitron', 'Russo One', ui-monospace, monospace`;
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillText(String(digit), w / 2 + 3, h / 2 + 8);
-    const tg = ctx.createLinearGradient(0, h * 0.18, 0, h * 0.82);
-    tg.addColorStop(0, '#fffdf2');
-    tg.addColorStop(0.4, accent);
-    tg.addColorStop(1, '#a9720a');
+    ctx.font = `800 ${Math.round(h * 0.86)}px 'Orbitron', 'Russo One', ui-monospace, monospace`;
+    ctx.fillStyle = 'rgba(0,0,0,0.95)';
+    ctx.fillText(String(digit), w / 2 + h * 0.016, h / 2 + h * 0.047);
+    const tg = ctx.createLinearGradient(0, h * 0.08, 0, h * 0.92);
+    tg.addColorStop(0, '#ffffff');
+    tg.addColorStop(0.35, '#ffe9a8');
+    tg.addColorStop(0.75, accent);
+    tg.addColorStop(1, '#c08a12');
     ctx.fillStyle = tg;
     ctx.fillText(String(digit), w / 2, h / 2 + 2);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,248,221,0.55)';
-    ctx.strokeText(String(digit), w / 2, h / 2);
+    ctx.lineWidth = h * 0.016;
+    ctx.strokeStyle = 'rgba(255,248,221,0.85)';
+    ctx.strokeText(String(digit), w / 2, h / 2 + h * 0.008);
 
-    // Свечение вокруг цифры
+    // Ореол вокруг цифры — свечение видно даже в тени
     ctx.globalCompositeOperation = 'lighter';
-    const halo = ctx.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w * 0.46);
-    halo.addColorStop(0, withAlpha(accent, 0.24));
+    const halo = ctx.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w * 0.52);
+    halo.addColorStop(0, withAlpha(accent, 0.4));
     halo.addColorStop(1, withAlpha(accent, 0));
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, w, h);
@@ -532,6 +568,306 @@ export function engravedPlate(label: string, sub = ''): THREE.CanvasTexture {
   });
 }
 
+
+/** Бетон стартовой площадки: детерминированный шум + потёки (без Math.random). */
+export function concrete(): THREE.CanvasTexture {
+  return cached('concrete:v1', [512, 512], (ctx, w, h) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    ctx.fillStyle = '#3a3d46';
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 240; i++) {
+      const x = rnd(i) * w, y = rnd(i + 500) * h, r = 6 + rnd(i + 900) * 46;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const dark = rnd(i + 77) > 0.5;
+      g.addColorStop(0, dark ? 'rgba(20,22,28,.16)' : 'rgba(120,124,134,.10)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    for (let i = 0; i < 5200; i++) {
+      const v = 40 + rnd(i * 3) * 60;
+      ctx.fillStyle = `rgba(${v | 0},${v | 0},${(v + 6) | 0},${0.05 + rnd(i) * 0.08})`;
+      ctx.fillRect(rnd(i + 1) * w, rnd(i + 2) * h, 1.4, 1.4);
+    }
+    ctx.strokeStyle = 'rgba(18,20,26,.35)';
+    for (let i = 0; i < 14; i++) {
+      ctx.lineWidth = 0.7 + rnd(i + 40) * 1.4;
+      ctx.beginPath();
+      let x = rnd(i + 60) * w, y = 0;
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 9; k++) {
+        x += (rnd(i * 9 + k) - 0.5) * 46;
+        y += h / 9;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(12,14,18,.5)';
+    ctx.lineWidth = 3;
+    for (let i = 1; i < 4; i++) {
+      ctx.beginPath(); ctx.moveTo((w / 4) * i, 0); ctx.lineTo((w / 4) * i, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
+    }
+  });
+}
+
+/** Огненный шар взрыва: турбулентные лепестки вокруг ядра (детерминированно). */
+export function fireball(): THREE.CanvasTexture {
+  return cached('fireball:v1', [256, 256], (ctx, w) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 91.7 + 47.3) * 24634.6345;
+      return x - Math.floor(x);
+    };
+    const c = w / 2;
+    ctx.clearRect(0, 0, w, w);
+    for (let i = 0; i < 46; i++) {
+      const a = rnd(i) * Math.PI * 2;
+      const d = rnd(i + 9) * c * 0.62;
+      const r = c * (0.16 + rnd(i + 21) * 0.30);
+      const x = c + Math.cos(a) * d, y = c + Math.sin(a) * d;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const hot = rnd(i + 33) > 0.42;
+      g.addColorStop(0, hot ? 'rgba(255,214,120,.9)' : 'rgba(255,106,26,.8)');
+      g.addColorStop(0.55, 'rgba(255,84,20,.34)');
+      g.addColorStop(1, 'rgba(120,20,10,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    const core = ctx.createRadialGradient(c, c, 0, c, c, c * 0.5);
+    core.addColorStop(0, 'rgba(255,246,214,1)');
+    core.addColorStop(1, 'rgba(255,160,60,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(c, c, c * 0.5, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+
+/** Стена арены: тёмный цилиндр с неоновыми пилястрами (глубина вместо пустоты). */
+export function arenaWall(): THREE.CanvasTexture {
+  return cached('arenaWall:v1', [1024, 256], (ctx, w, h) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 57.3 + 11.9) * 34621.4321;
+      return x - Math.floor(x);
+    };
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#05030c');
+    g.addColorStop(0.72, '#0b0718');
+    g.addColorStop(1, '#160f2b');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // пилястры: чередование фиолетовых и циановых полос, тающих вверх
+    for (let i = 0; i < 24; i++) {
+      const x = (i + 0.5) * (w / 24);
+      const col = i % 2 ? '34,211,238' : '168,85,247';
+      const hh = h * (0.35 + rnd(i) * 0.4);
+      const lg = ctx.createLinearGradient(0, h, 0, h - hh);
+      lg.addColorStop(0, `rgba(${col},.5)`);
+      lg.addColorStop(1, `rgba(${col},0)`);
+      ctx.fillStyle = lg;
+      ctx.fillRect(x - 3, h - hh, 6, hh);
+      ctx.fillStyle = `rgba(${col},.8)`;
+      ctx.fillRect(x - 1.2, h - 14, 2.4, 14);
+    }
+    // нижняя световая линия
+    const bl = ctx.createLinearGradient(0, h, 0, h - 10);
+    bl.addColorStop(0, 'rgba(245,197,66,.8)');
+    bl.addColorStop(1, 'rgba(245,197,66,0)');
+    ctx.fillStyle = bl;
+    ctx.fillRect(0, h - 10, w, 10);
+  });
+}
+
+/** Вертикальный световой пилон: мягкая колонна света (альфа тает вверх). */
+export function lightPillar(color = '#22d3ee'): THREE.CanvasTexture {
+  return cached(`pillar:${color}`, [128, 256], (ctx, w, h) => {
+    const lg = ctx.createLinearGradient(0, h, 0, 0);
+    lg.addColorStop(0, withAlpha(color, 0.85));
+    lg.addColorStop(0.5, withAlpha(color, 0.28));
+    lg.addColorStop(1, withAlpha(color, 0));
+    ctx.fillStyle = lg;
+    ctx.fillRect(0, 0, w, h);
+    // мягкие края по горизонтали
+    ctx.globalCompositeOperation = 'destination-in';
+    const hg = ctx.createLinearGradient(0, 0, w, 0);
+    hg.addColorStop(0, 'rgba(0,0,0,0)');
+    hg.addColorStop(0.5, 'rgba(0,0,0,1)');
+    hg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
+
+/** Чёрный полированный мрамор с золотыми прожилками — пол и постаменты. */
+export function blackMarble(): THREE.CanvasTexture {
+  return cached('blackMarble:v1', [512, 512], (ctx, w, h) => {
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 74.7 + 7.7) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, '#0b0b12');
+    g.addColorStop(0.5, '#101018');
+    g.addColorStop(1, '#0a0a10');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // широкие дымчатые разводы
+    for (let i = 0; i < 26; i++) {
+      const x = rnd(i) * w, y = rnd(i + 31) * h, r = 40 + rnd(i + 61) * 120;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+      rg.addColorStop(0, `rgba(${i % 3 ? '38,38,52' : '26,24,36'},.22)`);
+      rg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // прожилки: золото и серебро, ветвящиеся линии
+    for (let i = 0; i < 16; i++) {
+      const gold = i % 3 === 0;
+      ctx.strokeStyle = gold ? 'rgba(212,175,55,.4)' : 'rgba(190,196,224,.22)';
+      ctx.lineWidth = gold ? 1.6 : 1.1;
+      ctx.beginPath();
+      let x = rnd(i + 7) * w, y = 0;
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 12; k++) {
+        x += (rnd(i * 13 + k) - 0.5) * 70;
+        y += h / 12;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      // тонкие ответвления
+      ctx.strokeStyle = gold ? 'rgba(212,175,55,.18)' : 'rgba(190,196,224,.1)';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(x - 30, y - h / 4);
+      ctx.lineTo(x + 26, y);
+      ctx.stroke();
+    }
+    // блики полировки
+    for (let i = 0; i < 8; i++) {
+      const x = rnd(i + 91) * w, y = rnd(i + 121) * h;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, 60 + rnd(i) * 60);
+      rg.addColorStop(0, 'rgba(255,255,255,.05)');
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg;
+      ctx.fillRect(0, 0, w, h);
+    }
+  });
+}
+
+/**
+ * Клеймо слитка: «VAULT 999.9 FINE GOLD». Тёмная гравировка на прозрачном —
+ * кладётся отдельной плоскостью на верхнюю грань слитка.
+ */
+export function ingotStamp(): THREE.CanvasTexture {
+  const W = 256;
+  const H = 88;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  if (!g) return new THREE.CanvasTexture(c);
+
+  // Двойная рамка штампа
+  g.strokeStyle = 'rgba(74,58,14,0.85)';
+  g.lineWidth = 5;
+  g.strokeRect(10, 8, W - 20, H - 16);
+  g.lineWidth = 2;
+  g.strokeRect(20, 16, W - 40, H - 32);
+
+  // Гравировка: тёмный знак + светлый сдвиг вниз-вправо (эффект чеканки)
+  const draw = (color: string, ox: number, oy: number) => {
+    g.fillStyle = color;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '800 34px Georgia, serif';
+    g.fillText('VAULT', W / 2 + ox, 32 + oy);
+    g.font = '700 19px Georgia, serif';
+    g.fillText('999.9 · FINE GOLD', W / 2 + ox, 62 + oy);
+  };
+  draw('rgba(255,236,180,0.5)', 1.4, 1.4);
+  draw('rgba(58,44,8,0.95)', 0, 0);
+
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * Золотой медальон арены: компасная роза судьбы под монетой.
+ * Прозрачный фон — кладётся декалью на мрамор.
+ */
+export function arenaMedallion(): THREE.CanvasTexture {
+  const S = 1024;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d');
+  if (!g) return new THREE.CanvasTexture(c);
+  const cx = S / 2, cy = S / 2;
+
+  g.strokeStyle = 'rgba(232,196,110,0.9)';
+  g.lineWidth = 10;
+  g.beginPath(); g.arc(cx, cy, 470, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 4;
+  g.beginPath(); g.arc(cx, cy, 430, 0, Math.PI * 2); g.stroke();
+
+  // Лучи розы: 8 длинных, 16 коротких
+  g.fillStyle = 'rgba(232,196,110,0.75)';
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    g.save();
+    g.translate(cx, cy); g.rotate(a);
+    g.beginPath();
+    g.moveTo(0, -410); g.lineTo(26, -120); g.lineTo(-26, -120);
+    g.closePath(); g.fill();
+    g.restore();
+  }
+  g.fillStyle = 'rgba(232,196,110,0.4)';
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2 + Math.PI / 16;
+    g.save();
+    g.translate(cx, cy); g.rotate(a);
+    g.beginPath();
+    g.moveTo(0, -300); g.lineTo(14, -110); g.lineTo(-14, -110);
+    g.closePath(); g.fill();
+    g.restore();
+  }
+
+  // Центральное кольцо и бусины по ободу
+  g.lineWidth = 6;
+  g.strokeStyle = 'rgba(232,196,110,0.9)';
+  g.beginPath(); g.arc(cx, cy, 96, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = 'rgba(232,196,110,0.85)';
+  for (let i = 0; i < 32; i++) {
+    const a = (i / 32) * Math.PI * 2;
+    g.beginPath();
+    g.arc(cx + Math.cos(a) * 450, cy + Math.sin(a) * 450, 7, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 8;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * Радиальное затухание 1→0: альфа-карта для пола, который растворяется
+ * в фоне карточки (прозрачная сцена витрины).
+ */
+export function radialFade(): THREE.CanvasTexture {
+  return cached('radialFade', [256, 256], (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, w * 0.08, w / 2, h / 2, w * 0.5);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.62, '#ffffff');
+    g.addColorStop(1, '#000000');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
 /* ═══════════════════════════ ПОЛ И ФОН ═════════════════════════════════ */
 
 /** Радиальное свечение на полу (неоновое кольцо арены, подсветка сейфа). */
@@ -566,17 +902,23 @@ export function arenaFloor(): THREE.CanvasTexture {
   const t = cached('arena:v2', [512, 512], (ctx, w, h) => {
     ctx.fillStyle = '#0b0718';
     ctx.fillRect(0, 0, w, h);
+    // Детерминированный ГПСЧ вместо Math.random
+    let seed = 777004 >>> 0 || 1;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
     // Прожилки
     ctx.globalAlpha = 0.3;
     for (let i = 0; i < 26; i++) {
       ctx.strokeStyle = i % 3 === 0 ? 'rgba(168,85,247,.5)' : 'rgba(200,205,240,.28)';
-      ctx.lineWidth = Math.random() * 2.4 + 0.4;
+      ctx.lineWidth = rnd() * 2.4 + 0.4;
       ctx.beginPath();
-      let x = Math.random() * w, y = Math.random() * h;
+      let x = rnd() * w, y = rnd() * h;
       ctx.moveTo(x, y);
       for (let s = 0; s < 7; s++) {
-        x += (Math.random() - 0.5) * 190;
-        y += (Math.random() - 0.5) * 190;
+        x += (rnd() - 0.5) * 190;
+        y += (rnd() - 0.5) * 190;
         ctx.lineTo(x, y);
       }
       ctx.stroke();
@@ -595,37 +937,85 @@ export function arenaFloor(): THREE.CanvasTexture {
 
 /** Туманность для космоса (фон ракеты): облака цвета вместо чёрной пустоты. */
 export function nebula(): THREE.CanvasTexture {
-  return cached('nebula:v2', [1024, 512], (ctx, w, h) => {
-    ctx.fillStyle = '#04050e';
+  // v4: детерминированный ГПСЧ, богаче облака и звёзды; полюса тёмные —
+  // верх и низ текстуры на сфере стягиваются в точку, и яркий рисунок там
+  // превращался в «срезанные» разводы вверху кадра
+  return cached('nebula:v4', [1024, 512], (ctx, w, h) => {
+    let seed = 987654321 >>> 0;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+
+    // Глубокий градиент вместо плоского чёрного
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#070a1c');
+    bg.addColorStop(0.5, '#04050e');
+    bg.addColorStop(1, '#0a0716');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
+
     const clouds: Array<[number, number, number, string]> = [
-      [w * 0.22, h * 0.36, h * 0.62, 'rgba(88,44,160,0.42)'],
-      [w * 0.62, h * 0.28, h * 0.5, 'rgba(20,90,150,0.36)'],
-      [w * 0.84, h * 0.66, h * 0.46, 'rgba(150,44,96,0.3)'],
-      [w * 0.42, h * 0.74, h * 0.44, 'rgba(40,120,140,0.24)'],
-      [w * 0.1, h * 0.8, h * 0.34, 'rgba(120,80,200,0.2)']
+      [w * 0.22, h * 0.36, h * 0.66, 'rgba(96,52,178,0.5)'],
+      [w * 0.62, h * 0.26, h * 0.56, 'rgba(28,102,168,0.44)'],
+      [w * 0.84, h * 0.66, h * 0.5, 'rgba(168,52,108,0.36)'],
+      [w * 0.42, h * 0.76, h * 0.48, 'rgba(44,132,150,0.3)'],
+      [w * 0.1, h * 0.8, h * 0.38, 'rgba(132,88,214,0.26)'],
+      [w * 0.52, h * 0.5, h * 0.6, 'rgba(70,60,190,0.3)']
     ];
     clouds.forEach(([x, y, r, color]) => {
-      // Облако из множества мягких пятен
-      for (let i = 0; i < 34; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const d = Math.random() * r * 0.85;
-        const rr = r * (0.2 + Math.random() * 0.5);
-        const g = ctx.createRadialGradient(x + Math.cos(a) * d, y + Math.sin(a) * d, 0, x + Math.cos(a) * d, y + Math.sin(a) * d, rr);
+      // Облако из множества мягких пятен + яркое ядро
+      for (let i = 0; i < 46; i++) {
+        const a = rnd() * Math.PI * 2;
+        const d = rnd() * r * 0.85;
+        const rr = r * (0.2 + rnd() * 0.5);
+        const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
+        const g = ctx.createRadialGradient(px, py, 0, px, py, rr);
         g.addColorStop(0, color);
         g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, rr, 0, Math.PI * 2);
+        ctx.arc(px, py, rr, 0, Math.PI * 2);
         ctx.fill();
       }
     });
-    // Мелкие звёзды прямо в текстуре (крупные — отдельные спрайты в сцене)
-    for (let i = 0; i < 900; i++) {
-      const x = Math.random() * w, y = Math.random() * h;
-      const b = Math.random();
-      ctx.fillStyle = `rgba(255,255,255,${0.18 + b * 0.7})`;
-      ctx.fillRect(x, y, b > 0.94 ? 2 : 1, b > 0.94 ? 2 : 1);
+
+    // Диагональная полоса «млечного пути» из мелкой звёздной пыли
+    for (let i = 0; i < 700; i++) {
+      const t = rnd();
+      const x = t * w;
+      const y = h * (0.32 + t * 0.22) + (rnd() - 0.5) * h * 0.22;
+      const b = rnd();
+      ctx.fillStyle = `rgba(210,220,255,${0.06 + b * 0.3})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+
+    // Затемнение к полюсам (верх/низ кадра на сфере)
+    const poleTop = ctx.createLinearGradient(0, 0, 0, h * 0.24);
+    poleTop.addColorStop(0, 'rgba(3,4,10,1)');
+    poleTop.addColorStop(1, 'rgba(3,4,10,0)');
+    ctx.fillStyle = poleTop;
+    ctx.fillRect(0, 0, w, h * 0.24);
+    const poleBottom = ctx.createLinearGradient(0, h, 0, h * 0.76);
+    poleBottom.addColorStop(0, 'rgba(3,4,10,1)');
+    poleBottom.addColorStop(1, 'rgba(3,4,10,0)');
+    ctx.fillStyle = poleBottom;
+    ctx.fillRect(0, h * 0.76, w, h * 0.24);
+
+    // Звёзды: мелкие точки + у ярких крестовый блик
+    for (let i = 0; i < 1200; i++) {
+      const x = rnd() * w, y = rnd() * h;
+      const b = rnd();
+      ctx.fillStyle = `rgba(255,255,255,${0.16 + b * 0.72})`;
+      ctx.fillRect(x, y, b > 0.93 ? 2 : 1, b > 0.93 ? 2 : 1);
+      if (b > 0.965) {
+        ctx.strokeStyle = 'rgba(220,230,255,0.55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x - 3, y); ctx.lineTo(x + 3, y);
+        ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 3);
+        ctx.stroke();
+      }
     }
   });
 }

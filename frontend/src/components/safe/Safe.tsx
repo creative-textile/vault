@@ -289,6 +289,7 @@ export default function Safe() {
       )}
       <SafeCrackScene
         phase={isCracking ? 'spinning' : last?.status === 'finished' ? 'result' : 'idle'}
+        celebrate={prize > 0}
         code={isCracking ? safe.code : (last?.code ?? undefined)}
         drumSpeeds={safe?.drum_speeds || undefined}
       />

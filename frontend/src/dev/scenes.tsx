@@ -23,7 +23,56 @@ import DuelScene from '../three/duel/DuelScene';
 import SafeCrackScene from '../three/safe/SafeCrackScene';
 import VaultScene from '../three/main/VaultScene';
 import { digitAt, speedOf } from '../three/safe/drumMath';
-import { detectQuality } from '../three/lib/stage';
+import { detectQuality, getStageStats, type StageStats } from '../three/lib/stage';
+import { modelInfo } from '../three/lib/models';
+
+const GLBS = ['safe.glb', 'rocket.glb', 'coin.glb'] as const;
+
+function fmtKb(n: number | null): string {
+  return n === null ? '—' : `${(n / 1024).toFixed(0)} КБ`;
+}
+
+/** Переключатель «модели/процедурно» + живая статистика (ТЗ 6.4). */
+function DevPanel({ forceProc, onToggle }: { forceProc: boolean; onToggle: () => void }) {
+  const [stats, setStats] = useState<Record<string, StageStats>>({});
+  const [sizes, setSizes] = useState<Record<string, number | null>>({});
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setStats(getStageStats());
+      Promise.all(GLBS.map((f) => modelInfo(f))).then((r) => {
+        const next: Record<string, number | null> = {};
+        GLBS.forEach((f, i) => { next[f] = r[i]?.bytes ?? null; });
+        setSizes(next);
+      });
+    }, 700);
+    return () => clearInterval(iv);
+  }, []);
+  const rows = Object.entries(stats);
+  return (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 10, background: 'rgba(8,6,15,.92)',
+      borderBottom: '1px solid #2a2440', padding: '10px 16px',
+      display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center',
+      backdropFilter: 'blur(6px)'
+    }}>
+      <button className={`btn btn-small ${forceProc ? 'btn-danger' : 'btn-green'}`} onClick={onToggle}>
+        {forceProc ? ' процедурно (fallback)' : '📦 3D-модели .glb'}
+      </button>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-dim)' }}>
+        {rows.map(([id, st]) => (
+          <span key={id} style={{ fontFamily: 'monospace' }}>
+            <b style={{ color: 'var(--gold)' }}>{id}</b> {st.fps} fps ·{' '}
+            {(st.triangles / 1000).toFixed(1)}k tris · {st.calls} calls
+          </span>
+        ))}
+        {rows.length === 0 && <span>статистика появится после рендера сцен…</span>}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'monospace' }}>
+        {GLBS.map((f) => `${f.replace('.glb', '')} ${fmtKb(sizes[f] ?? null)}`).join(' · ')}
+      </div>
+    </div>
+  );
+}
 
 const CODE = [7, 3, 9];
 const SPEEDS = [1.55, 1.72, 1.9];
@@ -194,8 +243,18 @@ function Safe() {
 
 function App() {
   const [q] = useState(detectQuality());
+  const [forceProc, setForceProc] = useState(false);
+  const [gen, setGen] = useState(0);
+  const toggle = () => {
+    const next = !forceProc;
+    setForceProc(next);
+    (window as unknown as { __VAULT_FORCE_PROCEDURAL__?: boolean }).__VAULT_FORCE_PROCEDURAL__ = next;
+    setGen((g) => g + 1);   // перемонтировать сцены, чтобы они перечитали флаг
+  };
   return (
-    <div style={{ padding: '18px 16px 60px', maxWidth: 860, margin: '0 auto' }}>
+    <div style={{ padding: '0 0 60px' }}>
+      <DevPanel forceProc={forceProc} onToggle={toggle} />
+      <div style={{ padding: '18px 16px 0', maxWidth: 860, margin: '0 auto' }}>
       <div className="logo" style={{ marginBottom: 4 }}>VAULT · галерея сцен</div>
       <div className="text-dim" style={{ fontSize: 13, marginBottom: 18 }}>
         Отладочная страница (в прод-сборку не входит). Качество определено как
@@ -203,14 +262,15 @@ function App() {
         <br />
         Если сцена пустая — браузер не дал WebGL-контекст, игра при этом остаётся играбельной.
       </div>
-      <Rocket />
-      <Duel />
-      <Safe />
+      <Rocket key={`r${gen}`} />
+      <Duel key={`d${gen}`} />
+      <Safe key={`s${gen}`} />
       <Section title="🏦 Витрина хранилища (онбординг)" hint="Прозрачный фон: сцена встроена в карточку, ореол вместо bloom.">
         <div style={{ background: 'linear-gradient(160deg,#141a3a,#070913)', borderRadius: 16, padding: 8 }}>
-          <VaultScene size={300} />
+          <VaultScene key={`v${gen}`} size={300} />
         </div>
       </Section>
+      </div>
     </div>
   );
 }

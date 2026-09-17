@@ -62,13 +62,15 @@ const PRESETS: Record<EnvPreset, EnvConfig> = {
     fill: { color: 0x22d3ee, intensity: 1.5 },
     floor: { color: 0x2a1a3a, intensity: 0.9 }
   },
-  // Сейф: сталь + тревожный красный
+  // Сейф (раунд U): тёплая музейная студия. Прежний красный контровой давал
+  // те самые «кислотные розовые отсветы» на стали — металл отражает именно
+  // эти панели, поэтому комната должна быть дорогой, а не тревожной.
   safe: {
-    bg: 0x0c0810,
-    key: { color: 0xdfe6ff, intensity: 4.4 },
-    rim: { color: 0xff2d55, intensity: 3.0 },
-    fill: { color: 0xf5c542, intensity: 1.5 },
-    floor: { color: 0x1a1014, intensity: 0.7 }
+    bg: 0x0d0a08,
+    key: { color: 0xfff0d6, intensity: 5.6 },
+    rim: { color: 0xffb066, intensity: 1.7 },
+    fill: { color: 0xd8e2f5, intensity: 1.0 },
+    floor: { color: 0x2a1c0e, intensity: 0.7 }
   }
 };
 
