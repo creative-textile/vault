@@ -122,38 +122,38 @@ jobs:
       # [skip ci] — чтобы коммит не запускал новый прогон.
       - name: Сводный кадр для агента
         if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Логи этого шага песочнице недоступны, поэтому всё пишем в сводку прогона.
-          exec 2>&1
+          # ВНИМАНИЕ: у этого job working-directory = frontend, поэтому пути
+          # ниже отсчитываются от frontend/, а не от корня репозитория.
           LOG=/tmp/eyes.log
+          : >$LOG
+          set +e
           {
-          echo "== frames =="; ls -la frontend/frames/ | head -20
-          command -v montage || echo "montage НЕТ"
-          cd frontend/frames
-          command -v montage >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick; }
-          echo "== после установки =="; command -v montage || echo "montage всё ещё НЕТ"
-          montage $(ls frame-*.png 2>/dev/null | head -6) -tile 3x2 -geometry 320x320+4+4 -background '#05060f' preview.jpg && echo "montage ok"
+          echo "== cwd: $(pwd) =="
+          ls -la frames/ | head -8
+          cd frames || exit 3
+          command -v montage >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq imagemagick; }
+          montage $(ls frame-*.png 2>/dev/null | head -6) -tile 3x2 -geometry 320x320+4+4 -background '#05060f' preview.jpg
           [ -f preview.jpg ] || cp frame-000.png preview.jpg
           ls -la preview.jpg
-          } >>$LOG
-          if [ -f frontend/frames/preview.jpg ]; then
-            B64=$(base64 -w0 frontend/frames/preview.jpg)
-            echo "<details><summary>Кадр 3D-сцены</summary><img src="data:image/jpeg;base64,$B64" width="640"></details>" >> $GITHUB_STEP_SUMMARY
+          } >>$LOG 2>&1
+          cd "$GITHUB_WORKSPACE/frontend"
+          if [ -f frames/preview.jpg ]; then
+            B64=$(base64 -w0 frames/preview.jpg)
+            { echo '<details><summary>Кадр 3D-сцены</summary>'; echo "<img src=\"data:image/jpeg;base64,$B64\" width=\"640\">"; echo '</details>'; } >> $GITHUB_STEP_SUMMARY
           fi
-          echo '```' >> $GITHUB_STEP_SUMMARY; cat $LOG >> $GITHUB_STEP_SUMMARY; echo '```' >> $GITHUB_STEP_SUMMARY
-          # Картинку кладём в ветку — песочница читает её через api.github.com.
+          { echo '```'; cat $LOG; echo '```'; } >> $GITHUB_STEP_SUMMARY
+          # Картинку кладём в ветку: blob-хранилище артефактов песочнице недоступно,
+          # а api.github.com открыт — оттуда агент читает файл и смотрит глазами.
           cd "$GITHUB_WORKSPACE"
           BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
           git config user.name "vault-eyes"
           git config user.email "eyes@vault.local"
           git add -f frontend/frames/preview.jpg
-          git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]" || true
-          SHA=$(git rev-parse HEAD)
-          echo "== push $SHA -> $BRANCH ==" >> $LOG
-          git push -q origin "HEAD:$BRANCH" >>$LOG || echo "push не удался (не критично)" >> $LOG
-          tail -5 $LOG >> $GITHUB_STEP_SUMMARY
+          git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]" || echo "нечего коммитить"
+          echo "push $(git rev-parse --short HEAD) -> $BRANCH" >> $GITHUB_STEP_SUMMARY
+          git push -q origin "HEAD:$BRANCH" || echo "push не удался (не критично)"
+          true
 
   bot:
     name: "Telegram-бот: типы и сборка"
