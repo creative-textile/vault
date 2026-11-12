@@ -15,7 +15,7 @@
  *
  * Запуск:  node tests/eyes/frames.mjs            # 12 кадров
  *          node tests/eyes/frames.mjs --frames 30 --zoom 2
- * Переменные: SCENES_URL — адрес превью (по умолчанию vite preview :4173).
+ * Переменные: SCENES_URL — адрес галереи (по умолчанию dev-сервер Vite :4173).
  */
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
@@ -47,11 +47,19 @@ async function findChrome(pw) {
   return null;
 }
 
-/** Поднимаем `vite preview` и ждём, пока порт начнёт отвечать. */
+/**
+ * Поднимаем dev-сервер Vite и ждём, пока он начнёт отдавать галерею.
+ *
+ * Почему dev, а не preview: `scenes.html` намеренно НЕ входит в прод-сборку
+ * (его нет в build.rollupOptions.input). `vite preview` раздаёт `dist/`, где
+ * этой страницы нет, и на неизвестный путь отдаёт index.html — первые кадры
+ * снимали онбординг вместо 3D-сцен. Ошибку поймали глазами: на картинке был
+ * экран «Витрина хранилища».
+ */
 async function startServer() {
   const child = spawn(
     process.execPath,
-    ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'],
+    ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'],
     { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] }
   );
   const log = [];
@@ -60,15 +68,19 @@ async function startServer() {
 
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`preview завершился: ${log.join('').slice(-400)}`);
+    if (child.exitCode !== null) throw new Error(`dev-сервер завершился: ${log.join('').slice(-400)}`);
     try {
       const res = await fetch(URL, { signal: AbortSignal.timeout(2000) });
-      if (res.ok) return child;
+      // Проверяем содержимое, а не только 200: на любой неизвестный путь
+      // Vite отдаёт index.html, и «сервер поднялся» ещё не значит
+      // «отдаёт галерею сцен».
+      const html = res.ok ? await res.text() : '';
+      if (html.includes('scenes.tsx') || html.includes('/src/dev/scenes')) return child;
     } catch { /* ещё не поднялся */ }
     await new Promise((r) => setTimeout(r, 500));
   }
   child.kill('SIGKILL');
-  throw new Error(`preview не поднялся за 60 с: ${log.join('').slice(-400)}`);
+  throw new Error(`dev-сервер не отдал scenes.html за 60 с: ${log.join('').slice(-400)}`);
 }
 
 async function main() {
@@ -97,7 +109,7 @@ async function main() {
   try {
     if (OWN_SERVER) {
       server = await startServer();
-      console.log('[eyes] preview поднят на', URL);
+      console.log('[eyes] dev-сервер поднят на', URL);
     }
   } catch (e) {
     console.log('[eyes] сервер не поднялся —', e.message);
