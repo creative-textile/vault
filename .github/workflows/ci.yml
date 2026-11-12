@@ -122,25 +122,38 @@ jobs:
       # [skip ci] — чтобы коммит не запускал новый прогон.
       - name: Сводный кадр для агента
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -x
+          # Логи этого шага песочнице недоступны, поэтому всё пишем в сводку прогона.
+          exec 2>&1
+          LOG=/tmp/eyes.log
+          {
+          echo "== frames =="; ls -la frontend/frames/ | head -20
+          command -v montage || echo "montage НЕТ"
           cd frontend/frames
-          # ImageMagick на ubuntu-latest может отсутствовать — ставим явно.
-          command -v montage >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick) || true
-          montage $(ls frame-*.png | head -6) -tile 3x2 -geometry 320x320+4+4 -background '#05060f' preview.jpg || \
-            convert frame-000.png -resize 50% preview.jpg || exit 0
+          command -v montage >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick; }
+          echo "== после установки =="; command -v montage || echo "montage всё ещё НЕТ"
+          montage $(ls frame-*.png 2>/dev/null | head -6) -tile 3x2 -geometry 320x320+4+4 -background '#05060f' preview.jpg && echo "montage ok"
+          [ -f preview.jpg ] || cp frame-000.png preview.jpg
           ls -la preview.jpg
+          } >>$LOG
+          if [ -f frontend/frames/preview.jpg ]; then
+            B64=$(base64 -w0 frontend/frames/preview.jpg)
+            echo "<details><summary>Кадр 3D-сцены</summary><img src="data:image/jpeg;base64,$B64" width="640"></details>" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY; cat $LOG >> $GITHUB_STEP_SUMMARY; echo '```' >> $GITHUB_STEP_SUMMARY
+          # Картинку кладём в ветку — песочница читает её через api.github.com.
           cd "$GITHUB_WORKSPACE"
-          # На push-событии GITHUB_HEAD_REF пуст — берём имя ветки из GITHUB_REF_NAME.
           BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
-          echo "ветка: $BRANCH"
           git config user.name "vault-eyes"
           git config user.email "eyes@vault.local"
           git add -f frontend/frames/preview.jpg
-          git diff --cached --quiet && { echo "нечего коммитить"; exit 0; }
-          git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]"
-          git pull -q --rebase origin "$BRANCH" || true
-          git push origin "HEAD:$BRANCH"
+          git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]" || true
+          SHA=$(git rev-parse HEAD)
+          echo "== push $SHA -> $BRANCH ==" >> $LOG
+          git push -q origin "HEAD:$BRANCH" >>$LOG || echo "push не удался (не критично)" >> $LOG
+          tail -5 $LOG >> $GITHUB_STEP_SUMMARY
 
   bot:
     name: "Telegram-бот: типы и сборка"
