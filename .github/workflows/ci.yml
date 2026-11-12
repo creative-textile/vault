@@ -154,5 +154,8 @@ jobs:
         run: npm run test:regression
       - name: Продолжение после tool-call limit
         run: npm run test:tool-limit
+      # Без --base: гейт путей сверяет только рабочее дерево (в CI оно чистое).
+      # Сравнение с базовой ревизией (D-027) требует правки только транспорта —
+      # это делает миссия, а не любой продуктовый коммит.
       - name: Узел допускает сборку к установке
-        run: node tools/relay-build.mjs --repo . --base origin/${{ github.base_ref || 'main' }} --json
+        run: node tools/relay-build.mjs --repo . --json
