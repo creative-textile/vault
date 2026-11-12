@@ -1,0 +1,9 @@
+{
+  "url": "http://127.0.0.1:4173/scenes.html",
+  "frames": 12,
+  "spanMs": 6000,
+  "webgl": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}
