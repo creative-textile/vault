@@ -1,7 +1,7 @@
 # Где сейчас Vault и что дальше
 
-Дата: 2026-11-12 · ветка `arena/669da8ec-vault` · PR [#2](https://github.com/creative-textile/vault/pull/2)
-Основание: `main` @ `a2be2c9` (мерж PR #1).
+Дата: 2026-11-12 · база: `main` @ `05053df` (мерж PR [#6](https://github.com/creative-textile/vault/pull/6))
+История: PR #1–#6 смёржены, каждый — 8/8 проверок.
 Стадия: **фаза 0 закрыта, активна фаза 1 «Ядро продукта и 3D»**, первая миссия — **V-1-1**.
 
 ## 1. Коротко
@@ -25,7 +25,7 @@
 | «Песочницы откатываются — тяжёлые инструменты в репозиторий» | `tools/modeling/`, `tools/media/`, `tools/audio/`, `audio/` — всё в git | — |
 | «Нужно разбить на фазы, внутри фазы — миссии» | `docs/PHASES.md`: Ф0…Ф4, Ф0 закрыта, Ф1 активна | приёмка миссий |
 | «USDT на TON, BEP-20 и ERC-20» | `docs/architecture/payments-multichain.md`: схема, потоки, этапы | ключи mainnet (Ф2) |
-| «Работать командой, а не одному» | роли и зоны в `docs/REGULATION.md` v1.1; транспорт 1.16.0; карточки выдаёт Coordinator | агенты Arena + `Agent URL` (Мастер) |
+| «Работать командой, а не одному» | роли и зоны в `docs/REGULATION.md` v1.6; транспорт 1.16.0; карточки выдаёт Coordinator | агенты Arena + `Agent URL` (Мастер) |
 | «Звук — настоящие записи, не синтез» | `audio/`: 6 треков FreePD (CC0) + 19 звуков Oculus (CC BY 4.0), `npm run audio:audit` | подключение к экранам, экран «Лицензии» |
 | «Хостинг — за $0» | решение записано: бесплатный тариф, засыпание допустимо | выбор конкретного хостинга (Ф2) |
 
@@ -39,7 +39,7 @@ docs/art-direction.md               художественный контрак�
 docs/art-direction/refs/            refs/src/*.jpg, refs/cut/*.webp, contact-sheet.png
 docs/audio.md                       аудио-направление: что берём, лимиты, чего не обещаем
 docs/architecture/payments-multichain.md   TON + BEP-20 + ERC-20
-docs/missions/V-1-1.md              ТЗ первой миссии фазы 1 (v1.1, оракул)
+docs/missions/V-1-1.md              ТЗ первой миссии фазы 1 (v1.2, оракул)
 docs/missions/V-1-1-card-queue.md   очередь из 7 карточек для Coordinator
 docs/missions/TEMPLATE.md           форма ТЗ миссии
 docs/missions/archive/              преждевременные ТЗ и очередь VAULT-1
@@ -64,8 +64,10 @@ tools/audio/audit_audio.py          формат, вес, длительност
 | `npm run audio:audit` | 25 файлов, формат/вес/лицензии — **rc=0** |
 | `npm run modeling:audit` | safe ✗, rocket ✓, coin ✗ — 2 из 3 вне бюджета, это исходная точка V-1-1 |
 | Blender `bpy` смоук | `4.5.3 LTS`, `background=True`, GLB/UV/рендер — зелёные |
-| CI PR #2 | 6/6 джобов pass |
-| Vercel | деплой `dpl_786WeZRctHfnx8HgfgKM8P6EpBH7` — **READY** (production, коммит `372e68b`) |
+| CI PR #2–#6 | каждый PR — 8/8 джобов pass |
+| Vercel | production **READY** на `05053df`; `/api/*` → 404 (backend — фаза 2), поэтому Mini App показывает «Сервер API недоступен» (D-111) |
+| Бот `@my_vault_dev_bot` | Mini App `app` открывается, экран ошибки API — ожидаемый (D-113, D-115) |
+| Языки ru+en | автоопределение по `language_code` (D-114); в `en.json` кириллицы нет (D-116) |
 
 ## 4. Решения фазы 0: что принято и что открыто
 
@@ -83,6 +85,17 @@ tools/audio/audit_audio.py          формат, вес, длительност
 | Ф0-8 | Продукт на **двух языках: ru + en**; перенос текста — отдельной миссией | `docs/i18n.md` |
 | Ф0-9 | Telegram: **тестовый бот сейчас** (заводит Мастер), боевой — Ф2 | `docs/setup/telegram.md` |
 
+**После закрытия фазы 0 (та же дата, 2026-11-12):**
+
+| № | Решение | Записано в |
+|---|---|---|
+| D-111 | Вместо белого экрана при недоступном API — честный экран «Сервер API недоступен» | `docs/DECISIONS.md` |
+| D-112 | Два языка ru + en, новых локалей без Мастера не добавляем | `docs/i18n.md` |
+| D-113 | Тестовый Telegram-бот `Vault Dev` `@my_vault_dev_bot`, Mini App `app` | `docs/setup/telegram.md` |
+| D-114 | Язык определяется сам по `language_code` (`en`→en, `ru`/`uk`/`be`/`kk`→ru, иначе ru); ручной выбор сильнее и хранится в профиле; юртексты значимы по-русски | `docs/DECISIONS.md` |
+| D-115 | Токен бота — только у Мастера; `BOT_USERNAME` в `.env.example` | `docs/setup/telegram.md` |
+| D-116 | **Названия игр переводятся** (Сейф→Safe, Ракета→Rocket, Дуэль→Duel); в `en`-интерфейсе кириллицы нет; глоссарий 20 терминов | `docs/i18n.md` §6 |
+
 **Открыто (не блокирует старт фазы 1):**
 
 1. **Хранилище ключей на старт mainnet** — рекомендация B (аппаратный кошелёк + ручное
@@ -93,8 +106,8 @@ tools/audio/audit_audio.py          формат, вес, длительност
    готова и отдаётся, но по ссылке требуется вход в аккаунт Vercel. Снять защиту может только
    владелец аккаунта в настройках проекта (Settings → Deployment Protection). До этого проверка
    «с телефона» идёт из-под аккаунта владельца.
-4. **Агенты Arena** — `Agent URL` у Platform Architect и Coordinator пуст; это единственное,
-   что удерживает карточку K1 в Draft.
+4. **Агенты Arena** — `Agent URL` у Platform Architect, Coordinator, Spec Auditor и ролей локализации/транспорта пуст; это единственное,
+   что удерживает карточку K1 в Draft. Warden заведён (URL и Admin=true), дубль роли Platform Architect — в корзине.
 
 ## 5. Что я НЕ делал сознательно
 
