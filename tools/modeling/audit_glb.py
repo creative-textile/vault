@@ -31,6 +31,31 @@ def png_size(blob):
     return struct.unpack(">II", blob[16:24])
 
 
+
+def jpeg_size(blob):
+    """Размер JPEG из маркера SOF — нужен, чтобы VRAM считался и для JPEG/WebP.
+
+    Почему это важно: раньше VRAM оценивалась только для PNG, а для JPEG
+    молча возвращала 0. После сжатия модели в JPEG аудит показывал «VRAM ≈ 0 Б»
+    — то есть ЛОЖНОЕ «всё хорошо», хотя текстура 1024×1024 занимает 5.3 МБ.
+    """
+    if len(blob) < 4 or blob[0:2] != b"\xff\xd8":
+        return None
+    i = 2
+    while i < len(blob) - 9:
+        if blob[i] != 0xFF:
+            i += 1
+            continue
+        marker = blob[i + 1]
+        # SOF0..SOF15, кроме DHT(C4), JPG(C8), DAC(CC)
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            h = int.from_bytes(blob[i + 5:i + 7], "big")
+            w = int.from_bytes(blob[i + 7:i + 9], "big")
+            return (w, h) if w and h else None
+        seg_len = int.from_bytes(blob[i + 2:i + 4], "big")
+        i += 2 + seg_len
+    return None
+
 def read_glb(path):
     """Возвращает (json-чанк, bin-начало, bin-длина)."""
     data = path.read_bytes()
@@ -82,14 +107,22 @@ def measure(path):
         start = (bin_off or 0) + view.get("byteOffset", 0)
         blob = data[start:start + view["byteLength"]]
         tex_bytes += len(blob)
-        size = png_size(blob) if img.get("mimeType") == "image/png" else None
+        mime = img.get("mimeType") or ""
+        if mime == "image/png":
+            size = png_size(blob)
+        elif mime in ("image/jpeg", "image/jpg"):
+            size = jpeg_size(blob)
+        else:
+            size = None
         if size:
             w, h = size
             # RGBA8 + мип-цепочка 4/3 — так текстура живёт в VRAM.
             vram += int(w * h * 4 * 4 / 3)
             textures.append({"w": w, "h": h, "bytes": len(blob)})
         else:
-            textures.append({"w": None, "h": None, "bytes": len(blob)})
+            # Неизвестный формат: VRAM не посчитать. Молчать нельзя — иначе
+            # аудит покажет «VRAM 0» и пропустит перегрузку памяти.
+            textures.append({"w": None, "h": None, "bytes": len(blob), "unknownFormat": mime or "?"})
 
     anims = [
         {"name": a.get("name") or "", "channels": len(a.get("channels", []))}

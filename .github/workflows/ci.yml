@@ -96,6 +96,16 @@ jobs:
       - run: npx tsc --noEmit
       - name: Математика 3D-анимаций и линт шейдеров
         run: npm test
+
+      # Модель может проходить аудит по весу и всё равно не загрузиться:
+      # так было с WebP (GLTFLoader падает, у игрока — процедурный fallback).
+      # Проверяем каждую .glb реальным three.js до сборки.
+      - name: Модели разбираются three.js
+        run: |
+          cd ..
+          for f in frontend/public/models/*.glb; do
+            node tools/modeling/validate_glb.mjs "$f"
+          done
       - run: npm run build
 
       # 👁 ГЛАЗА АГЕНТА: настоящий Chromium снимает 3D-сцены в PNG.

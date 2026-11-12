@@ -27,6 +27,19 @@
 `npm run verify` и наборы `test:prompts`, `test:delivery`, `test:pilot`,
 `test:docs` должны быть зелёными до боевого запуска.
 
+## Инструменты: что запускать
+Полный каталог — [tools.md](tools.md). Минимум, который нужен каждому агенту:
+
+- `npm run verify` — весь репозиторий;
+- `cd frontend && npm run eyes` — **кадры 3D-сцен**; работает только в CI (нужен
+  браузер), в песочнице мягко выходит с кодом 0. Результат — `frontend/frames/preview.jpg`;
+- `python3 tools/modeling/audit_glb.py <модель>` — бюджет 3D-модели;
+- `node tools/modeling/validate_glb.mjs <модель>` — модель реально разбирается three.js;
+- `node tools/modeling/shrink_glb.mjs <модель>` — ужать в бюджет (JPEG 512).
+
+**Не проверяйте визуал по числам.** Аудит и тесты не видят чёрного кадра,
+уехавшей камеры и пустой сцены — только глаза.
+
 ## Provisioning Arena-агентов (1.10.0)
 1. В профиле ScriptCat включите provisioning только после согласия Мастера: задайте allowlist точных `owner/repo`, bootstrap-пробник без внутренних токенов, лимиты и режим manual/auto. По умолчанию всё выключено.
 2. В Notion «Роли» добавьте аддитивные поля: Agent Admin (checkbox), Agent State (select), Agent Job ID, Agent Created At, Previous Agent URL. Отметьте `Agent Admin=true` у действующего Coordinator или Reviewer.
