@@ -9,7 +9,8 @@
     "test": "npm run test:scene && npm run test:shaders",
     "test:shaders": "node tests/shader-lint.mjs",
     "test:scene": "esbuild tests/scene-math.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/scene-math.mjs --log-level=warning && node node_modules/.cache/scene-math.mjs",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "eyes": "node tests/eyes/frames.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
@@ -31,6 +32,7 @@
     "@types/three": "^0.164.1",
     "@vitejs/plugin-react": "^4.3.0",
     "typescript": "^5.4.5",
-    "vite": "^5.2.11"
+    "vite": "^5.2.11",
+    "playwright": "^1.49.0"
   }
 }

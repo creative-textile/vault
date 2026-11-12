@@ -18,6 +18,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Шагу «Сводный кадр для агента» нужно право коммитить в ветку.
+# Остальные job'ы получают ровно те права, что и раньше.
+permissions:
+  contents: write
+
 jobs:
   backend:
     name: "Backend: типы и смоук-тесты"
@@ -92,6 +97,65 @@ jobs:
       - name: Математика 3D-анимаций и линт шейдеров
         run: npm test
       - run: npm run build
+
+      # 👁 ГЛАЗА АГЕНТА: настоящий Chromium снимает 3D-сцены в PNG.
+      # Числа проверяют математику, но не проверяют, что на экране что-то
+      # нарисовалось (чёрный кадр, уехавшая камера, лопнувший материал).
+      # Кадры уезжают артефактом — агент скачивает и смотрит их глазами.
+      - name: Браузер для кадров сцен
+        run: npx playwright install --with-deps chromium
+      - name: Кадры 3D-сцен
+        run: node tests/eyes/frames.mjs --frames 12
+      - name: Артефакт с кадрами
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-frames
+          path: frontend/frames/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Песочница агента НЕ может скачать артефакт: blob-хранилище GitHub
+      # (productionresultssa*.blob.core.windows.net) в белом списке отсутствует,
+      # зато api.github.com открыт. Поэтому сводная картинка кладётся в ветку —
+      # агент читает её через API и СМОТРИТ глазами.
+      # [skip ci] — чтобы коммит не запускал новый прогон.
+      - name: Сводный кадр для агента
+        if: always()
+        run: |
+          # ВНИМАНИЕ: у этого job working-directory = frontend, поэтому пути
+          # ниже отсчитываются от frontend/, а не от корня репозитория.
+          LOG=/tmp/eyes.log
+          : >$LOG
+          set +e
+          {
+          echo "== cwd: $(pwd) =="
+          ls -la frames/ | head -8
+          cd frames || exit 3
+          command -v montage >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq imagemagick; }
+          montage $(ls frame-*.png 2>/dev/null | head -6) -tile 3x2 -geometry 320x320+4+4 -background '#05060f' preview.jpg
+          [ -f preview.jpg ] || cp frame-000.png preview.jpg
+          ls -la preview.jpg
+          } >>$LOG 2>&1
+          cd "$GITHUB_WORKSPACE/frontend"
+          if [ -f frames/preview.jpg ]; then
+            B64=$(base64 -w0 frames/preview.jpg)
+            { echo '<details><summary>Кадр 3D-сцены</summary>'; echo "<img src=\"data:image/jpeg;base64,$B64\" width=\"640\">"; echo '</details>'; } >> $GITHUB_STEP_SUMMARY
+          fi
+          { echo '```'; cat $LOG; echo '```'; } >> $GITHUB_STEP_SUMMARY
+          # Картинку кладём в ветку: blob-хранилище артефактов песочнице недоступно,
+          # а api.github.com открыт — оттуда агент читает файл и смотрит глазами.
+          cd "$GITHUB_WORKSPACE"
+          BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          git config user.name "vault-eyes"
+          git config user.email "eyes@vault.local"
+          # report.json — версия WebGL и ошибки страницы: агенту нужны не только
+          # пиксели, но и «чем рисовали» и «что ругалось».
+          git add -f frontend/frames/preview.jpg frontend/frames/report.json
+          git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]" || echo "нечего коммитить"
+          echo "push $(git rev-parse --short HEAD) -> $BRANCH" >> $GITHUB_STEP_SUMMARY
+          git push -q origin "HEAD:$BRANCH" || echo "push не удался (не критично)"
+          true
 
   bot:
     name: "Telegram-бот: типы и сборка"

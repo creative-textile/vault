@@ -8,3 +8,6 @@ pgdata
 __pycache__
 .vite
 coverage
+
+# Кадры 3D-сцен (артефакт CI, не исходники)
+frontend/frames/
