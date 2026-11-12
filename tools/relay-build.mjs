@@ -52,7 +52,7 @@ export const CHECKS = [
  */
 // Vault: единственный репозиторий, поэтому сюда же входят корневой манифест и
 // документы процесса — они часть контура транспорта, а не чужой код.
-export const ALLOWED_PATHS = ['tools/script-cat/', 'tools/relay-watchdog.mjs', 'tools/relay-build.mjs', 'docs/', 'package.json'];
+export const ALLOWED_PATHS = ['tools/script-cat/', 'tools/modeling/', 'tools/relay-watchdog.mjs', 'tools/relay-build.mjs', 'docs/', 'package.json'];
 // Сторож и узел — файлы, а не каталоги: сравниваем точно, иначе `tools/` целиком
 // считалось бы разрешённым и узел перестал бы замечать чужой код рядом с собой.
 const ALLOWED_FILES = new Set(ALLOWED_PATHS.filter((path) => !path.endsWith('/')));

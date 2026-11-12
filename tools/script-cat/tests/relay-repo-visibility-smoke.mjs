@@ -20,7 +20,7 @@ assertUserscriptVersionContract(src);
 // ── 1. Репозиторий документов — отдельно от репозитория сессии ───────────────
 const cfg = readFileSync(new URL('../src/01-config.js', import.meta.url), 'utf8');
 assert.match(cfg, /docsRepo: ""/, 'репозиторий документов задан отдельной настройкой');
-assert.match(cfg, /queueDoc: "docs\/missions\/VAULT-1-card-queue\.md"/, 'файл редакции задан настройкой');
+assert.match(cfg, /queueDoc: "docs\/PHASES\.md"/, 'файл редакции задан настройкой');
 
 const adr = readFileSync(new URL('../src/25-legacy-adr.js', import.meta.url), 'utf8');
 assert.match(adr, /function docsRepository\(\)/, 'репозиторий документов вычисляется, а не берётся из C.repo');
@@ -61,18 +61,20 @@ assert.match(upload, /contents\/\$\{encodeURI\(path\)\}/, 'путь пишетс
 // Ровно это расхождение и было 09.11: очередь объявляла «ТЗ 1.6», а миссия
 // продолжала говорить «Версия ТЗ 1.5». Гейт сверки такой документ считал бы
 // опубликованным, потому что читает одну шапку из двух.
+//
+// D-108: миссий пока нет (идёт фаза 0), поэтому сверяются план фаз и шаблон
+// миссии — форма номеров та же, и правило «две шапки не расходятся» остаётся
+// проверяемым до появления первой миссии.
 {
-  const mission = readFileSync(new URL('../../../docs/missions/VAULT-1.md', import.meta.url), 'utf8');
-  const queue = readFileSync(new URL('../../../docs/missions/VAULT-1-card-queue.md', import.meta.url), 'utf8');
-  const inMission = mission.match(/Версия ТЗ \*\*(\d+\.\d+)\*\*/);
-  // В шапке очередь пишет «ТЗ» между двумя звёздочными парами:
-  // «(**редакция 1.8**, **ТЗ 1.6**)» — ищем номер без привязки к выделению.
-  const inQueue = queue.slice(0, 1200).match(/ТЗ\s*\**\s*(\d+\.\d+)/);
-  assert.ok(inMission, 'в шапке миссии назван номер ТЗ');
-  assert.ok(inQueue, 'в шапке очереди назван номер ТЗ');
-  assert.equal(inMission[1], inQueue[1], 'номер ТЗ в миссии и в очереди совпадает');
-  const declared = queue.slice(0, 1200).match(/редакция\s*\**\s*(\d+\.\d+)/);
-  assert.ok(declared, 'в шапке очереди назван номер редакции');
+  const plan = readFileSync(new URL('../../../docs/PHASES.md', import.meta.url), 'utf8');
+  const template = readFileSync(new URL('../../../docs/missions/TEMPLATE.md', import.meta.url), 'utf8');
+  const inPlan = plan.match(/Версия \*\*(\d+\.\d+)\*\*/);
+  const inTemplate = template.match(/Версия ТЗ \*\*(\d+\.\d+)\*\*/);
+  assert.ok(inPlan, 'в шапке плана назван номер версии');
+  assert.ok(inTemplate, 'в шапке шаблона миссии назван номер ТЗ');
+  assert.equal(inPlan[1], inTemplate[1], 'номер в плане и в шаблоне совпадает');
+  const declared = plan.slice(0, 1200).match(/Версия\s*\**\s*(\d+\.\d+)/);
+  assert.ok(declared, 'в шапке плана назван номер редакции');
   // Номер редакции сравнивается попарно, а не как дробь: `Number("1.10")` = 1.1,
   // то есть редакция 1.10 была бы «ниже 1.8». Ровно на этом ломался следующий же
   // шаг: очередь доходила до 1.10 и проба падала на верной правке.
