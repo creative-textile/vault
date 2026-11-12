@@ -130,3 +130,32 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+
+  # Транспорт агентов (ScriptCat) живёт в этом же репозитории, поэтому он не может
+  # остаться без гейта: сборка, переносимость, пробы и узел допуска к установке.
+  # Проверки фиксированы в tools/relay-build.mjs и не читаются из package.json.
+  scriptcat:
+    name: "ScriptCat: сборка, guard, пробы, узел"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Сборка соответствует исходникам
+        run: node tools/script-cat/build.mjs --check
+      - name: Переносимый комплект без прежних имён
+        run: node tools/script-cat/portability-guard.mjs
+      - name: Пробы транспорта
+        run: npm test
+      - name: Регрессии транспорта
+        run: npm run test:regression
+      - name: Продолжение после tool-call limit
+        run: npm run test:tool-limit
+      # Без --base: гейт путей сверяет только рабочее дерево (в CI оно чистое).
+      # Сравнение с базовой ревизией (D-027) требует правки только транспорта —
+      # это делает миссия, а не любой продуктовый коммит.
+      - name: Узел допускает сборку к установке
+        run: node tools/relay-build.mjs --repo . --json
