@@ -16,6 +16,8 @@
     "test:tool-limit": "node --test tools/script-cat/tests/tool-limit-continuation-smoke.mjs tools/script-cat/regression-tests/tool-limit-continuation-integration.mjs",
     "verify": "npm run scriptcat:check && npm run scriptcat:guard && npm test && npm run test:regression && npm run test:tool-limit",
     "verify:node": "node tools/relay-build.mjs --repo . --allow-dirty",
-    "go-live:check": "node scripts/go-live-check.mjs"
+    "go-live:check": "node scripts/go-live-check.mjs",
+    "modeling:audit": "python3 tools/modeling/audit_glb.py frontend/public/models/*.glb",
+    "audio:audit": "python3 tools/audio/audit_audio.py"
   }
 }

@@ -1,0 +1,38 @@
+{
+  "comment": "Бюджет 3D-ассетов Vault. Единицы: треугольники — штуки, вес — байты, VRAM — байты. Значения выведены из факта мобильного рендера (WebView Telegram, Android среднего класса), а не из пожеланий: см. docs/perf-budget.md.",
+  "version": 1,
+  "perModel": {
+    "triangles": 25000,
+    "bytes": 1200000,
+    "textureBytes": 600000,
+    "vramBytes": 16777216,
+    "textures": 4,
+    "textureMaxSide": 1024,
+    "materials": 4,
+    "primitives": 12
+  },
+  "perScene": {
+    "triangles": 120000,
+    "bytes": 2500000,
+    "vramBytes": 50331648,
+    "drawCalls": 60
+  },
+  "forbiddenExtensions": [
+    "KHR_draco_mesh_compression_not_allowed_here"
+  ],
+  "requiredExtensionsByDelivery": [
+    "KHR_meshopt_compression"
+  ],
+  "allowAnyExtensions": [
+    "KHR_materials_emissive_strength",
+    "KHR_materials_clearcoat",
+    "KHR_materials_ior",
+    "KHR_materials_transmission",
+    "KHR_texture_transform"
+  ],
+  "notes": [
+    "Формат хранения — PNG (совместимость WebView), но бюджет по байтам текстуры считается отдельно от геометрии: он уходит в VRAM даже если вес файла в норме.",
+    "Draco допустим только вместе с fallback-декодером; для Mini App предпочтителен meshopt: декодер меньше и работает на всех целевых Android.",
+    "Один материал на деталь — потолок: материалы и текстуры дороже треугольников на мобильном GPU."
+  ]
+}

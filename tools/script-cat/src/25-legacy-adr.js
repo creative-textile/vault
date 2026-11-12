@@ -152,7 +152,7 @@
     return String(C.repo || "");
   }
 
-  async function publishedTzVersion(file = C.queueDoc || "docs/missions/VAULT-1-card-queue.md") {
+  async function publishedTzVersion(file = C.queueDoc || "docs/PHASES.md") {
     const cache = GM_getValue("cfn-tz-published", null);
     const now = Date.now();
     const repo = canonicalTargetRepository(docsRepository());
@@ -166,8 +166,12 @@
       const url = `https://api.github.com/repos/${repo}/contents/${file}?ref=${encodeURIComponent(C.branch || "main")}`;
       const got = await request("GET", url, githubHeaders(token));
       const text = b64Text(got && got.content);
-      const tz = String(text || "").match(/ТЗ\s*\**\s*(\d+\.\d+)/i);
-      const queue = String(text || "").match(/редакция\s*\**\s*(\d+\.\d+)/i);
+      // D-108: план фаз объявляет «Версия 1.0» в шапке; миссии и очереди —
+      // «ТЗ 1.5» и «редакция 1.7». Читаем все три формы, иначе гейт D-086
+      // молча не видит опубликованный номер там, где он есть.
+      const body = String(text || "");
+      const tz = body.match(/ТЗ\s*\**\s*(\d+\.\d+)/i) || body.match(/Версия\s*\**\s*(\d+\.\d+)/i);
+      const queue = body.match(/редакция\s*\**\s*(\d+\.\d+)/i) || body.match(/Версия\s*\**\s*(\d+\.\d+)/i);
       if (!tz && !queue) return null;
       const out = { at: now, file, repo, version: tz ? tz[1] : "", queue: queue ? queue[1] : "" };
       GM_setValue("cfn-tz-published", out);

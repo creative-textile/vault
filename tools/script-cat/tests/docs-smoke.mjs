@@ -104,11 +104,12 @@ assert.match(decisionsDoc, /## D-105 \(1\.14\.32\)/);
 assert.match(decisionsDoc, /## D-106 \(1\.14\.33\)/, 'D-106 записан в решениях');
 const acceptanceDoc = readFileSync(join(root, 'docs/agents/acceptance-report.md'), 'utf8');
 // Шапка отчёта — текущий выпуск Vault; прежние выпуски остаются архивом ниже.
-assert.match(acceptanceDoc.split(/\r?\n/)[0], /1\.15\.0.*D-107/);
+assert.match(acceptanceDoc.split(/\r?\n/)[0], /1\.16\.0.*D-108/);
 assert.match(acceptanceDoc, /Живая.*ручн/i);
 const updateDoc = readFileSync(join(root, 'docs/scriptcat-update.md'), 'utf8');
-assert.match(updateDoc, /сейчас \*\*1\.15\.0\*\*/);
-assert.match(updateDoc, /1\.15\.0 \(D-107\)/, 'scriptcat-update описывает выпуск D-107');
+assert.match(updateDoc, /сейчас \*\*1\.16\.0\*\*/);
+assert.match(updateDoc, /1\.16\.0 \(D-108\)/, 'scriptcat-update описывает выпуск D-108');
+assert.match(updateDoc, /1\.15\.0 \(D-107\)/, 'история выпуска D-107 сохранена');
 assert.match(updateDoc, /1\.14\.32 \(D-105\)/);
 
 // 2. Все документы на месте (включая drive.md, закрывающий битую ссылку).
@@ -489,7 +490,8 @@ for (const [role, file] of Object.entries(roleDoc)) {
   const adr = readFileSync(join(root, 'tools/script-cat/src/25-legacy-adr.js'), 'utf8');
   assert.match(adr, /async function publishedTzVersion/, 'опубликованная редакция читается из репозитория');
   const cfg = readFileSync(join(root, 'tools/script-cat/src/01-config.js'), 'utf8');
-  assert.match(cfg, /queueDoc: "docs\/missions\/VAULT-1-card-queue\.md"/, 'файл редакции задан конфигом');
+  // D-108: до первой миссии опубликованная редакция живёт в плане фаз.
+  assert.match(cfg, /queueDoc: "docs\/PHASES\.md"/, 'файл редакции задан конфигом');
   assert.match(cfg, /telemetryRepo: ""/, 'телеметрия в проект не пишется');
   const heal = readFileSync(join(root, 'tools/script-cat/src/41-heal.js'), 'utf8');
   assert.match(heal, /C\.telemetryRepo/, 'выгрузка идёт в отдельный репозиторий');
