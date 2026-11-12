@@ -93,6 +93,23 @@ jobs:
         run: npm test
       - run: npm run build
 
+      # 👁 ГЛАЗА АГЕНТА: настоящий Chromium снимает 3D-сцены в PNG.
+      # Числа проверяют математику, но не проверяют, что на экране что-то
+      # нарисовалось (чёрный кадр, уехавшая камера, лопнувший материал).
+      # Кадры уезжают артефактом — агент скачивает и смотрит их глазами.
+      - name: Браузер для кадров сцен
+        run: npx playwright install --with-deps chromium
+      - name: Кадры 3D-сцен
+        run: node tests/eyes/frames.mjs --frames 12
+      - name: Артефакт с кадрами
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-frames
+          path: frontend/frames/
+          if-no-files-found: warn
+          retention-days: 14
+
   bot:
     name: "Telegram-бот: типы и сборка"
     runs-on: ubuntu-latest
