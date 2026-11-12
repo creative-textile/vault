@@ -31,51 +31,78 @@ const FRAMES = num('frames', 12);       // сколько кадров снят�
 const SPAN_MS = num('span', 6000);      // на каком отрезке анимации
 const ZOOM = num('zoom', 1);            // 2 = крупнее (детали материалов)
 const OUT = process.env.FRAMES_DIR || 'frames';
-const URL = process.env.SCENES_URL || 'http://127.0.0.1:4173/scenes.html';
+const PORT = num('port', 4173);
+const URL = process.env.SCENES_URL || `http://127.0.0.1:${PORT}/scenes.html`;
+const OWN_SERVER = !process.env.SCENES_URL;
 
-/** Chromium ищем там, где его кладёт playwright, или через env. */
-function findChrome() {
-  const cands = [
-    process.env.CHROME_PATH,
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    ...(process.env.HOME
-      ? [`${process.env.HOME}/.cache/ms-playwright`]
-      : [])
-  ].filter(Boolean);
-  for (const c of cands) if (existsSync(c)) return c;
-  // playwright ставит браузер в каталог с хешем версии — ищем по имени
-  const roots = process.env.PLAYWRIGHT_BROWSERS_PATH
-    ? [process.env.PLAYWRIGHT_BROWSERS_PATH]
-    : [`${process.env.HOME}/.cache/ms-playwright`];
-  for (const root of roots) {
-    for (const dir of existsSync(root) ? require('node:fs').readdirSync(root) : []) {
-      for (const bin of ['chrome-linux/chrome', 'chrome-linux/headless_shell']) {
-        const p = path.join(root, dir, bin);
-        if (existsSync(p)) return p;
-      }
-    }
+/** Путь к Chromium: сначала playwright, потом env, потом системный. */
+async function findChrome(pw) {
+  try {
+    const p = pw.chromium.executablePath();
+    if (p && existsSync(p)) return p;
+  } catch { /* playwright не знает — пойдём дальше */ }
+  for (const c of [process.env.CHROME_PATH, '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean)) {
+    if (existsSync(c)) return c;
   }
   return null;
 }
 
+/** Поднимаем `vite preview` и ждём, пока порт начнёт отвечать. */
+async function startServer() {
+  const child = spawn(
+    process.execPath,
+    ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'],
+    { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+  const log = [];
+  child.stdout.on('data', (d) => log.push(String(d)));
+  child.stderr.on('data', (d) => log.push(String(d)));
+
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`preview завершился: ${log.join('').slice(-400)}`);
+    try {
+      const res = await fetch(URL, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) return child;
+    } catch { /* ещё не поднялся */ }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  child.kill('SIGKILL');
+  throw new Error(`preview не поднялся за 60 с: ${log.join('').slice(-400)}`);
+}
+
 async function main() {
-  let chromium;
+  await rm(OUT, { recursive: true, force: true });
+  await mkdir(OUT, { recursive: true });
+
+  let pw;
   try {
-    ({ chromium } = await import('playwright-core'));
+    pw = await import('playwright');
   } catch {
-    console.log('[eyes] playwright-core не установлен — кадры пропущены (это не ошибка)');
+    try { pw = await import('playwright-core'); } catch { pw = null; }
+  }
+  if (!pw) {
+    console.log('[eyes] playwright не установлен — кадры пропущены (это не ошибка)');
     return 0;
   }
-  const execPath = findChrome();
+  const { chromium } = pw;
+  const execPath = await findChrome(pw);
   if (!execPath) {
     console.log('[eyes] Chromium не найден — кадры пропущены (это не ошибка)');
     return 0;
   }
+  console.log('[eyes] Chromium:', execPath);
 
-  await rm(OUT, { recursive: true, force: true });
-  await mkdir(OUT, { recursive: true });
+  let server = null;
+  try {
+    if (OWN_SERVER) {
+      server = await startServer();
+      console.log('[eyes] preview поднят на', URL);
+    }
+  } catch (e) {
+    console.log('[eyes] сервер не поднялся —', e.message);
+    return 1;
+  }
 
   const browser = await chromium.launch({
     executablePath: execPath,
@@ -121,6 +148,7 @@ async function main() {
     });
   }
   await browser.close();
+  if (server) server.kill('SIGKILL');
 
   await writeFile(
     path.join(OUT, 'report.json'),
