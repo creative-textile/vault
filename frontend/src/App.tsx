@@ -53,6 +53,12 @@ export default function App() {
   // существующим; второй ответ закрывал только что открытый onboarding.
   const authInFlight = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** Причина, по которой вход не состоялся и повторять его бессмысленно.
+      Раньше такой случай выглядел как вечный спиннер «Открываем хранилище…»:
+      на Vercel без backend `/api/auth/demo` отдаёт 404, приложение крутится, а
+      пользователю не сказано ни слова. Теперь экран называет причину и даёт
+      кнопку — молчаливое ожидание и есть та «бесконечная загрузка». */
+  const [loginError, setLoginError] = useState<string | null>(null);
   /** Счётчик принудительных перезапусков входа: меняет зависимости эффекта
       авто-логина даже тогда, когда `token` и так был null (иначе эффект не
       перезапустился бы и приложение осталось без сессии до рефреша). */
@@ -268,6 +274,7 @@ export default function App() {
         setStoredToken(res.token);
         setToken(res.token);
         setUser(res.user);
+        setLoginError(null);
         if (res.isNew) {
           persistOnboardingDone(false);
           setOnboardingDoneState(false);
@@ -280,7 +287,10 @@ export default function App() {
           setShowOnboarding(false);
         }
       } catch (e: any) {
-        showToast('Ошибка входа: ' + e.message);
+        // Причина остаётся на экране, а не только в тосте на 3.5 секунды:
+        // иначе после исчезновения тоста снова виден спиннер и снова ничего
+        // не понятно.
+        setLoginError(e?.message || 'Не удалось войти в приложение');
       } finally {
         authInFlight.current = false;
       }
@@ -307,6 +317,26 @@ export default function App() {
   // Не монтируем Home и игровые pollers в коротком окне между loading=false и
   // получением JWT: именно их 401 мог приехать позже и уничтожить новую сессию.
   if (loading || (!token && !publicReplay)) {
+    // Вход не удался — показываем причину. Спиннер без объяснения читается как
+    // «загружается», хотя ждать уже нечего.
+    if (loginError) {
+      return (
+        <div className="app">
+          <div className="container text-center" style={{ paddingTop: '30vh', maxWidth: 460 }}>
+            <div className="gold-text" style={{
+              fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 900,
+              letterSpacing: '.3em', paddingLeft: '.3em', marginBottom: 18
+            }}>VAULT</div>
+            <div style={{ marginBottom: 8, fontWeight: 600 }}>Вход не выполнен</div>
+            <div className="text-faint" style={{ lineHeight: 1.5, marginBottom: 22 }}>{loginError}</div>
+            <button
+              className="btn btn-gold"
+              onClick={() => { setLoginError(null); setLoading(true); setReauthNonce(n => n + 1); }}
+            >Повторить</button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="app">
         <div className="container text-center" style={{ paddingTop: '38vh' }}>

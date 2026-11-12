@@ -90,17 +90,32 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     // сессии: сбросило токен и перезапустило вход.
     if (!adminPassword) throw new ApiError('Требуется пароль администратора', 401);
   }
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(adminPassword ? { 'X-Admin-Password': adminPassword } : {}),
-      'X-Device-Id': getDeviceId(),
-      ...options.headers
-    }
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(adminPassword ? { 'X-Admin-Password': adminPassword } : {}),
+        'X-Device-Id': getDeviceId(),
+        ...options.headers
+      }
+    });
+  } catch {
+    // Сеть/CORS: fetch отверг промис. Без явного текста экран входа молчал бы.
+    throw new ApiError('Нет связи с сервером API. Проверьте, что backend запущен и доступен по этому адресу.', 0);
+  }
+  // Тело может быть не JSON: на Vercel без backend `/api/*` отдаёт HTML-404, а не
+  // `{"error": ...}`. Раньше `data` становился `{}`, текст ошибки — undefined, и
+  // экран входа крутил спиннер вечно: пользователь видел «Открываем хранилище…»
+  // без объяснения. Теперь причина называется прямо.
   const data = await res.json().catch(()=>({}));
+  if (!res.ok && !data.error) {
+    data.error = res.status === 404
+      ? 'Сервер API недоступен: эта сборка фронтенда развёрнута без backend (Vercel раздаёт только статику).'
+      : `Сервер ответил ${res.status} без описания ошибки`;
+  }
   if (!res.ok && isAdminPath && res.status===401) forgetAdminPassword();
   // Любой актуальный 401 будит единый auth bootstrap. Токен кладём в detail,
   // чтобы запоздалый ответ старой сессии не мог удалить уже выданный новый JWT.
