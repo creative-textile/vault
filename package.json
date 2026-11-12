@@ -1,0 +1,21 @@
+{
+  "name": "vault",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vault — Telegram Mini App: Ракета, Дуэль, Сейф и Vault-вклад; USDT в TON, BEP-20 и ERC-20",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "scriptcat:build": "node tools/script-cat/build.mjs",
+    "scriptcat:check": "node tools/script-cat/build.mjs --check",
+    "scriptcat:guard": "node tools/script-cat/portability-guard.mjs",
+    "test": "node --test tools/script-cat/tests/*.mjs",
+    "test:regression": "node --test tools/script-cat/regression-tests/*.mjs",
+    "test:tool-limit": "node --test tools/script-cat/tests/tool-limit-continuation-smoke.mjs tools/script-cat/regression-tests/tool-limit-continuation-integration.mjs",
+    "verify": "npm run scriptcat:check && npm run scriptcat:guard && npm test && npm run test:regression && npm run test:tool-limit",
+    "verify:node": "node tools/relay-build.mjs --repo . --allow-dirty",
+    "go-live:check": "node scripts/go-live-check.mjs"
+  }
+}
