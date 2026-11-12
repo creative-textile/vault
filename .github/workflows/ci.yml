@@ -149,7 +149,9 @@ jobs:
           BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
           git config user.name "vault-eyes"
           git config user.email "eyes@vault.local"
-          git add -f frontend/frames/preview.jpg
+          # report.json — версия WebGL и ошибки страницы: агенту нужны не только
+          # пиксели, но и «чем рисовали» и «что ругалось».
+          git add -f frontend/frames/preview.jpg frontend/frames/report.json
           git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]" || echo "нечего коммитить"
           echo "push $(git rev-parse --short HEAD) -> $BRANCH" >> $GITHUB_STEP_SUMMARY
           git push -q origin "HEAD:$BRANCH" || echo "push не удался (не критично)"
