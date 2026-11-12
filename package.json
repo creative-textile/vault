@@ -17,6 +17,7 @@
     "verify": "npm run scriptcat:check && npm run scriptcat:guard && npm test && npm run test:regression && npm run test:tool-limit",
     "verify:node": "node tools/relay-build.mjs --repo . --allow-dirty",
     "go-live:check": "node scripts/go-live-check.mjs",
-    "modeling:audit": "python3 tools/modeling/audit_glb.py frontend/public/models/*.glb"
+    "modeling:audit": "python3 tools/modeling/audit_glb.py frontend/public/models/*.glb",
+    "audio:audit": "python3 tools/audio/audit_audio.py"
   }
 }
