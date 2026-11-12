@@ -18,6 +18,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Шагу «Сводный кадр для агента» нужно право коммитить в ветку.
+# Остальные job'ы получают ровно те права, что и раньше.
+permissions:
+  contents: write
+
 jobs:
   backend:
     name: "Backend: типы и смоук-тесты"
@@ -109,6 +114,28 @@ jobs:
           path: frontend/frames/
           if-no-files-found: warn
           retention-days: 14
+
+      # Песочница агента НЕ может скачать артефакт: blob-хранилище GitHub
+      # (productionresultssa*.blob.core.windows.net) в белом списке отсутствует,
+      # зато api.github.com открыт. Поэтому одна сводная картинка кладётся в
+      # ветку — агент читает её через API и СМОТРИТ глазами.
+      # [skip ci] в сообщении — чтобы коммит не запускал новый прогон.
+      - name: Сводный кадр для агента
+        if: always()
+        run: |
+          set -e
+          ls frontend/frames/*.png >/dev/null 2>&1 || exit 0
+          (command -v montage >/dev/null && montage frontend/frames/frame-00[0-5].png \
+             -tile 3x2 -geometry 300x300+4+4 -background '#05060f' frontend/frames/preview.jpg) \
+           || (command -v convert >/dev/null && convert frontend/frames/frame-000.png -resize 50% frontend/frames/preview.jpg) \
+           || exit 0
+          git config user.name "vault-eyes"
+          git config user.email "eyes@vault.local"
+          git add -f frontend/frames/preview.jpg
+          git diff --cached --quiet && exit 0
+          git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]"
+          git pull -q --rebase origin "$GITHUB_HEAD_REF" || true
+          git push -q origin "HEAD:$GITHUB_HEAD_REF" || true
 
   bot:
     name: "Telegram-бот: типы и сборка"
