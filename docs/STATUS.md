@@ -1,7 +1,7 @@
 # Где сейчас Vault и что дальше
 
-Дата: 2026-11-12 · ветка `arena/669da8ec-vault` · PR [#2](https://github.com/creative-textile/vault/pull/2)
-Основание: `main` @ `a2be2c9` (мерж PR #1).
+Дата: 2026-11-12 · PR [#2](https://github.com/creative-textile/vault/pull/2) **смёржен** в `main`
+(`22fb01d`); работа продолжается на ветке `arena/669da8ec-vault` от `main`.
 Стадия: **фаза 0 закрыта, активна фаза 1 «Ядро продукта и 3D»**, первая миссия — **V-1-1**.
 
 ## 1. Коротко
@@ -65,7 +65,7 @@ tools/audio/audit_audio.py          формат, вес, длительност
 | `npm run modeling:audit` | safe ✗, rocket ✓, coin ✗ — 2 из 3 вне бюджета, это исходная точка V-1-1 |
 | Blender `bpy` смоук | `4.5.3 LTS`, `background=True`, GLB/UV/рендер — зелёные |
 | CI PR #2 | 6/6 джобов pass |
-| Vercel | деплой `dpl_786WeZRctHfnx8HgfgKM8P6EpBH7` — **READY** (production, коммит `372e68b`) |
+| Vercel | production `dpl_G2nN52zdcHUvThE7npiTANn7sNv8` — **READY** на `main` @ `22fb01d`; страница отдаёт экран «Вход не выполнен» с причиной, а не вечный спиннер |
 
 ## 4. Решения фазы 0: что принято и что открыто
 
@@ -87,10 +87,10 @@ tools/audio/audit_audio.py          формат, вес, длительност
    подтверждение крупных выплат). Testnet уже решён: ручная подпись, ключей в коде нет.
 2. **Конкретный хостинг API за $0** — решение про тариф принято, сервис выбирается в фазе 2
    (`docs/environments.md` §4–5).
-3. **Vercel-превью закрыто SSO-защитой** (`ssoProtection: all_except_custom_domains`): сборка
-   готова и отдаётся, но по ссылке требуется вход в аккаунт Vercel. Снять защиту может только
-   владелец аккаунта в настройках проекта (Settings → Deployment Protection). До этого проверка
-   «с телефона» идёт из-под аккаунта владельца.
+3. **Vercel раздаёт только статику — backend на Vercel нет.** Поэтому `/api/*` отвечает 404, и
+   вход в проде честно сообщает об этом (раньше был вечный спиннер, исправлено в D-111). Превью
+   закрыто SSO-защитой (`ssoProtection: all_except_custom_domains`) — снимает владелец аккаунта.
+   Чтобы продукт открывался с телефона, нужен хостинг API за $0 (задача Ф2).
 4. **Агенты Arena** — `Agent URL` у Platform Architect и Coordinator пуст; это единственное,
    что удерживает карточку K1 в Draft.
 
