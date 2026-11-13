@@ -2155,5 +2155,41 @@
       "probe": "tests/relay-publication-gap-smoke.mjs",
       "suites": 175
     }
+  },
+  "d124": {
+    "version": "1.16.1",
+    "title": "Поле непустое, а ввод не зарегистрирован: Send не зажигается, ожидание ждёт 20 с",
+    "date": "2026-11-12",
+    "problem": {
+      "cls": "transport",
+      "reason": "writePrompt вернул успех по наличию символов в узле, хотя запасной textContent не регистрирует ввод в ProseMirror; waitSendReady 20 с ждал серую Send и не имел права перевставить непустое поле (D-079)",
+      "wrongShape": "пауза send на ровном месте при полном поле текста; «кнопка не найдена» означала сразу три разных состояния"
+    },
+    "decision": [
+      "16-arena-send.writePrompt: запоминает факт приёма ввода (registered = execCommand), а не только наличие символов",
+      "16-arena-send.unregisteredWrite/reinsertPrompt: узкий признак и лечение тем же путём, что очистка при отмене",
+      "17-arena-polls.waitSendReady: перевставка при непринятом вводе, не больше sendHealMax, окно sendHealWindowMs",
+      "16-arena-send.sendScanSummary: причина отказа называет область поиска, число кнопок, disabled и «Send вне панели»",
+      "41-heal.healPageSnapshot: в снимке разбора есть send.scan и send.write",
+      "01-config: sendHealMax 2, sendHealWindowMs 45000"
+    ],
+    "behaviour": [
+      "ввод не принят → поле лечится один раз и кнопка появляется (2,1 с вместо 20,1 с)",
+      "набранное человеком поле не перезаписывается: признак берётся только из writePrompt",
+      "лечение не помогло → прежняя пауза send после sendHealMax попыток",
+      "причина отказа называет состояние панели и вставки, а не «кнопка не найдена» на все случаи"
+    ],
+    "budgetsRaised": false,
+    "protocolNote": "protocolVersion остаётся 1.11: маркеры, профили и бюджеты не менялись. ScriptCat 1.16.1 (D-027: @version/SCRIPT_VERSION подняты синхронно)",
+    "safety": [
+      "перевставка запускается только по записи самого writePrompt (registered:false), не по догадке",
+      "поле считается своим только при совпадении текста и того же узла редактора",
+      "число лечений ограничено и живёт в конфиге",
+      "кнопки вне панели ввода по-прежнему не нажимаются: их число только попадает в отчёт"
+    ],
+    "evidence": {
+      "probe": "tests/relay-send-unregistered-smoke.mjs",
+      "suites": 123
+    }
   }
 }

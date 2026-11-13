@@ -25,7 +25,7 @@
 | «Песочницы откатываются — тяжёлые инструменты в репозиторий» | `tools/modeling/`, `tools/media/`, `tools/audio/`, `audio/` — всё в git | — |
 | «Нужно разбить на фазы, внутри фазы — миссии» | `docs/PHASES.md`: Ф0…Ф4, Ф0 закрыта, Ф1 активна | приёмка миссий |
 | «USDT на TON, BEP-20 и ERC-20» | `docs/architecture/payments-multichain.md`: схема, потоки, этапы | ключи mainnet (Ф2) |
-| «Работать командой, а не одному» | роли и зоны в `docs/REGULATION.md` v1.6; транспорт 1.16.0; карточки выдаёт Coordinator | агенты Arena + `Agent URL` (Мастер) |
+| «Работать командой, а не одному» | роли и зоны в `docs/REGULATION.md` v1.6; транспорт 1.16.1; карточки выдаёт Coordinator | агенты Arena + `Agent URL` (Мастер) |
 | «Звук — настоящие записи, не синтез» | `audio/`: 6 треков FreePD (CC0) + 19 звуков Oculus (CC BY 4.0), `npm run audio:audit` | подключение к экранам, экран «Лицензии» |
 | «Хостинг — за $0» | решение записано: бесплатный тариф, засыпание допустимо | выбор конкретного хостинга (Ф2) |
 
@@ -60,7 +60,7 @@ tools/audio/audit_audio.py          формат, вес, длительност
 | Команда | Результат |
 |---|---|
 | `npm run verify` | 173 + 22 + 2 pass, **fail 0** |
-| `npm run verify:node` | «сборка допущена: 1.16.0» |
+| `npm run verify:node` | «сборка допущена: 1.16.1» |
 | `npm run audio:audit` | 25 файлов, формат/вес/лицензии — **rc=0** |
 | `npm run modeling:audit` | safe ✗, rocket ✓, coin ✗ — 2 из 3 вне бюджета, это исходная точка V-1-1 |
 | Blender `bpy` смоук | `4.5.3 LTS`, `background=True`, GLB/UV/рендер — зелёные |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Relay — передача хода между агентами
 // @namespace    https://arena.ai/
-// @version      1.16.0
+// @version      1.16.1
 // @description  Цикл Координатор → исполнитель → Координатор: агент сам коммитит, пушит и мержит PR; ScriptCat ждёт мерж и нажимает Continue.
 // @match        https://arena.ai/*
 // @match        https://www.arena.ai/*
@@ -81,7 +81,7 @@
     // D-073: отпечаток сборки вшивает build.mjs (SHA-256 источника). Номер версии
     // говорит «какой выпуск», отпечаток — «какая именно сборка»: без него проверка
     // «работает новая версия, а не прежняя под новым номером» невозможна.
-    buildFingerprint: "edcdd6602b27696a",
+    buildFingerprint: "91ec82766cbd6922",
     repo: "", // для ссылки на PR из номера
     tickMs: 15000,
     mergeGraceMs: 90000, // сколько ждём мерж, прежде чем нажать кнопки за агента
@@ -111,6 +111,12 @@
     composerGraceMs: 8000, // сколько ждём возврата поля ввода, если оно исчезло при перерисовке
     sendRetries: 3, // сколько тиков ждём дорисовку страницы, прежде чем звать Мастера
     sendReadyMs: 20000, // столько ждём активную кнопку Send на дорисовывающейся странице
+    // 1.16.1: поле непустое, а ввод не зарегистрирован (запасной `textContent`).
+    // Ждать Send в этом состоянии бессмысленно, поэтому поле лечится
+    // перевставкой — не больше sendHealMax раз и только по признаку самого
+    // writePrompt. Окно — чтобы старая запись не считалась про это поле.
+    sendHealMax: 2,
+    sendHealWindowMs: 45000, // вставка старше 45 с уже не про это ожидание
     clickReadyMs: 8000, // столько ждём кнопку, прежде чем считать её недоступной
     pendingTtlMs: 600000, // отправка старше 10 минут не досылается: адресат её не получил
     undeliveredTtlMs: 7200000, // неотправленное задание ждёт Мастера два часа, а не десять минут
@@ -740,7 +746,7 @@
 
   const NTFY_BASE = "https://ntfy.sh";
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "1.16.0";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "1.16.1";
 
   /** «https://ntfy.sh/topic?x=1» и «topic» одинаково дают topic. */
   function normalizeNtfyTopic(raw) {
@@ -6385,6 +6391,60 @@
     }
   }
 
+  /**
+   * Что именно нашлось в панели ввода при последнем поиске Send.
+   *
+   * До 1.16.1 «кнопка не найдена» означала сразу три разных состояния: панели
+   * ввода нет, кнопки в панели нет и кнопка есть, но `disabled`. По такому
+   * отчёту чинить нечего: 12.11 в 23:11 поле держало 4182 знака, на странице
+   * было 148 кнопок, а пауза говорила «кнопка не найдена». Теперь разбор
+   * запоминается, и причина отказа называет состояние, а не догадку.
+   */
+  let lastSendScan = null;
+
+  /**
+   * Последняя вставка: состоялась ли она «по мнению редактора».
+   *
+   * `registered: false` означает, что текст в узле есть, а ввод не прошёл
+   * (`execCommand` не сработал и сработал запасной `textContent`). Это не
+   * успех, хотя `writePrompt` вернул true: Send от такого текста не загорится.
+   */
+  let lastWrite = null;
+
+  /**
+   * Прошлая вставка в это же поле не была принята редактором.
+   *
+   * Признак берётся только из `writePrompt`: он знает, прошёл ли `execCommand`
+   * или текст лёг запасным `textContent`. Человеческий ввод и успешная вставка
+   * сюда не попадают никогда — значит перевставка не может затереть набранное.
+   * Окно — `sendHealWindowMs`: старая запись уже не про это поле.
+   */
+  function unregisteredWrite(editor, text) {
+    const w = lastWrite;
+    if (!w || w.registered !== false || w.healed) return false;
+    if (w.editor && editor && w.editor !== editor) return false;
+    const windowMs = Number(C.sendHealWindowMs) || 45000;
+    if (Date.now() - Number(w.at || 0) > windowMs) return false;
+    const shown = flat(composerText(editor));
+    const want = flat(text);
+    if (!shown || !want) return false;
+    return shown.includes(want.slice(0, 60));
+  }
+
+  /** Короткая строка для паузы и снимка страницы: где искали и что нашли. */
+  function sendScanSummary() {
+    const scan = lastSendScan;
+    if (!scan) return "панель ввода: не разбиралась";
+    const scope = scan.scope === "панель" ? "панель ввода" : scan.scope === "форма" ? "форма поля" : "не найдена";
+    const parts = [`${scope}: кнопок ${scan.total}`];
+    if (scan.disabled) parts.push(`disabled ${scan.disabled}`);
+    if (scan.usableSend) parts.push("Send активна");
+    else if (scan.likeSend) parts.push("Send есть, но недоступна");
+    else parts.push("кнопки с подписью Send в панели нет");
+    if (scan.outsideSend) parts.push(`Send вне панели ${scan.outsideSend}`);
+    return parts.join(", ");
+  }
+
   function sendButton(editor) {
     if (!composerAlive(editor)) return null;
 
@@ -6410,7 +6470,35 @@
       !inOwnPanel(b) &&
       !inSidebar(b) &&
       !STOP_LABEL.test(String(labelText(b)[0] || ""));
-    const controls = [...scope.querySelectorAll('button, [role="button"], input[type="submit"]')].filter(usable);
+    const candidates = [...scope.querySelectorAll('button, [role="button"], input[type="submit"]')];
+    const controls = candidates.filter(usable);
+    // Разбор панели — не для поиска, а для причины отказа. Кнопки вне панели
+    // по-прежнему не нажимаются (23.10 три клика ушли в аккаунт), но их число
+    // в отчёте нужно: иначе переверстку Arena не отличить от серой кнопки.
+    lastSendScan = {
+      at: Date.now(),
+      scope: box ? "панель" : "форма",
+      total: candidates.length,
+      disabled: candidates.filter((b) =>
+        b.disabled ||
+        b.getAttribute?.("aria-disabled") === "true" ||
+        b.getAttribute?.("data-disabled") === "true").length,
+      likeSend: candidates.filter((b) => labelText(b).some((l) => SEND_LABEL.test(l))).length,
+      usableSend: controls.filter((b) => labelText(b).some((l) => SEND_LABEL.test(l))).length,
+      outsideSend: 0,
+    };
+    if (!lastSendScan.usableSend && !lastSendScan.likeSend) {
+      // Send искали в панели и не нашли: сказать, есть ли она вообще на
+      // странице. Это чтение, а не клик: подпись Send вне панели не даёт права
+      // её нажимать.
+      try {
+        lastSendScan.outsideSend = [...document.querySelectorAll("button, [role=\"button\"]")]
+          .filter((b) => b !== editor && !scope.contains?.(b) && visible(b) && !inSidebar(b) && !inOwnPanel(b))
+          .filter((b) => labelText(b).some((l) => SEND_LABEL.test(l))).length;
+      } catch {
+        lastSendScan.outsideSend = 0;
+      }
+    }
     if (!controls.length) return null;
 
     // 1. Явная подпись отправки. Из нескольких — последняя в панели: ряд
@@ -6499,6 +6587,17 @@
       expected: text.length,
       alive: composerAlive(live),
     }));
+    // 1.16.1: «текст в DOM» и «редактор принял ввод» — разные вещи.
+    //
+    // Запасной путь `textContent` кладёт символы в узел, но ProseMirror о них
+    // не знает: его состояние остаётся пустым, и кнопка Send — серая. Именно
+    // это случилось 12.11 в 23:11: поле держало 4182 знака, `sendReady` 20 с
+    // не находил активной кнопки, а ждать было нечего — вставка «удалась».
+    // Поэтому факт регистрации запоминается: по нему `waitSendReady` решает,
+    // лечить ли поле, а не ждать вслепую.
+    lastWrite = written > 0
+      ? { at: Date.now(), editor: live, chars: written, registered: inserted === true }
+      : null;
     if (written > 0) return true;
 
     // Поле перерисовали: одна повторная попытка в новом узле.
@@ -6545,6 +6644,24 @@
       live.dispatchEvent(new InputEvent("input", { bubbles: true, data: "", inputType: "deleteContentBackward" }));
     }
     return !composerText(live);
+  }
+
+  /**
+   * Ввод не зарегистрирован: текст в поле есть, а Send от него не загорается.
+   *
+   * 1.16.1: это отдельное состояние, а не «долго рисуется». `waitSendReady`
+   * раньше писал заново только в ПУСТОЕ поле (D-079: не затирать набранное), и
+   * на непустом поле с непринятым вводом ждал все 20 с впустую. Здесь — тот же
+   * безопасный путь, каким поле чистится при отмене: `clearComposer`, затем
+   * вставка через `execCommand`. Условия жёсткие (см. `waitSendReady`): только
+   * когда прошлая вставка сама призналась, что ввод не прошёл, и не больше
+   * `sendHealMax` раз за ожидание.
+   */
+  function reinsertPrompt(editor, text) {
+    const live = composerAlive(editor) ? editor : composer();
+    if (!live) return false;
+    if (!clearComposer(live)) return false;
+    return writePrompt(live, text);
   }
 
   /**
@@ -7242,6 +7359,9 @@
     const deadline = started + (Number(timeoutMs) || 20000);
     let lastPrompt = 0;
     let rewrites = 0;
+    // 1.16.1: перевставки по непринятому вводу считаются отдельно от возврата
+    // стёртого текста в пустое поле — это разные причины и разные пределы.
+    let heals = 0;
     let told = false;
     while (Date.now() < deadline) {
       const probe = sendReady(editor);
@@ -7258,6 +7378,24 @@
         lastPrompt = Date.now();
         rewrites += 1;
         writePrompt(probe.editor, text);
+      } else if (
+        probe.editor && holdsText && heals < (Number(C.sendHealMax) || 2) &&
+        Date.now() - lastPrompt > 1500 &&
+        typeof unregisteredWrite === "function" && typeof reinsertPrompt === "function" &&
+        unregisteredWrite(probe.editor, text)
+      ) {
+        // 1.16.1: поле непустое, но ввод не зарегистрирован — `writePrompt`
+        // сам сказал, что текст лёг в узел запасным путём, а ProseMirror его
+        // не принял. Ждать Send в этом состоянии бессмысленно: 12.11 в 23:11
+        // так прошло 20 с при 4182 знаках в поле. Перевставка идёт тем же
+        // путём, что и очистка при отмене, и только по признаку самого
+        // `writePrompt` — набранное человеком поле она не трогает.
+        lastPrompt = Date.now();
+        heals += 1;
+        dbg("Send: ввод не зарегистрирован — перевставляю текст", { heals });
+        if (reinsertPrompt(probe.editor, text)) {
+          lastWrite = { ...(lastWrite || {}), healed: true, at: Date.now() };
+        }
       }
       if (!told && Date.now() - started > 3000) {
         told = true;
@@ -7691,7 +7829,8 @@
       let btn = await waitSendReady(live, text);
       if (!btn) {
         why.push(
-          `активной кнопки Send нет за ${Math.round((Number(C.sendReadyMs) || 20000) / 1000)} с (${composerDiagnostics()})`,
+          `активной кнопки Send нет за ${Math.round((Number(C.sendReadyMs) || 20000) / 1000)} с ` +
+        `(${composerDiagnostics()}; ${typeof sendScanSummary === "function" ? sendScanSummary() : "панель не разбиралась"})`,
         );
         break;
       }
@@ -7832,6 +7971,12 @@
       `панелей ${completionPanels().length}`,
       ...(dialog ? ["поверх чата открыт диалог Arena"] : []),
       `кнопка ${button ? (button.disabled ? "disabled" : "активна") : "нет"}`,
+      // 1.16.1: «кнопка нет» — это три разных состояния, и чинят их по-разному.
+      // Разбор панели называет, что именно нашлось, а `writePrompt` — принял ли
+      // редактор вставку. Без этих двух полей 12.11 в 23:11 причину приходилось
+      // восстанавливать по коду.
+      `панель: ${typeof sendScanSummary === "function" ? sendScanSummary() : "нет данных"}`,
+      `вставка: ${lastWrite ? (lastWrite.registered === false ? "редактор ввод не принял" : "через execCommand") : "не было"}`,
       `отпечаток ${String(textHash(text))}`,
       ...why,
     ].join(", ");
@@ -20136,6 +20281,18 @@
       skipCard: (() => { try { return Boolean(skipCardButton()); } catch { return false; } })(),
       panels: (() => { try { return completionPanels().length; } catch { return 0; } })(),
       diagnostics: (() => { try { return composerDiagnostics(); } catch { return null; } })(),
+      // 1.16.1: состояние кнопки Send и факт приёма вставки. Без них снимок
+      // «кнопка не найдена» не отличить от «кнопка серая» и «Send вне панели» —
+      // ровно на этом 12.11 в 23:11 разбор встал.
+      send: {
+        scan: (() => { try { return sendScanSummary(); } catch { return ""; } })(),
+        write: (() => {
+          try {
+            if (typeof lastWrite === "undefined" || !lastWrite) return "не было";
+            return lastWrite.registered === false ? "редактор ввод не принял" : "через execCommand";
+          } catch { return ""; }
+        })(),
+      },
     });
   }
 
