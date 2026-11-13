@@ -96,6 +96,15 @@ assert.match(contract.d106?.protocolNote || '', /protocolVersion остаётс�
 assert.match(contract.d106?.decision?.join(' ') || '', /daily-limit/, 'D-106: вид паузы назван');
 assert.match(contract.d106?.safety?.join(' ') || '', /aria-label/, 'D-106: детектор по метке UI');
 assert.match(contract.d106?.evidence?.probe || '', /relay-daily-limit-smoke/, 'D-106: проба названа');
+// D-122: непринятый ввод — транспорт-внутренняя правка без бюджетов; признак
+// берётся из writePrompt, а не из «поле непустое».
+assert.equal(contract.d122?.version, '1.16.1', 'D-122 привязан к выпуску ScriptCat 1.16.1');
+assert.equal(contract.d122?.budgetsRaised, false, 'D-122 не поднял бюджет');
+assert.match(contract.d122?.protocolNote || '', /protocolVersion остаётся 1\.11/, 'D-122 аддитивен');
+assert.match(contract.d122?.decision?.join(' ') || '', /registered/, 'D-122: факт приёма ввода назван');
+assert.match(contract.d122?.decision?.join(' ') || '', /sendScanSummary/, 'D-122: причина отказа названа');
+assert.match(contract.d122?.safety?.join(' ') || '', /registered:false/, 'D-122: лечение только по записи writePrompt');
+assert.match(contract.d122?.evidence?.probe || '', /relay-send-unregistered-smoke/, 'D-122: проба названа');
 assert.equal(contract.questionEnvelope?.properties?.gate?.type, 'boolean');
 assert.equal(contract.questionEnvelope?.properties?.need?.effectiveOnlyWhen, 'gate=true');
 assert.match(contract.markerMatrix.find((row) => row.marker === 'CF_ANSWER_RESULT')?.role || '', /question\.need/);
@@ -104,11 +113,13 @@ assert.match(decisionsDoc, /## D-105 \(1\.14\.32\)/);
 assert.match(decisionsDoc, /## D-106 \(1\.14\.33\)/, 'D-106 записан в решениях');
 const acceptanceDoc = readFileSync(join(root, 'docs/agents/acceptance-report.md'), 'utf8');
 // Шапка отчёта — текущий выпуск Vault; прежние выпуски остаются архивом ниже.
-assert.match(acceptanceDoc.split(/\r?\n/)[0], /1\.16\.0.*D-108/);
+assert.match(acceptanceDoc.split(/\r?\n/)[0], /1\.16\.1.*D-122/);
 assert.match(acceptanceDoc, /Живая.*ручн/i);
 const updateDoc = readFileSync(join(root, 'docs/scriptcat-update.md'), 'utf8');
-assert.match(updateDoc, /сейчас \*\*1\.16\.0\*\*/);
+assert.match(updateDoc, /сейчас \*\*1\.16\.1\*\*/);
 assert.match(updateDoc, /1\.16\.0 \(D-108\)/, 'scriptcat-update описывает выпуск D-108');
+assert.match(decisionsDoc, /## D-122 \(1\.16\.1\)/, 'D-122 записан в решениях');
+assert.match(updateDoc, /1\.16\.1 \(D-122\)/, 'scriptcat-update описывает выпуск D-122');
 assert.match(updateDoc, /1\.15\.0 \(D-107\)/, 'история выпуска D-107 сохранена');
 assert.match(updateDoc, /1\.14\.32 \(D-105\)/);
 

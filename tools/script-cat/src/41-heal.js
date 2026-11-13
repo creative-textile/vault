@@ -147,6 +147,18 @@
       skipCard: (() => { try { return Boolean(skipCardButton()); } catch { return false; } })(),
       panels: (() => { try { return completionPanels().length; } catch { return 0; } })(),
       diagnostics: (() => { try { return composerDiagnostics(); } catch { return null; } })(),
+      // 1.16.1: состояние кнопки Send и факт приёма вставки. Без них снимок
+      // «кнопка не найдена» не отличить от «кнопка серая» и «Send вне панели» —
+      // ровно на этом 12.11 в 23:11 разбор встал.
+      send: {
+        scan: (() => { try { return sendScanSummary(); } catch { return ""; } })(),
+        write: (() => {
+          try {
+            if (typeof lastWrite === "undefined" || !lastWrite) return "не было";
+            return lastWrite.registered === false ? "редактор ввод не принял" : "через execCommand";
+          } catch { return ""; }
+        })(),
+      },
     });
   }
 
