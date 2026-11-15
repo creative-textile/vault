@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "pinned": "5.3.0",
+  "fallbackLts": "5.2.4",
+  "sourceBlendVersion": "4.5.3",
+  "python": "3.13",
+  "args": [
+    "--background",
+    "--factory-startup",
+    "--gpu-backend",
+    "opengl",
+    "--threads",
+    "2",
+    "--python-exit-code",
+    "1"
+  ],
+  "render": { "width": 640, "height": 360, "engine": "CYCLES", "device": "CPU", "samples": 8 },
+  "notes": "Портативный blender.exe задаётся BLENDER_EXE в .env. 5.3 по умолчанию включает Vulkan: на HD 620 / 940MX с 6 ГБ RAM надёжнее --gpu-backend opengl. Исходники .blend созданы в 4.5.3 и НЕ пересохраняются в 5.3 до зелёных гейтов (audit_glb.py + validate_glb.mjs + сверка якорей). Скрипты gen_*_textures.py не требуют bpy — их запускает системный Python через tools/local/py.mjs."
+}
