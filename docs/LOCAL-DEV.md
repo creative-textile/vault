@@ -13,10 +13,11 @@
 | Python | **3.11+** | Pillow/numpy для текстур, медиа, аудит GLB | `py -3 -c "import PIL,numpy"` |
 | Blender | **5.3.0 portable** (`blender-version.json`) | 3D headless, CPU-рендер | `npm run blender:check` |
 | Playwright + Chromium | по необходимости | кадры 3D-сцен | `cd frontend && npx playwright install chromium` |
-| Docker Desktop | **не обязателен** | только полный сквозной стек | `docker compose config --quiet` |
+| Docker Desktop | **не используется** (D-126) | — | см. [`DEPLOY-FREE.md`](DEPLOY-FREE.md) |
 
-> На 6 ГБ RAM не держите Docker Desktop, Chromium и Blender одновременно:
-> повседневные проверки идут без контейнеров (`pg-mem`, `tsc`, локальные тесты).
+> На 6 ГБ RAM не держите Chromium и Blender одновременно; Docker не ставим
+> вовсе. Повседневные проверки идут без контейнеров (`pg-mem`, `tsc`, локальные
+> тесты), а тестовый деплой — на Vercel/Render/Supabase/GitHub Free.
 
 Установка Python-зависимостей (без pip-`bpy` и X11-стабов — они удалены):
 
@@ -25,12 +26,33 @@ py -3 -m pip install pillow numpy
 npm run py:check
 ```
 
-Blender: скачать **portable ZIP 5.3.0**, распаковать в `C:\tools\blender-5.3.0\`,
-в `.env` указать `BLENDER_EXE=C:/tools/blender-5.3.0/blender.exe`. Официальный
-минимум 5.3 — 8 ГБ RAM и Vulkan 1.3; на HD 620/940MX обёртка принудительно
-ставит `--gpu-backend opengl`. Если 5.3 не заведётся — `npm run blender:check
--- --allow-lts` с 5.2.4 LTS. Версия всегда сверяется с
-`tools/modeling/blender-version.json`.
+Blender: скачать **portable ZIP 5.3.0** (406 МБ) с
+[официальной страницы релиза](https://www.blender.org/releases/5-3/) или
+[прямой ссылкой](https://download.blender.org/release/Blender5.3/blender-5.3.0-windows-x64.zip),
+распаковать в `C:\tools\blender-5.3.0-windows-x64\` (внутри `blender.exe` и
+папка `5.3\`), в `.env` указать
+`BLENDER_EXE=C:/tools/blender-5.3.0-windows-x64/blender.exe`. Установщик, права
+администратора и интернет после скачивания не нужны: portable-сборка работает
+из папки [«Truly Portable»](https://www.blender.org/download/requirements/).
+
+Контрольная сумма из [официального `.sha256`](https://download.blender.org/release/Blender5.3/blender-5.3.0.sha256):
+`3ac567a63d59d9934f7b9213bfb27ba05760e1fb366f8f55c381573ec3eabfa8`.
+
+```powershell
+(Get-FileHash .\blender-5.3.0-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+```
+
+Официальный минимум Windows: Windows 8.1 x64, **4 ядра с SSE4.2, 8 ГБ RAM**,
+2 ГБ VRAM, OpenGL 4.3 / Vulkan 1.3
+([требования](https://www.blender.org/download/requirements/)). В 5.3 Vulkan
+стал бэкендом по умолчанию, но его минимальная версия снижена до 1.1
+([release notes](https://developer.blender.org/docs/release_notes/5.3/eevee/)).
+На HD 620 / 940MX с 6 ГБ RAM обёртка принудительно ставит
+`--gpu-backend opengl`, поэтому Vulkan для нашего headless-контура не нужен.
+Если 5.3 не заведётся —
+[5.2.4 LTS portable](https://download.blender.org/release/Blender5.2/blender-5.2.4-windows-x64.zip)
+и `npm run blender:check -- --allow-lts`. Версия всегда сверяется с
+`tools/modeling/blender-version.json` (там же ссылка и SHA-256).
 
 ## 2. Секреты (только локально)
 
@@ -116,7 +138,8 @@ system-prefix. `card:run` перед вызовом гоняет бесплат�
 | Текстуры (системный Python) | `node tools/local/py.mjs --script frontend/models-src/coin/gen_coin_textures.py` |
 | Кадры сцен | `cd frontend; npm run eyes` |
 | Аудит 3D / звука | `npm run modeling:audit`, `npm run audio:audit` |
-| Полный стек | `docker compose up --build` (по необходимости) |
+| Тестовый деплой (Ф2) | Vercel + Render + Supabase + GitHub Actions, см. [`DEPLOY-FREE.md`](DEPLOY-FREE.md) |
+| Инструменты «на всякий случай» | [`TOOLBOX.md`](TOOLBOX.md) |
 
 ## 6. Куда что писать
 
@@ -131,6 +154,9 @@ system-prefix. `card:run` перед вызовом гоняет бесплат�
 | Правила игры | `docs/PROCESS.md` (system-prefix, менять только ADR) |
 
 Сырые ответы API и контекст-паки лежат в `.state/` и в Git не попадают.
+Контур без Docker и решение D-126: [`DEPLOY-FREE.md`](DEPLOY-FREE.md),
+[`../decisions/D-126.md`](../decisions/D-126.md). Инструменты, которые можно
+быстро доставить позже: [`TOOLBOX.md`](TOOLBOX.md).
 
 ## 7. Если что-то не так
 
@@ -146,3 +172,5 @@ system-prefix. `card:run` перед вызовом гоняет бесплат�
 | `npm run verify` показывает SKIP | `npm ci` в `backend/`, `frontend/`, `bot/` → `preflight:full` |
 | `npm run verify` показывает KNOWN | записанный долг продукта; в `--full` это честный `FAIL`, см. `docs/STATUS.md` §4 |
 | `preflight:full` красный по `models:audit` | исходная точка V-1-1: `coin.glb` с 7 текстурами при лимите 4; карточки K1/K3/K4/K5 в `draft` |
+| `supabase start` просит Docker | это локальный стек Supabase, он исключён (D-126); используйте удалённый Free-проект: `npx supabase link` / SQL-редактор |
+| нужен «полный стек» | он больше не поднимается локально: `DEPLOY-FREE.md`; Docker-файлы — архив |

@@ -6,6 +6,8 @@
  *
  * Проверяет готовность локального .env к боевому режиму. Ничего не отправляет,
  * секреты не печатает (только имена переменных и «заполнено/нет»).
+ * С D-126 ориентируется на контур без Docker: вместо docker-compose.yml
+ * требует docs/DEPLOY-FREE.md и отклоняет локальный DATABASE_URL.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -24,8 +26,8 @@ function readEnv() {
     }
   }
   const keys = ['DEMO_MODE', 'JWT_SECRET', 'SECURITY_PEPPER', 'BOT_TOKEN', 'ADMIN_PASSWORD',
-    'ADMIN_TELEGRAM_IDS', 'ALLOWED_ORIGINS', 'BOT_USERNAME', 'WEBAPP_URL',
-    'TON_API_KEY', 'TON_WALLET_MNEMONIC', 'USDT_JETTON_ADDRESS'];
+    'ADMIN_TELEGRAM_IDS', 'ALLOWED_ORIGINS', 'BOT_USERNAME', 'WEBAPP_URL', 'DATABASE_URL',
+    'REDIS_URL', 'TON_API_KEY', 'TON_WALLET_MNEMONIC', 'USDT_JETTON_ADDRESS'];
   for (const k of keys) if (process.env[k] !== undefined) out[k] = process.env[k];
   return out;
 }
@@ -43,11 +45,16 @@ for (const k of ['JWT_SECRET', 'SECURITY_PEPPER', 'BOT_TOKEN', 'ADMIN_PASSWORD',
 if (filled('JWT_SECRET') && val('JWT_SECRET').length < 32) problems.push('JWT_SECRET короче 32 символов');
 if (filled('ALLOWED_ORIGINS') && val('ALLOWED_ORIGINS').includes('*')) problems.push('ALLOWED_ORIGINS не должен содержать *');
 if (!/^https:\/\//.test(val('WEBAPP_URL'))) problems.push('WEBAPP_URL должен быть HTTPS-адресом');
+if (val('DATABASE_URL') && /localhost|127\.0\.0\.1|@db:/.test(val('DATABASE_URL'))) {
+  problems.push('DATABASE_URL указывает на локальную/композную БД; для боевого контура нужна строка Supabase');
+}
+if (!val('REDIS_URL')) notes.push('REDIS_URL не задан: это допустимо, код использует fallback (D-126)');
 
 for (const k of ['TON_API_KEY', 'TON_WALLET_MNEMONIC', 'USDT_JETTON_ADDRESS']) {
   if (!filled(k)) notes.push(`${k}: не заполнено (допустимо до testnet; обязательно до mainnet)`);
 }
-for (const f of ['.env.example', 'backend/src/db/init.sql', 'backend/src/db/schema-check.sql', 'docker-compose.yml']) {
+for (const f of ['.env.example', 'backend/src/db/init.sql', 'backend/src/db/schema-check.sql',
+  'docs/DEPLOY-FREE.md', 'docs/TOOLBOX.md', 'decisions/D-126.md']) {
   if (!existsSync(resolve(ROOT, f))) problems.push(`нет файла ${f}`);
 }
 

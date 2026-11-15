@@ -41,6 +41,9 @@ test('Blender: версия читается, пин 5.3 и запасной LTS
   const cfg = JSON.parse(readFileSync(resolve(pre.ROOT, 'tools/modeling/blender-version.json'), 'utf8'));
   assert.equal(cfg.pinned, '5.3.0');
   assert.equal(cfg.fallbackLts, '5.2.4');
+  assert.match(cfg.download.url, /blender-5\.3\.0-windows-x64\.zip$/);
+  assert.match(cfg.download.sha256, /^[a-f0-9]{64}$/);
+  assert.match(cfg.download.ltsFallbackUrl, /5\.2\.4-windows-x64\.zip$/);
   assert.ok(cfg.args.includes('--gpu-backend'));
   assert.ok(cfg.args.includes('opengl'));
 });
@@ -87,4 +90,23 @@ test('preflight: список проверок зашит в коде и run п�
   assert.match(pre.KNOWN_PRODUCT_DEBT['models:audit'], /вне бюджета 3D/);
   assert.equal(pre.run([process.execPath, '-e', 'process.exit(0)'], pre.ROOT).rc, 0);
   assert.equal(pre.run([process.execPath, '-e', 'process.exit(7)'], pre.ROOT).rc, 7);
+});
+
+test('D-126: контур без Docker зафиксирован в CI, ADR и документации', () => {
+  const read = (rel) => readFileSync(resolve(pre.ROOT, rel), 'utf8');
+  const ci = read('.github/workflows/ci.yml');
+  assert.ok(!/docker build|docker compose config/.test(ci), 'в CI не должно быть сборки образов');
+  assert.ok(ci.includes('local-tools'));
+  const adr = read('decisions/D-126.md');
+  for (const s of ['Vercel', 'Render', 'Supabase', 'GitHub', 'Docker', 'Godot', 'PR']) assert.ok(adr.includes(s), `ADR не упоминает ${s}`);
+  const deploy = read('docs/DEPLOY-FREE.md');
+  for (const s of ['Vercel', 'Render', 'Supabase', 'GitHub', 'supabase start']) assert.ok(deploy.includes(s), `DEPLOY-FREE не упоминает ${s}`);
+  const toolbox = read('docs/TOOLBOX.md');
+  assert.match(toolbox, /winget install --id GitHub\.cli/);
+  assert.match(toolbox, /render\.cli/);
+  assert.match(toolbox, /Godot/);
+  const env = read('.env.example');
+  assert.match(env, /Vercel \(фронт\)/);
+  const oracle = read('scripts/go-live-check.mjs');
+  assert.ok(oracle.includes('docs/DEPLOY-FREE.md') && !oracle.includes("'docker-compose.yml'"));
 });

@@ -8,9 +8,10 @@
 
 Telegram Mini App: backend `backend/` (Express + socket.io + PostgreSQL + Redis),
 frontend `frontend/` (Vite + React + three.js), бот `bot/`, схема
-`backend/src/db/init.sql`. Полный стек — `docker-compose.yml`, но повседневные
-проверки идут без Docker: `npm run verify`, `cd backend && npm test`,
-`cd frontend && npm test && npx tsc --noEmit`.
+`backend/src/db/init.sql`. **Docker исключён (D-126)**: тестовый контур —
+Vercel · Render · Supabase · GitHub Free (`docs/DEPLOY-FREE.md`), повседневные
+проверки идут локально без контейнеров: `npm run verify`, `cd backend && npm test`,
+`cd frontend && npm test && npx tsc --noEmit`. `docker-compose.yml` — архив.
 
 ## 2. Диета контекста (обязательная)
 
@@ -74,13 +75,18 @@ Arena-агенты и ScriptCat **не участвуют и удалены** (D
 - Node ≥ 20, Python 3.11+ (`py -3 -m pip install pillow numpy`), Git.
 - Blender 5.3.0 portable, headless: `npm run blender:check`; скрипты —
   `node tools/local/blender.mjs --script <путь>`. pip-`bpy` и X11-стабы удалены.
-- Машина: Win10 x64, i3-7100U (4 потока), 6 ГБ RAM. Не поднимать одновременно
-  Docker Desktop + Chromium + Blender; полный стек — только по необходимости.
+- Машина: Win10 x64, i3-7100U (4 потока), 6 ГБ RAM. Docker не ставим; не
+  поднимать одновременно Chromium и Blender. Дополнительные CLI — по одному из
+  `docs/TOOLBOX.md`.
+- **Каждое обновление репозитория → PR и мерж** (правило Мастера, 2026-11-15):
+  коммит на активной ветке, PR, зелёные проверки, `gh pr merge`. Не оставлять
+  правку «просто запушенной» без PR.
 - Неясность → пауза и вопрос Мастеру, а не тихий дефолт (`docs/PROCESS.md` §6).
   Сомнение в зоне записи — карточка владельцу зоны, не правка «попутно».
 
 ## 7. Быстрые ссылки
 
 `docs/LOCAL-DEV.md` (установка), `docs/PROCESS.md` (правила/system-prefix),
-`docs/LOCAL-DEV-API.md` (архитектура), `decisions/D-125.md` (решение о миграции),
-`tools/local/README.md` (справочник команд оркестратора).
+`docs/LOCAL-DEV-API.md` (архитектура), `docs/DEPLOY-FREE.md` (без Docker),
+`docs/TOOLBOX.md` (быстрые инструменты), `decisions/D-125.md` (миграция),
+`decisions/D-126.md` (хостинг/PR+мерж), `tools/local/README.md` (команды оркестратора).

@@ -4,14 +4,16 @@
 Валюта: **USDT (сеть TON)**. Единая комиссия: **10%** с игр, **1%** за вывод.
 
 > **Локальная разработка через API (с 2026-11-15):** [`AGENTS.md`](./AGENTS.md) · [`docs/LOCAL-DEV.md`](./docs/LOCAL-DEV.md) · [`docs/PROCESS.md`](./docs/PROCESS.md) · [`docs/board/index.html`](./docs/board/index.html). Процесс и статусы — в Git; ScriptCat/Notion/Drive удалены (D-125).
+> **Контур без Docker (D-126):** Vercel · Render · Supabase · GitHub Free — [`docs/DEPLOY-FREE.md`](./docs/DEPLOY-FREE.md) · [`docs/TOOLBOX.md`](./docs/TOOLBOX.md). Каждое обновление → PR и мерж.
 >
 > Статус: ✅ Работающий MVP. Вся игровая математика, WebSocket-синхронизация, 3D-сцены, cron-задачи и админка реализованы.
 > Демо-режим (`DEMO_MODE=true` по умолчанию) позволяет тестировать игры без реального TON;
 > в реальном режиме демо-вход и демо-пополнение отключаются на сервере.
 >
 > Автоматические проверки: `backend: npm test` (7 режимов смоук-тестов), `npx tsc --noEmit`
-> в backend/frontend/bot, схема БД на настоящем PostgreSQL и сборка Docker-образов —
-> всё это запускает CI (`.github/workflows/ci.yml`).
+> в backend/frontend/bot, схема БД на настоящем PostgreSQL, кадры 3D-сцен и
+> `npm run verify` локального контура — всё это запускает CI
+> (`.github/workflows/ci.yml`). Сборка Docker-образов удалена (D-126).
 
 ---
 
@@ -20,6 +22,9 @@
 - **[`AGENTS.md`](./AGENTS.md)** — короткий вход для агента: диета контекста, деньги, гейты.
 - **[`docs/LOCAL-DEV.md`](./docs/LOCAL-DEV.md)** — установка на Win10 и первая карточка через API.
 - **[`docs/LOCAL-DEV-API.md`](./docs/LOCAL-DEV-API.md)** — архитектура локального контура и экономика токенов.
+- **[`docs/DEPLOY-FREE.md`](./docs/DEPLOY-FREE.md)** — деплой без Docker: Vercel/Render/Supabase/GitHub Free.
+- **[`docs/TOOLBOX.md`](./docs/TOOLBOX.md)** — инструменты «на всякий случай» и быстрая установка.
+- **[`decisions/D-126.md`](./decisions/D-126.md)** — решение об отказе от Docker и выборе бесплатного стека.
 - **[`docs/PROCESS.md`](./docs/PROCESS.md)** — правила ролей, зон, оракула и цикла (system-prefix).
 - **[`decisions/D-125.md`](./decisions/D-125.md)** — решение о миграции; [`docs/board/index.html`](./docs/board/index.html) — доска.
 - **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — подробная архитектура проекта, потоки данных, схема БД, алгоритмы игр, диаграммы компонентов.
@@ -28,61 +33,45 @@
 
 ---
 
-## 🚀 Быстрый старт (3 способа)
+## 🚀 Быстрый старт
 
-### Способ 1: Docker Compose (рекомендуется для проверки)
+**Docker не используется** (решение [D-126](./decisions/D-126.md)): на 6 ГБ RAM он
+тяжелее самой разработки. Активный контур — локальный ПК плюс бесплатные
+**Vercel · Render · Supabase · GitHub**. Карта сервисов —
+[`docs/DEPLOY-FREE.md`](./docs/DEPLOY-FREE.md), инструменты «на всякий случай» —
+[`docs/TOOLBOX.md`](./docs/TOOLBOX.md). `docker-compose.yml` и Dockerfile'ы
+сохранены как архивная справка, в CI не собираются.
 
-```bash
-git clone <repo-url> vault && cd vault
-cp .env.example .env  # для демо можно не редактировать
-docker compose up --build
+### 1. Локальная разработка (основной путь)
+
+```powershell
+git clone https://github.com/Creative-textile/vault.git
+cd vault
+Copy-Item .env.example .env
+npm run verify
+npm run card:plan -- --card tasks/F1/LOCAL-0-K1.json
 ```
 
-Все режимы и секреты читаются из корневого `.env` (в compose нет зашитых литералов):
-`DEMO_MODE`, `BOT_TOKEN`, `BOT_USERNAME`, `ADMIN_TELEGRAM_IDS`, `ADMIN_PASSWORD`,
-`JWT_SECRET`, `SECURITY_PEPPER`, `ALLOWED_ORIGINS`, `POSTGRES_*`, порты. Полный список
-и пояснения — в [`.env.example`](./.env.example).
+Полная установка Win10, Blender 5.3 portable и первая карточка через API —
+[`docs/LOCAL-DEV.md`](./docs/LOCAL-DEV.md). Смоук-тесты денег и игр идут на
+`pg-mem`, настоящая схема — в CI на PostgreSQL 16; живая БД, Redis и Docker на
+ноутбуке не нужны.
 
-Схема БД живёт в одном файле `backend/src/db/init.sql`; образ PostgreSQL собирается
-из корня репозитория (`docker build -f db/Dockerfile .`) и копирует именно его.
+### 2. Облачный тестовый контур (Ф2)
 
-**Примечание для Windows (Docker Desktop):**
-Если получаете ошибку `user declined directory sharing`, убедитесь, что в **Docker Desktop → Settings → Resources → File Sharing** разрешён доступ к диску, где лежит проект (обычно `C:`). Конфигурация проекта использует собственный Dockerfile для PostgreSQL без bind-mount файлов с хоста, поэтому дополнительная настройка прав для конкретных файлов не требуется.
+| Что | Где |
+|---|---|
+| Frontend (Mini App) | Vercel Hobby / preview на PR |
+| Backend + бот (Express + socket.io, постоянный процесс) | Render Free web service |
+| PostgreSQL | Supabase Free → `DATABASE_URL` |
+| CI, PR, секреты, доска | GitHub Free + GitHub Actions |
 
-После запуска:
-| Сервис | URL |
-|--------|-----|
-| 🌐 Frontend (Mini App) | http://localhost:3000 |
-| 🔌 Backend API | http://localhost:8000/api/health |
-| 🐘 PostgreSQL | `localhost:5432` (пользователь: `vault`, пароль: `vault_pass`, БД: `vault`) |
-| ⚡ Redis | `localhost:6379` |
+Секреты — только в локальном `.env`, GitHub Secrets и панелях сервисов, не в Git.
+Шаблон `render.yaml` лежит текстом в `docs/DEPLOY-FREE.md` и включается миссией Ф2.
 
-Демо-режим включён по умолчанию (`DEMO_MODE=true`): при входе через браузер создаётся тестовый пользователь, а кнопка «Демо-пополнение» на экране депозита мгновенно зачисляет средства для тестирования всех игр.
+### 3. Запуск в Telegram-боте
 
-### Способ 2: Режим разработки (с hot-reload)
-
-Требования: Node.js 20+, PostgreSQL 16+, Redis 7+.
-
-```bash
-# 1. Запустите Postgres и Redis (локально или в докере)
-docker-compose up -d db redis
-
-# 2. Бэкенд
-cd backend
-npm install
-npm run dev  # запустится на http://localhost:8000
-
-# 3. Фронтенд (в другом терминале)
-cd ../frontend
-npm install
-npm run dev  # запустится на http://localhost:3000
-```
-
-Бэкенд будет автоматически подключаться к Postgres/Redis из `docker-compose`, а фронтенд проксирует запросы на `localhost:8000` (настроено в `vite.config.ts`).
-
-### Способ 3: Запуск в Telegram боте
-
-1. Создайте бота через [@BotFather](https://t.me/BotFather), получите токен
+1. Создайте бота через [@BotFather](https://t.me/BotFather), получите токен.
 2. В `.env` укажите:
    ```env
    BOT_TOKEN=ваш_токен
@@ -95,8 +84,8 @@ npm run dev  # запустится на http://localhost:3000
    SECURITY_PEPPER=<другой случайный секрет>
    DEMO_MODE=false
    ```
-3. Установите TON-переменные для реальных платежей (см. раздел [Интеграция с TON](#интеграция-с-ton))
-4. Запустите стек: `docker compose up -d`
+3. Установите TON-переменные для реальных платежей (см. раздел [Интеграция с TON](#интеграция-с-ton)).
+4. Поднимите сервисы по [`docs/DEPLOY-FREE.md`](./docs/DEPLOY-FREE.md); `docker compose up -d` больше не является шагом.
 
 Вне демо-режима backend **не стартует** без `JWT_SECRET`, `SECURITY_PEPPER`,
 `ADMIN_PASSWORD`, `BOT_TOKEN` и `ADMIN_TELEGRAM_IDS` — с демо-значениями секретов

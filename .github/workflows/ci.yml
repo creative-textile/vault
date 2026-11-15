@@ -3,6 +3,7 @@ name: CI
 # Продуктовые проверки + локальный контур разработки через API.
 # Транспорт ScriptCat и авто-коммит кадров в ветку удалены (D-125): браузерный
 # контур Arena больше не нужен, кадры снимаются локально и уезжают артефактом.
+# Сборка Docker-образов удалена (D-126): деплой — Vercel/Render/Supabase/GitHub Free.
 
 on:
   push:
@@ -136,22 +137,3 @@ jobs:
       - run: npm run verify
       - name: Доска собрана из Git
         run: npm run board:check
-
-  docker:
-    name: Docker-образы собираются
-    runs-on: ubuntu-latest
-    needs: [backend, schema, frontend, bot, local-tools]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Образ БД (контекст — корень, схема из backend/src/db/init.sql)
-        run: docker build -f db/Dockerfile -t vault-db:ci .
-      - name: Backend
-        run: docker build -t vault-backend:ci ./backend
-      - name: Frontend
-        run: docker build -t vault-frontend:ci ./frontend
-      - name: Bot
-        run: docker build -t vault-bot:ci ./bot
-      - name: docker compose config валиден
-        run: |
-          cp .env.example .env
-          docker compose config --quiet

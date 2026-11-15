@@ -6,9 +6,11 @@
 
 ## 1. Установка
 
-1. Скачать **Blender 5.3.0 portable** (`blender-5.3.0-windows-x64.zip`),
-   распаковать, например, в `C:\tools\blender-5.3.0\`.
-2. В `.env`: `BLENDER_EXE=C:/tools/blender-5.3.0/blender.exe`.
+1. Скачать **Blender 5.3.0 portable**
+   ([прямая ссылка, 406 МБ](https://download.blender.org/release/Blender5.3/blender-5.3.0-windows-x64.zip),
+   SHA-256 в [`blender-version.json`](blender-version.json)), распаковать,
+   например, в `C:\tools\blender-5.3.0-windows-x64\`.
+2. В `.env`: `BLENDER_EXE=C:/tools/blender-5.3.0-windows-x64/blender.exe`.
 3. `npm run blender:check` — сверит версию с
    [`blender-version.json`](blender-version.json), создаст куб, экспортирует GLB
    и сделает CPU-рендер 640×360 в `.state/blender/`.
