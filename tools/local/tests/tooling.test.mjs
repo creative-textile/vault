@@ -91,3 +91,22 @@ test('preflight: список проверок зашит в коде и run п�
   assert.equal(pre.run([process.execPath, '-e', 'process.exit(0)'], pre.ROOT).rc, 0);
   assert.equal(pre.run([process.execPath, '-e', 'process.exit(7)'], pre.ROOT).rc, 7);
 });
+
+test('D-126: контур без Docker зафиксирован в CI, ADR и документации', () => {
+  const read = (rel) => readFileSync(resolve(pre.ROOT, rel), 'utf8');
+  const ci = read('.github/workflows/ci.yml');
+  assert.ok(!/docker build|docker compose config/.test(ci), 'в CI не должно быть сборки образов');
+  assert.ok(ci.includes('local-tools'));
+  const adr = read('decisions/D-126.md');
+  for (const s of ['Vercel', 'Render', 'Supabase', 'GitHub', 'Docker', 'Godot', 'PR']) assert.ok(adr.includes(s), `ADR не упоминает ${s}`);
+  const deploy = read('docs/DEPLOY-FREE.md');
+  for (const s of ['Vercel', 'Render', 'Supabase', 'GitHub', 'supabase start']) assert.ok(deploy.includes(s), `DEPLOY-FREE не упоминает ${s}`);
+  const toolbox = read('docs/TOOLBOX.md');
+  assert.match(toolbox, /winget install --id GitHub\.cli/);
+  assert.match(toolbox, /render\.cli/);
+  assert.match(toolbox, /Godot/);
+  const env = read('.env.example');
+  assert.match(env, /Vercel \(фронт\)/);
+  const oracle = read('scripts/go-live-check.mjs');
+  assert.ok(oracle.includes('docs/DEPLOY-FREE.md') && !oracle.includes("'docker-compose.yml'"));
+});
