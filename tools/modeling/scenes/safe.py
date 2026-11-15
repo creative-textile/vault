@@ -12,7 +12,7 @@
     -> docs/art-direction/acceptance/safe/ (приёмочные рендеры)
 
 Запуск:  /tmp/vault-bpy/bin/bpy-python tools/modeling/scenes/safe.py
-(нужен модуль bpy — tools/modeling/setup_bpy.sh; текстуры уже в репозитории)
+(нужен нативный Blender: npm run blender:check; текстуры уже в репозитории)
 
 Координаты: модель строится в «сценных» (glTF) координатах — Y-up, пол на y=0,
 лицо сейфа в +Z. Blender — Z-up, поэтому каждый объект строится через

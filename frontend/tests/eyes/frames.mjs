@@ -1,21 +1,23 @@
 /**
- * 👁 ГЛАЗА АГЕНТА — кадры 3D-сцен в PNG, без GPU и без ручного участия.
+ * 👁 КАДРЫ 3D-СЦЕН — PNG без GPU, локально и в CI.
  *
- * Зачем: агент «не видит» анимацию. Логи и числа проверяют математику, но не
- * проверяют, что на экране действительно что-то нарисовалось: чёрный кадр,
+ * Зачем: числа проверяют математику, но не проверяют, что на экране
+ * действительно что-то нарисовалось: чёрный кадр,
  * спрятавшаяся камера, лопнувший материал — по числам всё «в порядке».
  *
  * Решение: настоящий Chromium снимает страницу `/scenes.html` в N моментов
- * времени. Кадры складываются в `frames/` и уезжают артефактом CI. Агент
- * скачивает артефакт и СМОТРИТ файлы — то есть видит то же, что игрок.
+ * времени. Кадры складываются в `frames/`, уезжают артефактом CI и
+ * открываются глазами локально — это и есть визуальная приёмка.
  *
- * Где это работает: только там, где есть Chromium (CI на ubuntu-latest).
- * В песочнице агента браузера нет (закрыты deb-репозитории и CDN браузеров),
- * поэтому скрипт по умолчанию мягко выходит с кодом 0 и не ломает `npm test`.
+ * Где это работает: локально (установленный Chromium/Playwright) и в CI.
+ * "Мягкого выхода с кодом 0, потому что песочнице не хватает браузера" больше
+ * нет (D-125): кадры — это доказательство, пропуск не считается pass. Если
+ * браузера нет, скрипт явно падает и называет команду установки.
  *
  * Запуск:  node tests/eyes/frames.mjs            # 12 кадров
  *          node tests/eyes/frames.mjs --frames 30 --zoom 2
- * Переменные: SCENES_URL — адрес галереи (по умолчанию dev-сервер Vite :4173).
+ * Переменные: SCENES_URL — адрес галереи (по умолчанию dev-сервер Vite :4173),
+ *             CHROME_PATH — путь к системному Chromium, FRAMES_DIR — куда класть.
  */
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
@@ -94,14 +96,14 @@ async function main() {
     try { pw = await import('playwright-core'); } catch { pw = null; }
   }
   if (!pw) {
-    console.log('[eyes] playwright не установлен — кадры пропущены (это не ошибка)');
-    return 0;
+    console.error('[eyes] playwright не установлен: npm i -D playwright && npx playwright install chromium');
+    return 1;
   }
   const { chromium } = pw;
   const execPath = await findChrome(pw);
   if (!execPath) {
-    console.log('[eyes] Chromium не найден — кадры пропущены (это не ошибка)');
-    return 0;
+    console.error('[eyes] Chromium не найден: npx playwright install chromium (или задайте CHROME_PATH)');
+    return 1;
   }
   console.log('[eyes] Chromium:', execPath);
 

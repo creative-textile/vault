@@ -27,7 +27,7 @@ console.warn = (...a) => {
 };
 
 // three лежит во frontend/node_modules — импортируем по абсолютному пути,
-// чтобы валидатор работал из любой папки (в т.ч. из CI и из песочницы агента).
+// чтобы валидатор работал из любой папки (в т.ч. из CI и с локального ПК).
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 const threePath = path.resolve('frontend/node_modules/three/examples/jsm/loaders/GLTFLoader.js');

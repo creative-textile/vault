@@ -19,6 +19,6 @@ safe.glb — VAULT «Neon Vault Luxury» bank vault door
       render_safe_preview.py (превью),
       safe.blend (сцена-исходник),
       textures/safe/ (исходные PNG карт),
-      env_setup.sh (восстановление headless-окружения).
+      нативный Blender 5.3.0 portable (tools/modeling/blender-version.json).
 
 Сторонних ассетов, стоковых моделей и чужих текстур не использовано.

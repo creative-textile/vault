@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "kind": "mission",
+  "id": "V-1-1",
+  "phase": "F1",
+  "title": "3D-модели и сцены под бюджет телефона",
+  "status": "active",
+  "tz": "docs/art-direction.md",
+  "acceptance": "Все три модели в бюджете, GLB грузятся three.js, визуальная приёмка Мастером по рендерам.",
+  "oracle": [
+    {
+      "cmd": "python3 tools/modeling/audit_glb.py frontend/public/models/*.glb",
+      "expect": 0,
+      "proves": "вес, полигоны и VRAM в бюджете"
+    },
+    {
+      "cmd": "node tools/modeling/validate_glb.mjs <каждая модель>",
+      "expect": 0,
+      "proves": "GLB реально разбирается three.js"
+    },
+    {
+      "cmd": "cd frontend && npm test && npm run build",
+      "expect": 0,
+      "proves": "математика сцен, шейдеры, сборка"
+    }
+  ],
+  "invariants": [
+    "Оракул не ослабляется: проверки можно добавлять, но не удалять и не подгонять.",
+    "Секреты не попадают в Git, логи, промпты и вердикты.",
+    "Два независимых локальных замера с rc и SHA на каждое решение модели.",
+    "Правка вне zone карточки запрещена."
+  ],
+  "cards": [
+    "V-1-1-K1",
+    "V-1-1-K2",
+    "V-1-1-K3",
+    "V-1-1-K4",
+    "V-1-1-K5",
+    "V-1-1-K6",
+    "V-1-1-K7"
+  ]
+}

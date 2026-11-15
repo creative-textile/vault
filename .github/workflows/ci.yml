@@ -1,12 +1,8 @@
 name: CI
 
-# Минимальная проверка на каждый push и pull request: типы, смоук-тесты,
-# схема БД на настоящем PostgreSQL и сборка всех четырёх образов.
-#
-# Почему это появилось: в репозитории не было ни одной автоматической проверки,
-# поэтому вторая копия схемы (db/init.sql) успела разойтись с основной и
-# сломать инициализацию свежего Docker-тома — ошибка 42P01 всплывала только
-# у того, кто поднимал проект с нуля.
+# Продуктовые проверки + локальный контур разработки через API.
+# Транспорт ScriptCat и авто-коммит кадров в ветку удалены (D-125): браузерный
+# контур Arena больше не нужен, кадры снимаются локально и уезжают артефактом.
 
 on:
   push:
@@ -18,10 +14,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Шагу «Сводный кадр для агента» нужно право коммитить в ветку.
-# Остальные job'ы получают ровно те права, что и раньше.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   backend:
@@ -40,8 +34,7 @@ jobs:
       - run: npm ci
       - name: TypeScript без ошибок
         run: npx tsc --noEmit
-      # Смоук-тесты работают на pg-mem (живая БД не нужна): даты сейфа, цепочка
-      # раундов, правила взлома, HTTP-маршруты, дуэли, вклады и гонки денег.
+      # Смоук-тесты работают на pg-mem (живая БД не нужна).
       - name: Смоук-тесты (7 режимов)
         run: npm test
 
@@ -70,8 +63,6 @@ jobs:
       PGDATABASE: vault
     steps:
       - uses: actions/checkout@v4
-      # Так же, как это делает docker-entrypoint-initdb.d: один файл, одна
-      # транзакция, ON_ERROR_STOP=1 — любая ошибка означает красную сборку.
       - name: init.sql применяется целиком
         run: psql -v ON_ERROR_STOP=1 -f backend/src/db/init.sql
       - name: init.sql идемпотентен (второй прогон)
@@ -96,10 +87,6 @@ jobs:
       - run: npx tsc --noEmit
       - name: Математика 3D-анимаций и линт шейдеров
         run: npm test
-
-      # Модель может проходить аудит по весу и всё равно не загрузиться:
-      # так было с WebP (GLTFLoader падает, у игрока — процедурный fallback).
-      # Проверяем каждую .glb реальным three.js до сборки.
       - name: Модели разбираются three.js
         run: |
           cd ..
@@ -107,11 +94,6 @@ jobs:
             node tools/modeling/validate_glb.mjs "$f"
           done
       - run: npm run build
-
-      # 👁 ГЛАЗА АГЕНТА: настоящий Chromium снимает 3D-сцены в PNG.
-      # Числа проверяют математику, но не проверяют, что на экране что-то
-      # нарисовалось (чёрный кадр, уехавшая камера, лопнувший материал).
-      # Кадры уезжают артефактом — агент скачивает и смотрит их глазами.
       - name: Браузер для кадров сцен
         run: npx playwright install --with-deps chromium
       - name: Кадры 3D-сцен
@@ -124,48 +106,6 @@ jobs:
           path: frontend/frames/
           if-no-files-found: warn
           retention-days: 14
-
-      # Песочница агента НЕ может скачать артефакт: blob-хранилище GitHub
-      # (productionresultssa*.blob.core.windows.net) в белом списке отсутствует,
-      # зато api.github.com открыт. Поэтому сводная картинка кладётся в ветку —
-      # агент читает её через API и СМОТРИТ глазами.
-      # [skip ci] — чтобы коммит не запускал новый прогон.
-      - name: Сводный кадр для агента
-        if: always()
-        run: |
-          # ВНИМАНИЕ: у этого job working-directory = frontend, поэтому пути
-          # ниже отсчитываются от frontend/, а не от корня репозитория.
-          LOG=/tmp/eyes.log
-          : >$LOG
-          set +e
-          {
-          echo "== cwd: $(pwd) =="
-          ls -la frames/ | head -8
-          cd frames || exit 3
-          command -v montage >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq imagemagick; }
-          montage $(ls frame-*.png 2>/dev/null | head -6) -tile 3x2 -geometry 320x320+4+4 -background '#05060f' preview.jpg
-          [ -f preview.jpg ] || cp frame-000.png preview.jpg
-          ls -la preview.jpg
-          } >>$LOG 2>&1
-          cd "$GITHUB_WORKSPACE/frontend"
-          if [ -f frames/preview.jpg ]; then
-            B64=$(base64 -w0 frames/preview.jpg)
-            { echo '<details><summary>Кадр 3D-сцены</summary>'; echo "<img src=\"data:image/jpeg;base64,$B64\" width=\"640\">"; echo '</details>'; } >> $GITHUB_STEP_SUMMARY
-          fi
-          { echo '```'; cat $LOG; echo '```'; } >> $GITHUB_STEP_SUMMARY
-          # Картинку кладём в ветку: blob-хранилище артефактов песочнице недоступно,
-          # а api.github.com открыт — оттуда агент читает файл и смотрит глазами.
-          cd "$GITHUB_WORKSPACE"
-          BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
-          git config user.name "vault-eyes"
-          git config user.email "eyes@vault.local"
-          # report.json — версия WebGL и ошибки страницы: агенту нужны не только
-          # пиксели, но и «чем рисовали» и «что ругалось».
-          git add -f frontend/frames/preview.jpg frontend/frames/report.json
-          git commit -q -m "chore(eyes): сводный кадр сцен [skip ci]" || echo "нечего коммитить"
-          echo "push $(git rev-parse --short HEAD) -> $BRANCH" >> $GITHUB_STEP_SUMMARY
-          git push -q origin "HEAD:$BRANCH" || echo "push не удался (не критично)"
-          true
 
   bot:
     name: "Telegram-бот: типы и сборка"
@@ -184,10 +124,23 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run build
 
+  local-tools:
+    name: "Локальный контур: бюджет, контекст, доска"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Проверки зашиты в tools/local/preflight.mjs, а не читаются из package.json.
+      - run: npm run verify
+      - name: Доска собрана из Git
+        run: npm run board:check
+
   docker:
     name: Docker-образы собираются
     runs-on: ubuntu-latest
-    needs: [backend, schema, frontend, bot]
+    needs: [backend, schema, frontend, bot, local-tools]
     steps:
       - uses: actions/checkout@v4
       - name: Образ БД (контекст — корень, схема из backend/src/db/init.sql)
@@ -198,38 +151,7 @@ jobs:
         run: docker build -t vault-frontend:ci ./frontend
       - name: Bot
         run: docker build -t vault-bot:ci ./bot
-      # Композ проверяется отдельно: он поднимает БД из того же Dockerfile и
-      # ждёт её healthcheck, то есть воспроизводит «docker compose up» с нуля.
       - name: docker compose config валиден
         run: |
           cp .env.example .env
           docker compose config --quiet
-
-  # Транспорт агентов (ScriptCat) живёт в этом же репозитории, поэтому он не может
-  # остаться без гейта: сборка, переносимость, пробы и узел допуска к установке.
-  # Проверки фиксированы в tools/relay-build.mjs и не читаются из package.json.
-  scriptcat:
-    name: "ScriptCat: сборка, guard, пробы, узел"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Сборка соответствует исходникам
-        run: node tools/script-cat/build.mjs --check
-      - name: Переносимый комплект без прежних имён
-        run: node tools/script-cat/portability-guard.mjs
-      - name: Пробы транспорта
-        run: npm test
-      - name: Регрессии транспорта
-        run: npm run test:regression
-      - name: Продолжение после tool-call limit
-        run: npm run test:tool-limit
-      # Без --base: гейт путей сверяет только рабочее дерево (в CI оно чистое).
-      # Сравнение с базовой ревизией (D-027) требует правки только транспорта —
-      # это делает миссия, а не любой продуктовый коммит.
-      - name: Узел допускает сборку к установке
-        run: node tools/relay-build.mjs --repo . --json

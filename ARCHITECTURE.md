@@ -22,7 +22,7 @@
 
 **Схема на настоящем PostgreSQL.** Смоук-тесты работают на `pg-mem`, который не понимает `DO`-блоки, массивы и частичные индексы, поэтому DDL в тестах — упрощённое. Настоящий `init.sql` проверяется отдельно: `psql -v ON_ERROR_STOP=1 -f backend/src/db/init.sql` (дважды — на идемпотентность) и `psql -v ON_ERROR_STOP=1 -f backend/src/db/schema-check.sql`. Тот же набор шагов выполняет CI-джоб `schema` на сервисе `postgres:16`.
 
-**CI** (`.github/workflows/ci.yml`): `backend` (типы + смоук-тесты), `schema` (PostgreSQL 16), `frontend` (типы + сборка), `bot` (типы + сборка), `docker` (сборка всех четырёх образов и `docker compose config`). До этого в репозитории не было ни одной автоматической проверки — именно поэтому разошедшаяся копия схемы доехала до `main`.
+**CI** (`.github/workflows/ci.yml`): `backend` (типы + смоук-тесты), `schema` (PostgreSQL 16), `frontend` (типы + сборка + кадры сцен), `bot` (типы + сборка), `local-tools` (бюджет, контекст-паки, доска), `docker` (сборка всех четырёх образов и `docker compose config`). До этого в репозитории не было ни одной автоматической проверки — именно поэтому разошедшаяся копия схемы доехала до `main`.
 
 ---
 
@@ -780,7 +780,7 @@ esbuild-бандлом, поэтому работают на Node 20 из Docker
 
 С 2026-09 процедурная геометрия дополнена готовыми моделями
 (`frontend/public/models/{safe,rocket,coin}.glb`, источники —
-`frontend/models-src/`, всё сгенерировано скриптами Blender 4.2, лицензия CC0,
+`frontend/models-src/`, исходники созданы скриптами Blender 4.5.3 (пайплайн теперь на 5.3.0, см. `tools/modeling/blender-version.json`), лицензия CC0,
 см. `REPORT-3D-MODELS.md` и `TZ-3D-MODELS.md`):
 
 - **Загрузка** — `three/lib/models.ts`: `loadModel(file, opts)` тянет

@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "kind": "card",
+  "id": "V-1-1-K3",
+  "phase": "F1",
+  "mission": "V-1-1",
+  "title": "Сцена монеты по refs/03-coin: гурт, вдавленный герб, циановое кольцо",
+  "status": "draft",
+  "role": "executor",
+  "model": "executor",
+  "mode": "sync",
+  "zone": [
+    "frontend/models-src/coin/**",
+    "frontend/public/models/**"
+  ],
+  "contextFiles": [
+    "docs/art-direction.md",
+    "docs/perf-budget.md",
+    "tools/modeling/budget.json"
+  ],
+  "decisions": [
+    "D-125"
+  ],
+  "gates": [
+    [
+      "@node",
+      "tools/local/budget.mjs",
+      "check"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ]
+  ],
+  "oracle": [
+    {
+      "cmd": "python3 tools/modeling/audit_glb.py frontend/public/models/coin.glb",
+      "expect": 0,
+      "proves": "текстур ≤ 4"
+    },
+    {
+      "cmd": "node tools/modeling/validate_glb.mjs frontend/public/models/coin.glb",
+      "expect": 0,
+      "proves": "GLB грузится three.js (второй независимый замер)"
+    }
+  ],
+  "invariants": [
+    "Оракул не ослабляется: проверки можно добавлять, но не удалять и не подгонять.",
+    "Секреты не попадают в Git, логи, промпты и вердикты.",
+    "Два независимых локальных замера с rc и SHA на каждое решение модели.",
+    "Правка вне zone карточки запрещена."
+  ],
+  "acceptance": "Монета: текстур ≤ 4; отчёт с командами, rc и SHA; визуал — глазами Мастера.",
+  "dependsOn": [
+    "V-1-1-K2"
+  ],
+  "estimateUsd": 0.38,
+  "evidence": [],
+  "humanGate": false,
+  "note": "Гейты в cards намеренно минимальны и зелёные; полный оракул миссии — tasks/F1/mission.json. Карточки K1/K3 ждут исправления бюджета моделей (исходная точка V-1-1)."
+}

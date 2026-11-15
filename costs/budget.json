@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "currency": "USD",
+  "phaseLimitUsd": 15,
+  "warnAt": [0.8, 0.95],
+  "planBaselineUsd": 13.46,
+  "topUpFeePct": 5.5,
+  "note": "Лимит фазы из стека v3. planBaselineUsd — плановая смета (27 задач + 22 решения + 5 приёмок). Факт берётся только из usage.cost OpenRouter через tools/local/budget.mjs; оценки из стека v3 в журнал не пишутся. topUpFeePct — комиссия за перевод, учитывается отдельной записью kind=topup_fee, а не накруткой на каждый вызов."
+}

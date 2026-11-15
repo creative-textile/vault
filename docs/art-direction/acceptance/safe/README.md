@@ -14,7 +14,7 @@
 
 ```
 python3 tools/modeling/audit_glb.py frontend/public/models/safe.glb   # rc=0
-bash tools/modeling/setup_bpy.sh --check                              # rc=0
+npm run blender:check                                                 # rc=0
 npm run verify                                                        # rc=0
 ```
 

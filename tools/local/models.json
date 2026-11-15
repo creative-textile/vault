@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "provider": "openrouter",
+  "baseUrl": "https://openrouter.ai/api/v1",
+  "systemPrefix": "docs/PROCESS.md",
+  "contextLimitTokens": 12000,
+  "maxOutputTokens": 2000,
+  "temperature": 0.2,
+  "models": {
+    "executor": {
+      "env": "VAULT_MODEL_EXECUTOR",
+      "alias": "GPT-6.1 Sol (Medium)",
+      "estimateUsd": 0.38,
+      "mode": "sync"
+    },
+    "flash": {
+      "env": "VAULT_MODEL_FLASH",
+      "alias": "Flash",
+      "estimateUsd": 0.14,
+      "mode": "sync"
+    },
+    "critical": {
+      "env": "VAULT_MODEL_CRITICAL",
+      "alias": "Argon",
+      "estimateUsd": 0.71,
+      "mode": "sync",
+      "maxPerPhase": 4,
+      "note": "Деньги, доступы, миграции. Назначается по путям диффа, не по желанию роли."
+    },
+    "coordinator": {
+      "env": "VAULT_MODEL_COORDINATOR",
+      "alias": "Terra (Medium)",
+      "estimateUsd": 0.013,
+      "mode": "batch"
+    },
+    "auditor": {
+      "env": "VAULT_MODEL_AUDITOR",
+      "alias": "Carbon (High)",
+      "estimateUsd": 0.072,
+      "mode": "batch"
+    },
+    "acceptor": {
+      "env": "VAULT_MODEL_ACCEPTOR",
+      "alias": "Opus 5.5 (Max)",
+      "estimateUsd": 0.105,
+      "mode": "batch"
+    },
+    "image": {
+      "env": "VAULT_MODEL_IMAGE",
+      "alias": "nano-banana-2.1",
+      "estimateUsd": 0.034,
+      "mode": "sync",
+      "note": "Только если Blender не дал нужный силуэт. Сначала локальный CPU-рендер: $0."
+    }
+  },
+  "routing": {
+    "criticalPaths": [
+      "backend/src/services/ton.ts",
+      "backend/src/services/chain/",
+      "backend/src/db/init.sql",
+      "backend/src/db/schema-check.sql",
+      "docs/security/",
+      ".env.example",
+      ".github/workflows/"
+    ],
+    "scriptDecidable": [
+      "docs/board/",
+      "frontend/public/models/",
+      "audio/",
+      "locales/",
+      "tools/local/",
+      "tools/modeling/",
+      "*.md"
+    ],
+    "batchRoles": ["coordinator", "auditor", "acceptor"]
+  },
+  "notes": "Точные slug-иды моделей берутся из переменных окружения (см. .env.example): алиасы стека v3 не являются идентификаторами OpenRouter. Фактическая цена всегда читается из usage.cost, estimateUsd нужен только для budget check --add и сухого прогона. Батч = одна модель и один endpoint на запрос; session_id в батче не группируется (кэш и −50% не складываются)."
+}

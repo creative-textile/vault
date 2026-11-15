@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "kind": "card",
+  "id": "LOCAL-0-K1",
+  "phase": "F1",
+  "mission": "LOCAL-0",
+  "title": "Смоук локального контура: бюджет, контекст-пак, доска",
+  "status": "ready",
+  "role": "executor",
+  "model": "flash",
+  "mode": "sync",
+  "zone": [
+    "tools/local/**",
+    "docs/board/**"
+  ],
+  "contextFiles": [
+    "AGENTS.md",
+    "costs/README.md"
+  ],
+  "decisions": [
+    "D-125"
+  ],
+  "gates": [
+    [
+      "@node",
+      "tools/local/budget.mjs",
+      "check"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ],
+    [
+      "@node",
+      "tools/local/context-pack.mjs",
+      "--card",
+      "tasks/F1/LOCAL-0-K1.json",
+      "--no-write"
+    ]
+  ],
+  "oracle": [
+    {
+      "cmd": "node tools/local/budget.mjs check",
+      "expect": 0,
+      "proves": "лимит фазы соблюдён"
+    },
+    {
+      "cmd": "node tools/local/board.mjs --check",
+      "expect": 0,
+      "proves": "доска собрана из Git (второй независимый замер)"
+    }
+  ],
+  "invariants": [
+    "Оракул не ослабляется: проверки можно добавлять, но не удалять и не подгонять.",
+    "Секреты не попадают в Git, логи, промпты и вердикты.",
+    "Два независимых локальных замера с rc и SHA на каждое решение модели.",
+    "Правка вне zone карточки запрещена."
+  ],
+  "acceptance": "Сухой прогон и один реальный вызов дают структурированный вердикт; стоимость записана в ledger.",
+  "dependsOn": [],
+  "estimateUsd": 0.14,
+  "evidence": [],
+  "note": "Первая карточка для проверки оркестратора. Оракул полностью скриптовый → роутинг на Flash."
+}

@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Vault — Telegram Mini App: Ракета, Дуэль, Сейф и Vault-вклад; USDT в TON, BEP-20 и ERC-20",
   "license": "UNLICENSED",
@@ -8,17 +8,23 @@
     "node": ">=20"
   },
   "scripts": {
-    "scriptcat:build": "node tools/script-cat/build.mjs",
-    "scriptcat:check": "node tools/script-cat/build.mjs --check",
-    "scriptcat:guard": "node tools/script-cat/portability-guard.mjs",
-    "test": "node --test tools/script-cat/tests/*.mjs",
-    "test:regression": "node --test tools/script-cat/regression-tests/*.mjs",
-    "test:tool-limit": "node --test tools/script-cat/tests/tool-limit-continuation-smoke.mjs tools/script-cat/regression-tests/tool-limit-continuation-integration.mjs",
-    "verify": "npm run scriptcat:check && npm run scriptcat:guard && npm test && npm run test:regression && npm run test:tool-limit",
-    "verify:node": "node tools/relay-build.mjs --repo . --allow-dirty",
+    "verify": "node tools/local/preflight.mjs",
+    "preflight:full": "node tools/local/preflight.mjs --full",
+    "test:local": "node tools/local/test.mjs",
+    "budget:check": "node tools/local/budget.mjs check",
+    "budget:report": "node tools/local/budget.mjs report",
+    "card:plan": "node tools/local/run.mjs --dry-run",
+    "card:run": "node tools/local/run.mjs",
+    "card:batch": "node tools/local/run.mjs --batch",
+    "card:collect": "node tools/local/run.mjs --collect",
+    "context:check": "node tools/local/context-pack.mjs --check",
+    "board": "node tools/local/board.mjs",
+    "board:check": "node tools/local/board.mjs --check",
+    "blender:check": "node tools/local/blender.mjs --check",
+    "py:check": "node tools/local/py.mjs --check",
     "go-live:check": "node scripts/go-live-check.mjs",
-    "modeling:audit": "python3 tools/modeling/audit_glb.py frontend/public/models/*.glb",
-    "audio:audit": "python3 tools/audio/audit_audio.py"
+    "modeling:audit": "node tools/local/py.mjs --script tools/modeling/audit_glb.py -- frontend/public/models/coin.glb frontend/public/models/rocket.glb frontend/public/models/safe.glb",
+    "audio:audit": "node tools/local/py.mjs --script tools/audio/audit_audio.py"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.5.1",
