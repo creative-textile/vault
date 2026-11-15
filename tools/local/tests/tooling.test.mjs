@@ -41,6 +41,9 @@ test('Blender: версия читается, пин 5.3 и запасной LTS
   const cfg = JSON.parse(readFileSync(resolve(pre.ROOT, 'tools/modeling/blender-version.json'), 'utf8'));
   assert.equal(cfg.pinned, '5.3.0');
   assert.equal(cfg.fallbackLts, '5.2.4');
+  assert.match(cfg.download.url, /blender-5\.3\.0-windows-x64\.zip$/);
+  assert.match(cfg.download.sha256, /^[a-f0-9]{64}$/);
+  assert.match(cfg.download.ltsFallbackUrl, /5\.2\.4-windows-x64\.zip$/);
   assert.ok(cfg.args.includes('--gpu-backend'));
   assert.ok(cfg.args.includes('opengl'));
 });

@@ -4,6 +4,13 @@
   "fallbackLts": "5.2.4",
   "sourceBlendVersion": "4.5.3",
   "python": "3.13",
+  "download": {
+    "url": "https://download.blender.org/release/Blender5.3/blender-5.3.0-windows-x64.zip",
+    "sha256": "3ac567a63d59d9934f7b9213bfb27ba05760e1fb366f8f55c381573ec3eabfa8",
+    "sizeBytes": 425299259,
+    "releasePage": "https://www.blender.org/releases/5-3/",
+    "ltsFallbackUrl": "https://download.blender.org/release/Blender5.2/blender-5.2.4-windows-x64.zip"
+  },
   "args": [
     "--background",
     "--factory-startup",

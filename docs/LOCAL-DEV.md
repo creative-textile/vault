@@ -25,12 +25,33 @@ py -3 -m pip install pillow numpy
 npm run py:check
 ```
 
-Blender: скачать **portable ZIP 5.3.0**, распаковать в `C:\tools\blender-5.3.0\`,
-в `.env` указать `BLENDER_EXE=C:/tools/blender-5.3.0/blender.exe`. Официальный
-минимум 5.3 — 8 ГБ RAM и Vulkan 1.3; на HD 620/940MX обёртка принудительно
-ставит `--gpu-backend opengl`. Если 5.3 не заведётся — `npm run blender:check
--- --allow-lts` с 5.2.4 LTS. Версия всегда сверяется с
-`tools/modeling/blender-version.json`.
+Blender: скачать **portable ZIP 5.3.0** (406 МБ) с
+[официальной страницы релиза](https://www.blender.org/releases/5-3/) или
+[прямой ссылкой](https://download.blender.org/release/Blender5.3/blender-5.3.0-windows-x64.zip),
+распаковать в `C:\tools\blender-5.3.0-windows-x64\` (внутри `blender.exe` и
+папка `5.3\`), в `.env` указать
+`BLENDER_EXE=C:/tools/blender-5.3.0-windows-x64/blender.exe`. Установщик, права
+администратора и интернет после скачивания не нужны: portable-сборка работает
+из папки [«Truly Portable»](https://www.blender.org/download/requirements/).
+
+Контрольная сумма из [официального `.sha256`](https://download.blender.org/release/Blender5.3/blender-5.3.0.sha256):
+`3ac567a63d59d9934f7b9213bfb27ba05760e1fb366f8f55c381573ec3eabfa8`.
+
+```powershell
+(Get-FileHash .\blender-5.3.0-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+```
+
+Официальный минимум Windows: Windows 8.1 x64, **4 ядра с SSE4.2, 8 ГБ RAM**,
+2 ГБ VRAM, OpenGL 4.3 / Vulkan 1.3
+([требования](https://www.blender.org/download/requirements/)). В 5.3 Vulkan
+стал бэкендом по умолчанию, но его минимальная версия снижена до 1.1
+([release notes](https://developer.blender.org/docs/release_notes/5.3/eevee/)).
+На HD 620 / 940MX с 6 ГБ RAM обёртка принудительно ставит
+`--gpu-backend opengl`, поэтому Vulkan для нашего headless-контура не нужен.
+Если 5.3 не заведётся —
+[5.2.4 LTS portable](https://download.blender.org/release/Blender5.2/blender-5.2.4-windows-x64.zip)
+и `npm run blender:check -- --allow-lts`. Версия всегда сверяется с
+`tools/modeling/blender-version.json` (там же ссылка и SHA-256).
 
 ## 2. Секреты (только локально)
 
